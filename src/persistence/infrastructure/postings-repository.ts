@@ -1,5 +1,10 @@
 import { and, eq, isNull } from "drizzle-orm";
-import { Location, Posting, WorkMode } from "../../posting/domain/posting";
+import {
+  Location,
+  Posting,
+  Seniority,
+  WorkMode,
+} from "../../posting/domain/posting";
 import { Db } from "./db";
 import { postings } from "./schema";
 
@@ -194,6 +199,26 @@ export class PostingsRepository {
     this.db
       .update(postings)
       .set({ notifiedAt })
+      .where(eq(postings.fingerprint, fingerprint))
+      .run();
+  }
+
+  /**
+   * Written by stage A (M7) once extraction succeeds — `05-domain-model.md`:
+   * these are fields the score sees, not only the pre-filter's title
+   * pattern. Unlike `firstSeenAt`, this is a plain overwrite: a prompt
+   * improvement re-extracting the same posting should replace the old
+   * values, not be blocked by a "write once" rule that only makes sense for
+   * a sighting timestamp.
+   */
+  updateExtractedFields(
+    fingerprint: string,
+    seniority: Seniority | null,
+    experienceYears: number | null,
+  ): void {
+    this.db
+      .update(postings)
+      .set({ seniority, experienceYears })
       .where(eq(postings.fingerprint, fingerprint))
       .run();
   }

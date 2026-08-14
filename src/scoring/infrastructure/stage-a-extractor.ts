@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { Posting } from "../../posting/domain/posting";
+import { Posting, Seniority } from "../../posting/domain/posting";
 import { ExtractionsRepository } from "../../persistence/infrastructure/extractions-repository";
 import { Requirement } from "../domain/types";
 import { AskModel, parseModelOutputWithRetries } from "./llm-output";
@@ -10,10 +10,28 @@ const RequirementSchema = z.object({
   category: z.string().min(1),
   weight: z.enum(["blocking", "mandatory", "desirable"]),
 });
-const RequirementArraySchema = z.array(RequirementSchema);
+
+const SENIORITY_VALUES = [
+  "internship",
+  "trainee",
+  "junior",
+  "mid",
+  "senior",
+] as const;
+
+const ExtractionOutputSchema = z.object({
+  requirements: z.array(RequirementSchema),
+  seniority: z.enum(SENIORITY_VALUES).nullable(),
+  experienceYears: z.number().int().nonnegative().nullable(),
+});
 
 export type ExtractionResult =
-  | { readonly ok: true; readonly requirements: readonly Requirement[] }
+  | {
+      readonly ok: true;
+      readonly requirements: readonly Requirement[];
+      readonly seniority: Seniority | null;
+      readonly experienceYears: number | null;
+    }
   | {
       readonly ok: false;
       readonly reason: "extraction_failed";
@@ -21,11 +39,12 @@ export type ExtractionResult =
     };
 
 /**
- * Stage A (docs/04-scoring-model.md): reads a posting's title and
- * description, returns its declared requirements. Cached by
- * `(fingerprint, promptVersion)` (ADR-007) — a posting's requirements do not
- * change, so a cache hit never calls the model at all, which is what makes
- * re-matching across many M7 configurations affordable.
+ * Stage A (docs/04-scoring-model.md, v2 prompt: `05-domain-model.md`'s
+ * seniority/experienceYears fields): reads a posting's title and
+ * description, returns its declared requirements plus its stated seniority
+ * level. Cached whole by `(fingerprint, promptVersion)` (ADR-007) — a cache
+ * hit never calls the model at all, which is what makes re-matching across
+ * many M7 configurations affordable.
  */
 export class StageAExtractor {
   constructor(
@@ -42,11 +61,18 @@ export class StageAExtractor {
       posting.fingerprint,
       this.promptVersion,
     );
-    if (cached) return { ok: true, requirements: cached };
+    if (cached) {
+      return {
+        ok: true,
+        requirements: cached.requirements,
+        seniority: cached.seniority,
+        experienceYears: cached.experienceYears,
+      };
+    }
 
     const prompt = buildStageAPrompt(posting.title, posting.description);
     const result = await parseModelOutputWithRetries(
-      RequirementArraySchema,
+      ExtractionOutputSchema,
       this.ask,
       prompt,
     );
@@ -65,6 +91,6 @@ export class StageAExtractor {
       result.data,
       now(),
     );
-    return { ok: true, requirements: result.data };
+    return { ok: true, ...result.data };
   }
 }

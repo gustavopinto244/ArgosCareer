@@ -1,7 +1,14 @@
 import { and, eq } from "drizzle-orm";
+import { Seniority } from "../../posting/domain/posting";
 import { Requirement } from "../../scoring/domain/types";
 import { Db } from "./db";
 import { extractions } from "./schema";
+
+export interface ExtractionRecord {
+  readonly requirements: readonly Requirement[];
+  readonly seniority: Seniority | null;
+  readonly experienceYears: number | null;
+}
 
 /**
  * Stage A's cache, keyed `(fingerprint, promptVersion)` (ADR-007). Upsert
@@ -15,7 +22,7 @@ export class ExtractionsRepository {
   upsert(
     fingerprint: string,
     promptVersion: string,
-    requirements: readonly Requirement[],
+    record: ExtractionRecord,
     extractedAt: Date,
   ): void {
     const existing = this.db
@@ -29,28 +36,28 @@ export class ExtractionsRepository {
       )
       .get();
 
-    const serialized = JSON.stringify(requirements);
+    const values = {
+      requirements: JSON.stringify(record.requirements),
+      seniority: record.seniority,
+      experienceYears: record.experienceYears,
+      extractedAt,
+    };
 
     if (existing) {
       this.db
         .update(extractions)
-        .set({ requirements: serialized, extractedAt })
+        .set(values)
         .where(eq(extractions.id, existing.id))
         .run();
     } else {
       this.db
         .insert(extractions)
-        .values({
-          fingerprint,
-          promptVersion,
-          requirements: serialized,
-          extractedAt,
-        })
+        .values({ fingerprint, promptVersion, ...values })
         .run();
     }
   }
 
-  find(fingerprint: string, promptVersion: string): Requirement[] | null {
+  find(fingerprint: string, promptVersion: string): ExtractionRecord | null {
     const row = this.db
       .select()
       .from(extractions)
@@ -62,6 +69,12 @@ export class ExtractionsRepository {
       )
       .get();
 
-    return row ? (JSON.parse(row.requirements) as Requirement[]) : null;
+    if (!row) return null;
+
+    return {
+      requirements: JSON.parse(row.requirements) as Requirement[],
+      seniority: row.seniority as Seniority | null,
+      experienceYears: row.experienceYears,
+    };
   }
 }

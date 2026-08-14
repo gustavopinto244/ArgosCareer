@@ -1,4 +1,5 @@
 import { Posting } from "../../../posting/domain/posting";
+import { Recommendation } from "../recommendation";
 import { ScoreOutcome } from "../types";
 
 export type ScoreFailureReason =
@@ -9,9 +10,17 @@ export type ScoreFailureReason =
  * resolves, the outcome is final for this posting. `ok: false` is not an
  * exception — a posting that cannot be scored is not discarded, it carries
  * `attempts` into the digest's review section instead.
+ *
+ * `Recommendation` (`recommendedVariant`/`highlights`/`missingTerms`) is
+ * kept as a separate type from `ScoreOutcome` rather than folded into stage
+ * C's formula output — it answers question 3 (`01-vision-and-scope.md`), a
+ * different question from "what score does this posting get", computed by
+ * a different pure function (`computeRecommendation`) over the same
+ * matches. Keeping them separate means neither `computeScore` nor its tests
+ * needed to change to add this.
  */
 export type ScoreResult =
-  | ({ readonly ok: true } & ScoreOutcome)
+  | ({ readonly ok: true } & ScoreOutcome & Recommendation)
   | {
       readonly ok: false;
       readonly reason: ScoreFailureReason;

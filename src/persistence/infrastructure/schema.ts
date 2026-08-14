@@ -84,6 +84,11 @@ export const extractions = sqliteTable(
     fingerprint: text("fingerprint").notNull(),
     promptVersion: text("prompt_version").notNull(),
     requirements: text("requirements").notNull(),
+    // 'internship' | 'trainee' | 'junior' | 'mid' | 'senior' | null —
+    // mirrors Posting.seniority. Cached alongside requirements (v2 prompt)
+    // so a cache hit still has a value to write back onto the posting row.
+    seniority: text("seniority"),
+    experienceYears: integer("experience_years"),
     extractedAt: integer("extracted_at", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => [

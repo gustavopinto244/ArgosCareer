@@ -42,8 +42,8 @@ describe("prompt version constants", () => {
     expect(existsSync(STAGE_B_PROMPT_PATH)).toBe(true);
   });
 
-  it("are pinned to v1", () => {
-    expect(STAGE_A_PROMPT_VERSION).toBe("a-v1");
+  it("are pinned to the current versions", () => {
+    expect(STAGE_A_PROMPT_VERSION).toBe("a-v2");
     expect(STAGE_B_PROMPT_VERSION).toBe("b-v1");
   });
 });
