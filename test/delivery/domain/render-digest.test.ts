@@ -1,0 +1,155 @@
+import { describe, expect, it } from "vitest";
+import { createPosting } from "../../../src/posting/domain/posting";
+import { ScoreOutcome } from "../../../src/scoring/domain/types";
+import { Digest, ScoredPosting } from "../../../src/delivery/domain/digest";
+import {
+  renderDigestText,
+  renderPostingEntry,
+} from "../../../src/delivery/domain/render-digest";
+
+const NOW = new Date("2026-08-14T03:00:00Z");
+
+function posting(overrides: Partial<Parameters<typeof createPosting>[0]> = {}) {
+  return createPosting({
+    source: "gupy",
+    sourceId: "1",
+    company: "Empresa X",
+    title: "Estágio em Desenvolvimento Backend",
+    location: { kind: "known", city: "Rio de Janeiro" },
+    workMode: "hybrid",
+    sourceUrl: "https://example.org/vagas/1",
+    collectedAt: NOW,
+    firstSeenAt: NOW,
+    lastSeenAt: NOW,
+    rawPayload: {},
+    ...overrides,
+  });
+}
+
+function outcome(overrides: Partial<ScoreOutcome> = {}): ScoreOutcome {
+  return {
+    score: 62.4,
+    verdict: "review",
+    breakdown: {
+      mandatoryCoverage: 1,
+      desirableCoverage: 1,
+      trackAlignment: 1,
+    },
+    blockingFailure: null,
+    lowConfidence: true,
+    criticalGaps: [],
+    ...overrides,
+  };
+}
+
+function scored(overrides: Partial<ScoredPosting> = {}): ScoredPosting {
+  return { posting: posting(), outcome: outcome(), ...overrides };
+}
+
+function emptyDigest(overrides: Partial<Digest> = {}): Digest {
+  return {
+    runId: "run-1",
+    generatedAt: NOW,
+    recommended: [],
+    review: [],
+    periodBlocked: [],
+    summary: {
+      collected: 0,
+      deduplicated: 0,
+      filtered: 0,
+      scored: 0,
+      failedSources: [],
+    },
+    ...overrides,
+  };
+}
+
+describe("renderPostingEntry", () => {
+  it("renders company, title, rounded score, translated verdict, location and link", () => {
+    const text = renderPostingEntry(scored());
+
+    expect(text).toContain("Empresa: Empresa X");
+    expect(text).toContain("Cargo: Estágio em Desenvolvimento Backend");
+    expect(text).toContain("Compatibilidade: 62% · avaliar");
+    expect(text).toContain("Local: Rio de Janeiro · Híbrido");
+    expect(text).toContain("Fonte: gupy");
+    expect(text).toContain("→ https://example.org/vagas/1");
+  });
+
+  it("translates the apply verdict to candidatar", () => {
+    const text = renderPostingEntry(
+      scored({ outcome: outcome({ verdict: "apply", score: 85 }) }),
+    );
+    expect(text).toContain("· candidatar");
+  });
+
+  it("says explicitly when a source provided no link, rather than omitting the line", () => {
+    const text = renderPostingEntry(
+      scored({ posting: posting({ sourceUrl: null }) }),
+    );
+    expect(text).toContain("→ (link não informado pela fonte)");
+  });
+
+  it("renders a remote posting without a city", () => {
+    const text = renderPostingEntry(
+      scored({
+        posting: posting({ location: { kind: "unknown" }, workMode: "remote" }),
+      }),
+    );
+    expect(text).toContain("Local: Remoto");
+  });
+});
+
+describe("renderDigestText", () => {
+  it("renders all four sections in order, even when every list is empty", () => {
+    const text = renderDigestText(emptyDigest());
+    const recommendedIdx = text.indexOf("Recomendadas");
+    const reviewIdx = text.indexOf("Vale avaliar");
+    const periodIdx = text.indexOf("Abrem para você em breve");
+    const summaryIdx = text.indexOf("Resumo da execução");
+
+    expect(recommendedIdx).toBeGreaterThanOrEqual(0);
+    expect(reviewIdx).toBeGreaterThan(recommendedIdx);
+    expect(periodIdx).toBeGreaterThan(reviewIdx);
+    expect(summaryIdx).toBeGreaterThan(periodIdx);
+  });
+
+  it("includes a posting entry inside its section", () => {
+    const text = renderDigestText(emptyDigest({ review: [scored()] }));
+    expect(text).toContain("Empresa: Empresa X");
+  });
+
+  it("renders the period-blocked entry with its calendar-term label", () => {
+    const text = renderDigestText(
+      emptyDigest({
+        periodBlocked: [{ posting: posting(), opensAtLabel: "2027.1" }],
+      }),
+    );
+    expect(text).toContain("Empresa X — Estágio em Desenvolvimento Backend");
+    expect(text).toContain("Abre para você em 2027.1");
+  });
+
+  it("renders the run summary counts and a list of failed sources", () => {
+    const text = renderDigestText(
+      emptyDigest({
+        summary: {
+          collected: 10,
+          deduplicated: 8,
+          filtered: 5,
+          scored: 5,
+          failedSources: ["gupy"],
+        },
+      }),
+    );
+    expect(text).toContain("Coletadas: 10");
+    expect(text).toContain("Novas após deduplicação: 8");
+    expect(text).toContain("Após pré-filtro: 5");
+    expect(text).toContain("Pontuadas: 5");
+    expect(text).toContain("Fontes com falha: gupy");
+  });
+
+  it("reports no failed sources as 'nenhuma'", () => {
+    const text = renderDigestText(emptyDigest());
+    expect(text).toContain("Fontes com falha: nenhuma");
+  });
+});
