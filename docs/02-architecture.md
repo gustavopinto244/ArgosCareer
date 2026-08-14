@@ -77,11 +77,11 @@ possible, and it is why stage C contains no LLM call at all.
 
 Three, all defined in the domain layer, all implemented in infrastructure:
 
-| Port | Contract | Adapters |
-|---|---|---|
+| Port            | Contract                                                       | Adapters                                                                         |
+| --------------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------- |
 | `CollectorPort` | `collect(criteria): Promise<CollectionResult>` — never rejects | `GupyCollector` (M3), `JobSpyCollector` (post-M6), `LinkedInCollector` (post-M6) |
-| `ScorerPort` | `score(posting, profile): Promise<ScoreResult>` | `StubScorer` (M1), `ApiScorer` (M7), `OllamaScorer` (M7) |
-| `NotifierPort` | `notify(digest): Promise<void>` | `TelegramNotifier` (M6) |
+| `ScorerPort`    | `score(posting, profile): Promise<ScoreResult>`                | `StubScorer` (M1), `ApiScorer` (M7), `OllamaScorer` (M7)                         |
+| `NotifierPort`  | `notify(digest): Promise<void>`                                | `TelegramNotifier` (M6)                                                          |
 
 NestJS's DI container is what makes this cheap: a port is an injection token, an
 adapter is a provider, and swapping them is a module change. That is the reason
@@ -147,14 +147,14 @@ collected postings and is the single thing that makes a local model viable — t
 difference between scoring 200 postings and scoring 60 is the difference between
 a batch that finishes and one that gets killed.
 
-| Rule | Behavior |
-|---|---|
-| Title blocklist | `sênior`, `senior`, `pleno`, `especialista`, `coordenador`, `gerente`, `tech lead`, `III`, `IV` |
-| Title requirement | Must match `estágio` / `estagiário` / `intern` / `trainee` |
-| Location | Rio de Janeiro + metropolitan region, or remote |
-| Blocked companies | Configurable list |
-| Expired | Closed or past application deadline |
-| Minimum keyword adherence | Must hit a floor of profile keywords before spending LLM budget |
+| Rule                      | Behavior                                                                                        |
+| ------------------------- | ----------------------------------------------------------------------------------------------- |
+| Title blocklist           | `sênior`, `senior`, `pleno`, `especialista`, `coordenador`, `gerente`, `tech lead`, `III`, `IV` |
+| Title requirement         | Must match `estágio` / `estagiário` / `intern` / `trainee`                                      |
+| Location                  | Rio de Janeiro + metropolitan region, or remote                                                 |
+| Blocked companies         | Configurable list                                                                               |
+| Expired                   | Closed or past application deadline                                                             |
+| Minimum keyword adherence | Must hit a floor of profile keywords before spending LLM budget                                 |
 
 All rules are configuration (principle 3). Rules and thresholds get an ADR in M5.
 
@@ -165,11 +165,11 @@ than filtering and shrinks the input to every later stage.
 
 Summarized here; the reasoning lives in `04-scoring-model.md` and ADR-005.
 
-| Stage | Runs on | Cacheable by | Output |
-|---|---|---|---|
-| A — Extraction | LLM | posting | `{text, category, weight}[]` |
-| B — Matching | LLM | (posting, profile hash) | `met \| partial \| not_met` + evidence quote |
-| C — Score | **code** | — | number, verdict, gaps |
+| Stage          | Runs on  | Cacheable by            | Output                                       |
+| -------------- | -------- | ----------------------- | -------------------------------------------- |
+| A — Extraction | LLM      | posting                 | `{text, category, weight}[]`                 |
+| B — Matching   | LLM      | (posting, profile hash) | `met \| partial \| not_met` + evidence quote |
+| C — Score      | **code** | —                       | number, verdict, gaps                        |
 
 Stage C is a pure function: no I/O, no LLM, deterministic, unit-tested. The LLM
 never emits the number.
@@ -197,11 +197,11 @@ not.
 
 Worked example, using the real course start of March 2026:
 
-| Date | `absoluteIndex` | Period |
-|---|---|---|
-| March 2026 (start) | `2026×2 + 0` = 4052 | 1 |
-| August 2026 | `2026×2 + 1` = 4053 | **2** |
-| March 2027 (2027.1) | `2027×2 + 0` = 4054 | **3** |
+| Date                | `absoluteIndex`     | Period |
+| ------------------- | ------------------- | ------ |
+| March 2026 (start)  | `2026×2 + 0` = 4052 | 1      |
+| August 2026         | `2026×2 + 1` = 4053 | **2**  |
+| March 2027 (2027.1) | `2027×2 + 0` = 4054 | **3**  |
 
 Clamp the result to `[1, 8]` and handle dates before the start date explicitly.
 
@@ -248,11 +248,11 @@ cloudflared and two Docker containers.
 
 **Budget: ~150 MB at rest, ~250 MB at peak.**
 
-| Constraint | Requirement |
-|---|---|
-| Ollama peaks ~3.2 GB | **`OLLAMA_KEEP_ALIVE=0`** so the model unloads at end of batch |
+| Constraint                       | Requirement                                                                        |
+| -------------------------------- | ---------------------------------------------------------------------------------- |
+| Ollama peaks ~3.2 GB             | **`OLLAMA_KEEP_ALIVE=0`** so the model unloads at end of batch                     |
 | Swap is an OOM net, not headroom | Paging during inference destroys latency; a plan that relies on swap is not a plan |
-| P1 sources | Ephemeral Python container (`--rm`), prints JSON and exits — zero RAM at rest |
+| P1 sources                       | Ephemeral Python container (`--rm`), prints JSON and exits — zero RAM at rest      |
 
 Docker Compose, M8.
 
@@ -278,9 +278,9 @@ session or cookies. See `CLAUDE.md` §3.
 
 Recorded so they are not mistaken for facts.
 
-| Assumption | Status |
-|---|---|
+| Assumption                                                                                                       | Status                                                                                                                                                                                                   |
+| ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `https://employability-portal.gupy.io/api/v1/jobs` returns public JSON without auth, with a usable posting shape | **Unverified.** No request has been made from this repository. M3 adds `npm run fixture:gupy` to capture the real response; the Zod schema stays tolerant (`.passthrough()`, optional fields) until then |
-| A 4B local model is accurate enough for stages A and B | **Unverified.** Decided by the M7 benchmark, not in advance |
-| The pre-filter cuts ~70% | **Estimate.** Measured in M5 against real collected volume |
-| ~150 MB at rest fits alongside current Atlas load | **Estimate.** Verified in M8 under real load |
+| A 4B local model is accurate enough for stages A and B                                                           | **Unverified.** Decided by the M7 benchmark, not in advance                                                                                                                                              |
+| The pre-filter cuts ~70%                                                                                         | **Estimate.** Measured in M5 against real collected volume                                                                                                                                               |
+| ~150 MB at rest fits alongside current Atlas load                                                                | **Estimate.** Verified in M8 under real load                                                                                                                                                             |

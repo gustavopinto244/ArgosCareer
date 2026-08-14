@@ -1,0 +1,103 @@
+# ADR-005 — Keep score computation out of the LLM
+
+## Status
+
+Accepted
+
+## Date
+
+2026-08-14
+
+## Context
+
+The system must rank internship postings by how well a master profile matches
+what each posting declares it wants. Ranking quality is the product: a digest
+ordered badly costs more time than no digest, because it has to be read to be
+distrusted.
+
+Two constraints shape the design. The production scorer target is a ~4B model
+running on a mini PC with no GPU and a ~250 MB peak application budget. And
+criterion 6 of the project requires calibration — measuring the scoring system
+against 50 hand-labelled postings and publishing the result — which is only
+possible if scores are comparable across configurations.
+
+## Considered options
+
+### Send resume plus posting, ask for a score from 0 to 100
+
+Rejected, on three grounds.
+
+_Not calibrated._ Asked for a 0–100 score, models put almost everything between
+65 and 85. The output has the shape of a score without the discriminating power
+of one, and ranking by it approaches ranking by noise.
+
+_Not comparable across prompt versions._ Change a sentence in the prompt and
+every number moves. There is no way to tell an improvement from a shift, which
+makes the calibration protocol unrunnable — and calibration is what separates
+this from an aggregator with a number attached.
+
+_Worst case for a small model._ Holistic numeric judgment is precisely where a 4B
+model diverges most from a large one. Building the design around the task the
+production model is worst at is a choice to fail.
+
+### Ask the LLM for a structured verdict, compute nothing
+
+Rejected. It moves the problem without solving it: `apply | review | discard`
+straight from the model is still an uncalibrated holistic judgment, just with
+fewer possible values to hide the imprecision in.
+
+### Extract and match with the LLM, compute the score in code
+
+Accepted. The LLM is given only the two tasks it is genuinely good at — pulling
+structure out of prose, and judging one narrow claim at a time against cited
+evidence. Arithmetic happens in a pure function.
+
+## Decision
+
+Three stages.
+
+**A — Extraction (LLM).** Returns `{text, category, weight}` per requirement,
+`weight ∈ {blocking, mandatory, desirable}`. Cacheable per posting.
+
+**B — Matching (LLM).** Per requirement, `met | partial | not_met`, with a
+**mandatory verbatim evidence quote** from the profile. `evidence: null` forces
+`not_met`, enforced in code after parsing rather than requested in the prompt.
+Cacheable per (posting, profile hash).
+
+**C — Score (code).** Pure, deterministic, no I/O, unit-tested:
+
+```
+score = 65 × mandatoryCoverage + 20 × desirableCoverage + 15 × trackAlignment
+```
+
+A failed `blocking` requirement caps the score at 35, `partial` included, because
+a knockout question is binary. Fewer than `minExtractedRequirements` extracted
+sets `lowConfidence` and caps the verdict at `review`.
+
+The evidence requirement is the load-bearing part. Without it the model
+hallucinates adherence: it wants to agree that the candidate qualifies, and with
+no obligation to point at anything it will. Requiring a quote turns an agreeable
+judgment into a retrieval task with a checkable answer.
+
+Full formula, thresholds and calibration protocol: `docs/04-scoring-model.md`.
+
+## Consequences
+
+- Scores are deterministic and comparable across model, prompt and weight
+  changes. Calibration becomes possible, and so does changing one variable at a
+  time.
+- Stage C is testable with no LLM, no network and no fixtures, so it can be built
+  in M1 before any model integration exists.
+- Two LLM calls per posting instead of one, which costs more tokens and more
+  local inference time. Mitigated by per-stage caching: stage A results survive
+  every prompt iteration on stage B, which is most of the M7 workload.
+- Every failure becomes attributable. A wrong score traces to a specific bad
+  extraction or a specific bad match, both inspectable, rather than to an opaque
+  number.
+- The evidence quotes are reusable output: they are what `criticalGaps` and
+  `missingTerms` are derived from, and they make the digest explain itself.
+- The system now depends on stage A extracting sensible requirements. A posting
+  whose text is an image, a link, or pure boilerplate yields nothing to match —
+  which is the second reason `lowConfidence` exists.
+- Reversing this is cheap in code and expensive in credibility: the calibration
+  table published in the README would no longer mean anything.

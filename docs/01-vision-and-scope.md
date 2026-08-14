@@ -32,12 +32,12 @@ paperwork.
 
 ## Search profile
 
-| | |
-|---|---|
-| **Priority 1** | Back-end development internships |
-| **Priority 2** | Information security, infrastructure / automation |
-| **Location** | Rio de Janeiro and metropolitan region, or remote |
-| **Level** | Internship only — `estágio`, `estagiário`, `intern`, `trainee` |
+|                |                                                                |
+| -------------- | -------------------------------------------------------------- |
+| **Priority 1** | Back-end development internships                               |
+| **Priority 2** | Information security, infrastructure / automation              |
+| **Location**   | Rio de Janeiro and metropolitan region, or remote              |
+| **Level**      | Internship only — `estágio`, `estagiário`, `intern`, `trainee` |
 
 Track membership drives the `trackAlignment` term in the score
 (`docs/04-scoring-model.md`) and the `dev` / `security` / `automation` tags in the
@@ -48,13 +48,13 @@ master profile.
 Each of these looks useful and is deliberately excluded. Reopening one requires
 an ADR, not a preference.
 
-| Out of scope | Reason |
-|---|---|
-| Automatic job application | Ban risk on the platforms that matter, and it optimizes the wrong step — the bottleneck is finding the posting |
-| Per-posting resume generation | A meaningful project on its own; deferred to Phase 3 so it does not swallow v1 |
-| Web interface | Telegram is the interface in v1. A UI is where this kind of project quietly dies |
-| Multi-user / SaaS | Personal product. Auth, tenancy and LGPD compliance with no upside |
-| Scraping at scale | Not what this is for, and directly at odds with the polite-collector rules |
+| Out of scope                  | Reason                                                                                                         |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Automatic job application     | Ban risk on the platforms that matter, and it optimizes the wrong step — the bottleneck is finding the posting |
+| Per-posting resume generation | A meaningful project on its own; deferred to Phase 3 so it does not swallow v1                                 |
+| Web interface                 | Telegram is the interface in v1. A UI is where this kind of project quietly dies                               |
+| Multi-user / SaaS             | Personal product. Auth, tenancy and LGPD compliance with no upside                                             |
+| Scraping at scale             | Not what this is for, and directly at odds with the polite-collector rules                                     |
 
 ## Success criteria
 
@@ -100,11 +100,11 @@ Two further limits worth stating:
 These block nothing today but will produce wrong results if they stay unanswered.
 They are marked `⚠ VERIFY` in `config/profile.yaml`.
 
-| Field | Why it matters | Status |
-|---|---|---|
-| **English level** | A frequent knockout requirement, and absent from both resumes. Without it, stage B has no evidence to cite and every English requirement scores `not_met` — deflating scores across the board | Unanswered |
-| **Minimum stipend** | Pre-filter criterion. Without it, postings that are non-viable in practice consume LLM budget | Unanswered |
-| **Maximum weekly hours** | Same, and interacts with class schedule | Unanswered |
+| Field                    | Why it matters                                                                                                                                                                                | Status     |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| **English level**        | A frequent knockout requirement, and absent from both resumes. Without it, stage B has no evidence to cite and every English requirement scores `not_met` — deflating scores across the board | Unanswered |
+| **Minimum stipend**      | Pre-filter criterion. Without it, postings that are non-viable in practice consume LLM budget                                                                                                 | Unanswered |
+| **Maximum weekly hours** | Same, and interacts with class schedule                                                                                                                                                       | Unanswered |
 
 The English-level gap is the most damaging of the three: it does not merely miss
 a filter, it systematically biases the score downward, which would corrupt the

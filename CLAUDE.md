@@ -28,13 +28,13 @@ Full detail: `docs/01-vision-and-scope.md`.
 
 ## 2. Non-goals — do not implement these, even when they look useful
 
-| Out of scope | Reason |
-|---|---|
-| Automatic job application | Ban risk; the bottleneck is finding the posting, not applying |
-| Per-posting resume generation | A project of its own, deferred to Phase 3 |
-| Web interface | Telegram is the interface in v1 |
-| Multi-user / SaaS | Personal product; auth and LGPD compliance with no upside |
-| Scraping at scale | Not what this is for |
+| Out of scope                  | Reason                                                        |
+| ----------------------------- | ------------------------------------------------------------- |
+| Automatic job application     | Ban risk; the bottleneck is finding the posting, not applying |
+| Per-posting resume generation | A project of its own, deferred to Phase 3                     |
+| Web interface                 | Telegram is the interface in v1                               |
+| Multi-user / SaaS             | Personal product; auth and LGPD compliance with no upside     |
+| Scraping at scale             | Not what this is for                                          |
 
 ## 3. Non-negotiable safety rule
 
@@ -74,11 +74,11 @@ paging during inference destroys latency.
 
 ## 6. Job sources
 
-| Source | Priority | Strategy |
-|---|---|---|
-| **Gupy** | P0 | HTTP client in TS. Public JSON endpoint: `https://employability-portal.gupy.io/api/v1/jobs` (no auth) |
-| **Google Jobs / Indeed** | P1 | Ephemeral Python container (`--rm`) running `python-jobspy`; prints JSON and exits. Zero RAM at rest |
-| **LinkedIn** | P2 | Public visitor endpoints only — see §3 |
+| Source                   | Priority | Strategy                                                                                              |
+| ------------------------ | -------- | ----------------------------------------------------------------------------------------------------- |
+| **Gupy**                 | P0       | HTTP client in TS. Public JSON endpoint: `https://employability-portal.gupy.io/api/v1/jobs` (no auth) |
+| **Google Jobs / Indeed** | P1       | Ephemeral Python container (`--rm`) running `python-jobspy`; prints JSON and exits. Zero RAM at rest  |
+| **LinkedIn**             | P2       | Public visitor endpoints only — see §3                                                                |
 
 **The Gupy response schema is unverified.** No request has been made from this
 repository. Before trusting the adapter, `npm run fixture:gupy` (M3) must hit the
@@ -137,13 +137,13 @@ declares**.
 
 **Do not ask the LLM for the score.** Three stages instead:
 
-- **A — Extraction** *(LLM)*: reads the posting, returns structured requirements
+- **A — Extraction** _(LLM)_: reads the posting, returns structured requirements
   `{text, category, weight}` where `weight ∈ {blocking, mandatory, desirable}`.
   Cacheable per posting.
-- **B — Matching** *(LLM)*: per requirement, `met | partial | not_met`, **with a
+- **B — Matching** _(LLM)_: per requirement, `met | partial | not_met`, **with a
   mandatory evidence quote** from the profile. `evidence: null` forces `not_met`.
   Cacheable per (posting, profile hash).
-- **C — Score** *(code)*: pure, deterministic, unit-tested, no I/O, no LLM.
+- **C — Score** _(code)_: pure, deterministic, unit-tested, no I/O, no LLM.
 
 ```
 statusWeight = { met: 1.0, partial: 0.5, not_met: 0.0 }
@@ -282,18 +282,18 @@ about Brazilian postings. See ADR-003.
 
 ## 14. Milestones
 
-| # | Milestone | Delivers | Status |
-|---|---|---|---|
-| M0 | Bootstrap | `CLAUDE.md`, `docs/`, `.gitignore`, CI, ADR template, README | in progress |
-| M1 | Domain + stage C | Entities, fingerprint, score computation, unit tests | |
-| M2 | Master profile | Zod schema, loader, `profile.yaml`, period derivation | |
-| M3 | Gupy collector | Adapter + `fixture:gupy` + schema fitted to the real response | |
-| M4 | Persistence | Drizzle + SQLite, migrations, dedup, `runs` table | |
-| M5 | Pre-filter | Configurable deterministic rules | |
-| M6 | **Vertical slice** | Gupy → SQLite → Telegram with `StubScorer`. A real posting on the phone | |
-| M7 | Real scoring | Stages A and B, versioned prompts in `prompts/`, 50 labelled postings, calibration table in README | |
-| M8 | Deployment | Docker Compose on Atlas, scheduling, backup, broken-adapter alert | |
-| M9 | API + Hermes | HTTP endpoints, MCP server, integration | |
+| #   | Milestone          | Delivers                                                                                           | Status      |
+| --- | ------------------ | -------------------------------------------------------------------------------------------------- | ----------- |
+| M0  | Bootstrap          | `CLAUDE.md`, `docs/`, `.gitignore`, CI, ADR template, README                                       | in progress |
+| M1  | Domain + stage C   | Entities, fingerprint, score computation, unit tests                                               |             |
+| M2  | Master profile     | Zod schema, loader, `profile.yaml`, period derivation                                              |             |
+| M3  | Gupy collector     | Adapter + `fixture:gupy` + schema fitted to the real response                                      |             |
+| M4  | Persistence        | Drizzle + SQLite, migrations, dedup, `runs` table                                                  |             |
+| M5  | Pre-filter         | Configurable deterministic rules                                                                   |             |
+| M6  | **Vertical slice** | Gupy → SQLite → Telegram with `StubScorer`. A real posting on the phone                            |             |
+| M7  | Real scoring       | Stages A and B, versioned prompts in `prompts/`, 50 labelled postings, calibration table in README |             |
+| M8  | Deployment         | Docker Compose on Atlas, scheduling, backup, broken-adapter alert                                  |             |
+| M9  | API + Hermes       | HTTP endpoints, MCP server, integration                                                            |             |
 
 P1/P2 sources (Google Jobs, Indeed, LinkedIn) come after M6, one per pull
 request.
