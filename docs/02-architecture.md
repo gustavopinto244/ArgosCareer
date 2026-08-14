@@ -337,13 +337,49 @@ ever examined.
 **Non-negotiable:** no collector is ever authenticated with a personal LinkedIn
 session or cookies. See `CLAUDE.md` §3.
 
+## Verified: the Gupy response shape (M3)
+
+Was listed below as unverified through M0–M2. `npm run fixture:gupy` captured
+the real response from `https://employability-portal.gupy.io/api/v1/jobs`
+on 2026-08-14 — public, JSON, no auth, exactly as hoped, confirmed rather than
+assumed.
+
+```
+GET https://employability-portal.gupy.io/api/v1/jobs
+  ?jobName=<free text>&city=<text>&type=<vacancy_type_*>
+  &isRemoteWork=<bool>&limit=<n>&offset=<n>
+
+200 { data: JobItem[], pagination: { total, limit, offset } }
+```
+
+`jobName`, `city`, `type` and `isRemoteWork` all filter server-side — verified
+against the live endpoint, not guessed from the shape of the URL. This
+matters: it means the pre-filter in M5 does not have to fetch everything and
+discard most of it, because the search itself can be narrowed at the source.
+
+`JobItem` carries `id`, `name`, `companyId`, `careerPageName` (the employer's
+display name), `city`/`state`/`country`, `workplaceType`
+(`remote`/`hybrid`/`on-site`), `isRemoteWork`, `type` (an open string — four
+distinct values turned up in a small sample, evidence there are more, not a
+closed set), `publishedDate`, `applicationDeadline`, and an optional `badges`
+object present on some items and entirely absent — not null — on others.
+`skills` was an empty array on every item observed; no non-empty example
+exists anywhere in this project's fixtures because none has been seen.
+
+Full schema: `src/posting/infrastructure/gupy-schema.ts`. Provenance for the
+curated, committed sample: `test/fixtures/gupy-jobs.md`.
+
+**`robots.txt` checked on both `employability-portal.gupy.io` and `gupy.io`
+— neither exists (404).** Nothing to respect because nothing is declared;
+recorded here rather than left as a silent gap in the polite-collector
+checklist.
+
 ## Unverified assumptions
 
 Recorded so they are not mistaken for facts.
 
-| Assumption                                                                                                       | Status                                                                                                                                                                                                   |
-| ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `https://employability-portal.gupy.io/api/v1/jobs` returns public JSON without auth, with a usable posting shape | **Unverified.** No request has been made from this repository. M3 adds `npm run fixture:gupy` to capture the real response; the Zod schema stays tolerant (`.passthrough()`, optional fields) until then |
-| A 4B local model is accurate enough for stages A and B                                                           | **Unverified.** Decided by the M7 benchmark, not in advance                                                                                                                                              |
-| The pre-filter cuts ~70%                                                                                         | **Estimate.** Measured in M5 against real collected volume                                                                                                                                               |
-| ~150 MB at rest fits alongside current Atlas load                                                                | **Estimate.** Verified in M8 under real load                                                                                                                                                             |
+| Assumption                                             | Status                                                      |
+| ------------------------------------------------------ | ----------------------------------------------------------- |
+| A 4B local model is accurate enough for stages A and B | **Unverified.** Decided by the M7 benchmark, not in advance |
+| The pre-filter cuts ~70%                               | **Estimate.** Measured in M5 against real collected volume  |
+| ~150 MB at rest fits alongside current Atlas load      | **Estimate.** Verified in M8 under real load                |

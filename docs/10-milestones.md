@@ -65,18 +65,20 @@ Delivered in PRs #1 and #2, hardened in #3 and #4.
 - [x] `resumeVariants` in the schema — named subsets of the profile, holding no
       prose (`05-domain-model.md`)
 
-## M3 — Gupy collector
+## M3 — Gupy collector ✅
 
-- [ ] `npm run fixture:gupy` hits the real API, writes
+- [x] `npm run fixture:gupy` hits the real API, writes
       `test/fixtures/gupy-raw.json` (gitignored), prints the first item's keys
-- [ ] Tolerant Zod schema fitted to the **observed** response, not a guess
-- [ ] Curated fixture committed, derived by hand from the raw capture, with
+- [x] Tolerant Zod schema fitted to the **observed** response, not a guess
+- [x] Curated fixture committed, derived by hand from the raw capture, with
       recorded provenance (`07-testing-strategy.md`)
-- [ ] Adapter never throws — contract tests for non-200, timeout, malformed
+- [x] Adapter never throws — contract tests for non-200, timeout, malformed
       body, empty body, connection reset
-- [ ] Polite behavior verified: `robots.txt`, ~1.5 s interval, honest
-      `User-Agent`, backoff, explicit timeout
-- [ ] `docs/02` updated: the Gupy schema moves out of "unverified assumptions"
+- [x] Polite behavior verified: `robots.txt` (checked on both domains —
+      neither exists), ~1.5 s interval, honest `User-Agent`, backoff, explicit
+      timeout
+- [x] `docs/02` updated: the Gupy schema moves out of "unverified assumptions"
+      into a documented, verified shape
 
 ## M4 — Persistence
 

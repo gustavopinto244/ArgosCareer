@@ -13,6 +13,44 @@ version to attach it to.
 
 ## [Unreleased]
 
+### Added — M3, Gupy collector
+
+- `npm run fixture:gupy` (`scripts/fixture-gupy.ts`), run for real against
+  `https://employability-portal.gupy.io/api/v1/jobs` — public JSON, no auth,
+  confirmed rather than assumed. `robots.txt` checked on both
+  `employability-portal.gupy.io` and `gupy.io`: neither exists.
+- `GupyJobSchema` and `GupyResponseEnvelopeSchema`
+  (`src/posting/infrastructure/gupy-schema.ts`), fitted to the observed
+  response: `id`/`name` required, everything else optional or nullable,
+  `.passthrough()` throughout. `type` and `workplaceType` stay open strings —
+  four distinct `type` values turned up in a small sample.
+- `test/fixtures/gupy-jobs.json` — curated, committed, fictional, hand-derived
+  from the raw capture with provenance recorded in the sibling
+  `gupy-jobs.md`, preserving the real oddities observed: `badges` present on
+  some items and absent (not null) on others, all three `workplaceType`
+  values, `isRemoteWork` not always agreeing with the title.
+- `GupyCollector` (`src/posting/infrastructure/gupy-collector.ts`)
+  implementing `CollectorPort`: honest User-Agent, explicit per-request
+  timeout, exponential backoff on 5xx/network failures (not on 4xx),
+  ~1.5 s between paginated requests, fetch injected so no test ever makes a
+  real network call. Verified against the live API in addition to the
+  mocked contract tests: `collect({ jobName: "estágio", maxResults: 5 })`
+  returned 5 real postings, no error.
+- `docs/02-architecture.md`'s Gupy entry moved from "unverified assumptions"
+  to a documented, verified response shape.
+
+### Fixed — two collector bugs the contract tests caught
+
+- A backoff-exhausted 5xx landed in the outer error handler as a generic
+  "Gupy request failed", losing the actual status code. The underlying
+  error's message is now folded into the final one.
+- `maxResults` was originally bounded against the count of _valid_ postings
+  collected rather than raw items scanned. Against a page containing an
+  invalid item, this made the collector page further to backfill the
+  shortfall — the wrong direction when a source starts degrading, since it
+  amplifies request volume against a source that is already failing
+  validation. Rebounded against items scanned instead.
+
 ### Added — M2, master profile
 
 - `ProfileSchema` (`src/profile/domain/profile.ts`) for `config/profile.yaml`:
