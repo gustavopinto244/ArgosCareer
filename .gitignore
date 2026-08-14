@@ -1,0 +1,43 @@
+# ArgosCareer is a public portfolio repository. Everything below either carries
+# personal data or is machine-local state. See docs/adr/004 for the rationale.
+
+# Master profile: full resume, phone number and e-mail address.
+# The committed structural example lives at config/profile.example.yaml.
+config/profile.yaml
+config/profile.*.yaml
+!config/profile.example.yaml
+
+# Collected job postings and pipeline run history.
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+data/
+
+# Secrets: Telegram bot token, LLM API keys.
+.env
+.env.*
+!.env.example
+
+# Raw API captures. Recorded to pin down undocumented response schemas;
+# they may embed recruiter names and contact details.
+test/fixtures/*-raw.json
+
+# Dependencies and build output
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Test coverage
+coverage/
+
+# Logs
+*.log
+logs/
+
+# Editor and operating system
+.vscode/
+.idea/
+.DS_Store
