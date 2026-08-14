@@ -7,11 +7,15 @@
     // path is CJS, and its CLI and parts of the ecosystem assume it.
     // See docs/adr/002.
     //
-    // node16 rather than the classic commonjs/node pair: package.json declares
-    // no "type", so node16 resolves and emits CommonJS anyway, and the legacy
-    // "node" resolution is deprecated in TypeScript 6 and removed in 7.
-    "module": "node16",
-    "moduleResolution": "node16",
+    // nodenext rather than the classic commonjs/node pair: package.json
+    // declares no "type", so nodenext resolves and emits CommonJS anyway, and
+    // the legacy "node" resolution is deprecated in TypeScript 6, removed in 7.
+    //
+    // nodenext rather than node16 because it models require() of ESM, which
+    // Node has supported unflagged since 22.12.0. That is what lets an
+    // ESM-only dependency be imported from CommonJS without a .mts wrapper.
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
 
     // NestJS dependency injection resolves constructor parameter types from
     // metadata emitted by these two flags.
@@ -37,9 +41,8 @@
     "declaration": false,
     "noEmit": true
   },
-  // vitest.config.mts is listed so the project has at least one input file
-  // before src/ exists, and so the config itself is typechecked. It is .mts
-  // because vitest/config is ESM-only and cannot be required from CommonJS.
-  "include": ["src/**/*.ts", "test/**/*.ts", "vitest.config.mts"],
+  // vitest.config.ts is listed so the project has at least one input file
+  // before src/ exists, and so the config itself is typechecked.
+  "include": ["src/**/*.ts", "test/**/*.ts", "vitest.config.ts"],
   "exclude": ["node_modules", "dist"]
 }
