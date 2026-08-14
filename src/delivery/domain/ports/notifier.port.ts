@@ -1,12 +1,4 @@
-/**
- * Placeholder digest shape — the real structure (sections, per-posting
- * message format) is specified in docs/02-architecture.md and implemented
- * with the TelegramNotifier adapter in M6.
- */
-export interface Digest {
-  readonly runId: string;
-  readonly generatedAt: Date;
-}
+import { Digest } from "../digest";
 
 export interface NotificationError {
   readonly message: string;

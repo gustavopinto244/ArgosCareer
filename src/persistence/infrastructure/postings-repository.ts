@@ -28,6 +28,7 @@ function rowToPosting(row: PostingRow): Posting {
     seniority: row.seniority as Posting["seniority"],
     experienceYears: row.experienceYears,
     applicationDeadline: row.applicationDeadline,
+    sourceUrl: row.sourceUrl,
     // The stored row has no separate "collectedAt" column — lastSeenAt *is*
     // the most recent observation, which is what collectedAt means for a
     // hydrated (already-persisted) Posting.
@@ -77,6 +78,7 @@ export class PostingsRepository {
             seniority: posting.seniority,
             experienceYears: posting.experienceYears,
             applicationDeadline: posting.applicationDeadline,
+            sourceUrl: posting.sourceUrl,
             lastSeenAt: posting.lastSeenAt,
             rawPayload: JSON.stringify(posting.rawPayload),
             // firstSeenAt is deliberately absent from this SET clause.
@@ -97,6 +99,7 @@ export class PostingsRepository {
             seniority: posting.seniority,
             experienceYears: posting.experienceYears,
             applicationDeadline: posting.applicationDeadline,
+            sourceUrl: posting.sourceUrl,
             firstSeenAt: posting.firstSeenAt,
             lastSeenAt: posting.lastSeenAt,
             rawPayload: JSON.stringify(posting.rawPayload),

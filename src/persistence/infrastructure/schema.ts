@@ -42,6 +42,9 @@ export const postings = sqliteTable(
     applicationDeadline: integer("application_deadline", {
       mode: "timestamp_ms",
     }),
+    // Null when the source provided no link. The digest (M6) treats the
+    // original posting link as mandatory on every entry it can fill in.
+    sourceUrl: text("source_url"),
     firstSeenAt: integer("first_seen_at", { mode: "timestamp_ms" }).notNull(),
     lastSeenAt: integer("last_seen_at", { mode: "timestamp_ms" }).notNull(),
     rawPayload: text("raw_payload").notNull(),

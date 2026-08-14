@@ -30,6 +30,10 @@ export interface Posting {
    * posting never expires, and the pre-filter's expiry rule treats it as
    * such (M5): unknown, not automatically pass or fail. */
   readonly applicationDeadline: Date | null;
+  /** Null when the source did not provide a link. The digest (M6) treats a
+   * posting with no link as undeliverable-without-a-fallback — see
+   * `docs/02-architecture.md`'s "link is mandatory" rule. */
+  readonly sourceUrl: string | null;
   readonly collectedAt: Date;
   readonly firstSeenAt: Date;
   readonly lastSeenAt: Date;
@@ -46,6 +50,7 @@ export type CreatePostingInput = {
   seniority?: Seniority | null;
   experienceYears?: number | null;
   applicationDeadline?: Date | null;
+  sourceUrl?: string | null;
   collectedAt: Date;
   firstSeenAt: Date;
   lastSeenAt: Date;
@@ -84,6 +89,7 @@ export function createPosting(input: CreatePostingInput): Posting {
     seniority: input.seniority ?? null,
     experienceYears: input.experienceYears ?? null,
     applicationDeadline: input.applicationDeadline ?? null,
+    sourceUrl: input.sourceUrl ?? null,
     collectedAt: input.collectedAt,
     firstSeenAt: input.firstSeenAt,
     lastSeenAt: input.lastSeenAt,
