@@ -27,13 +27,61 @@ Normalization is the only place allowed to know both shapes.
 
 ### Invariants of `Posting`
 
-| Invariant                                                    | Why                                                                                                               |
-| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
-| `company`, `title`, `source`, `sourceId` are non-empty       | The fingerprint is built from company and title; an empty component silently collapses distinct postings into one |
-| `fingerprint` is present and stable                          | Recomputing it must give the same value forever — it is the deduplication key and is persisted                    |
-| `collectedAt` is set by the collector, not by the database   | Re-running a stage must not change when a posting was found                                                       |
-| `location` is either a resolved place or explicitly `remote` | "Unknown" must be representable; guessing a city to fill the field corrupts the location filter                   |
-| Raw source payload is retained                               | Schema archaeology in M3 and beyond depends on being able to re-normalize without re-collecting (principle 2)     |
+| Invariant                                                  | Why                                                                                                               |
+| ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `company`, `title`, `source`, `sourceId` are non-empty     | The fingerprint is built from company and title; an empty component silently collapses distinct postings into one |
+| `fingerprint` is present and stable                        | Recomputing it must give the same value forever — it is the deduplication key and is persisted                    |
+| `collectedAt` is set by the collector, not by the database | Re-running a stage must not change when a posting was found                                                       |
+| `location` and `workMode` are separate fields              | They are different axes — see below                                                                               |
+| `location` is a resolved place or explicitly unknown       | Guessing a city to fill the field corrupts the location filter                                                    |
+| `firstSeenAt` is written once and never modified           | Re-collection must not overwrite it; the history is unrecoverable if it does (ADR-007 amendment)                  |
+| Raw source payload is retained                             | Schema archaeology in M3 and beyond depends on being able to re-normalize without re-collecting (principle 2)     |
+
+### `location` and `workMode` are different axes
+
+Collapsing them is the second most tempting simplification here, after collapsing
+`RawPosting` and `Posting`.
+
+A posting is _both_ somewhere and some way of working: "remote, company based in
+São Paulo" and "hybrid in Niterói" are two independent facts. Storing `remote` in
+`location` makes the second unrepresentable, and quietly breaks the location
+filter — which then rejects a remote posting from a São Paulo company that would
+have been perfectly viable.
+
+```
+location  → a place, or unknown
+workMode  → remote | hybrid | onsite | unknown
+```
+
+`unknown` is representable in both and is not the same as absent. A posting that
+does not say is a posting that does not say; the pre-filter treats that as a
+candidate for review rather than silently discarding or silently accepting it.
+
+### `seniority` is a field, not only a title pattern
+
+The pre-filter blocks by title keyword, which is cheap and catches most cases.
+But the title is not the requirement — "Analista de Sistemas" is sometimes an
+internship, and "Estágio" sometimes demands three years of experience.
+
+`seniority` and `experienceYears` are therefore fields on `Posting`, populated
+during extraction and visible to scoring, not only to the title blocklist. The
+title rule stays as the cheap first pass; the field is what the score sees.
+
+This matters for a decision already recorded: junior and entry-level roles are
+out of scope (`01-vision-and-scope.md`), and that exclusion is only trustworthy
+if seniority is something the system knows rather than something it
+pattern-matched on a string.
+
+### Two timestamps, two write rules
+
+| Field         | Written          | On re-collection   |
+| ------------- | ---------------- | ------------------ |
+| `firstSeenAt` | Once, on insert  | **Never modified** |
+| `lastSeenAt`  | Every collection | Overwritten        |
+
+The reasoning and the hazard are in the ADR-007 amendment. The short version:
+a naive upsert makes every posting look like it was found today, silently and
+irrecoverably.
 
 ### The fingerprint is a domain concept, not a database detail
 
@@ -112,6 +160,39 @@ A posting has three identifiers and they are not interchangeable:
 The same job posted to both Gupy and Indeed has **two** `sourceId` values and
 **one** `fingerprint`. Using `sourceId` as the dedup key would deliver that job
 twice, which fails success criterion 2 in `01-vision-and-scope.md`.
+
+## Resume variants
+
+The profile is the source of truth; the resume PDFs are projections of it. To
+answer question 3 — "how should I present my profile for this posting?" — those
+projections have to be modelled rather than left as files on a disk.
+
+A `ResumeVariant` is a **named subset of the profile**: an identifier, the tracks
+it emphasizes, and which competencies and evidence it foregrounds. It contains no
+prose. It is a view over the profile, not a second copy of it.
+
+That is the load-bearing property. A variant holding its own text would drift
+from the profile, and the system would recommend a resume whose claims no longer
+match the evidence the score was computed from.
+
+Recommending a variant is therefore a pure function over data that already
+exists: given the posting's matched requirements and its track, pick the variant
+whose emphasized tracks and competencies overlap most. No model call, no
+generated text, nothing invented.
+
+## The corpus is not a cache
+
+Every collected posting is retained, **including the ones the pre-filter
+rejected** and the ones scored `discard`.
+
+This is a storage decision that looks wasteful and is not. Question 2 — "what do
+I need to improve?" — is answered over the whole corpus. "Which companies hire
+most", "which regions have most openings", and "which technologies are most
+requested" are all questions about the market, not about the shortlist, and
+deleting rejected postings deletes most of the market.
+
+Rejection is recorded with its reason (above), so a rejected posting is a data
+point with an explanation rather than an absence.
 
 ## What is deliberately not modelled in v1
 

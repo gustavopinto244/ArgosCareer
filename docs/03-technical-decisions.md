@@ -19,6 +19,7 @@ revisited on its merits instead of re-argued from memory.
 | [005](adr/005-llm-does-not-produce-the-score.md)     | Keep score computation out of the LLM                        | Accepted | 2026-08-14 |
 | [006](adr/006-llm-output-failure-policy.md)          | Treat invalid LLM output as a normal outcome                 | Accepted | 2026-08-14 |
 | [007](adr/007-stage-re-execution-and-idempotency.md) | Make stages re-runnable through persisted state              | Accepted | 2026-08-14 |
+| [008](adr/008-n8n-as-pluggable-adapter.md)           | Use n8n as a pluggable adapter, never as the orchestrator    | Accepted | 2026-08-14 |
 
 ## When an ADR is required
 

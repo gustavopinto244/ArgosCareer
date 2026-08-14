@@ -33,6 +33,24 @@ master profile, and delivers a ranked digest to Telegram. Strictly personal use.
 architecture, LLM integration, persistence, scheduling and deployment on
 self-hosted infrastructure.
 
+### The three questions
+
+Long term, the system answers three questions automatically. Every module exists
+to answer one of them.
+
+|       | Question                                      | Answered by                                              | Status                 |
+| ----- | --------------------------------------------- | -------------------------------------------------------- | ---------------------- |
+| **1** | Which are the best postings for me right now? | Radar — collect, dedup, score, digest                    | v1, M1–M9              |
+| **2** | What do I need to improve?                    | Market intelligence and gap analysis over the corpus     | M10, after calibration |
+| **3** | How should I present my profile here?         | Resume-variant recommendation, highlights, missing terms | Output of M2 + M7      |
+
+The chain, in dependency order — each link needs the one before it:
+
+```
+Radar → Corpus → Scoring → History → Market analysis
+      → Gap analysis → Study plan → Resume recommendation
+```
+
 **Search profile:** back-end development **and** information security
 internships (both priority 1, equally); infrastructure/automation (priority 2).
 Rio de Janeiro and its metropolitan region, or remote.
@@ -41,13 +59,16 @@ Full detail: `docs/01-vision-and-scope.md`.
 
 ## 2. Non-goals — do not implement these, even when they look useful
 
-| Out of scope                  | Reason                                                        |
-| ----------------------------- | ------------------------------------------------------------- |
-| Automatic job application     | Ban risk; the bottleneck is finding the posting, not applying |
-| Per-posting resume generation | A project of its own, deferred to Phase 3                     |
-| Web interface                 | Telegram is the interface in v1                               |
-| Multi-user / SaaS             | Personal product; auth and LGPD compliance with no upside     |
-| Scraping at scale             | Not what this is for                                          |
+| Out of scope                         | Reason                                                           |
+| ------------------------------------ | ---------------------------------------------------------------- |
+| Automatic job application            | Ban risk; the bottleneck is finding the posting, not applying    |
+| Per-posting resume generation        | A project of its own, deferred to Phase 3                        |
+| Web interface                        | Telegram is the interface in v1                                  |
+| Junior / entry-level roles           | Reconsidered and kept out — see `docs/01`; revisit at period 4   |
+| **Generating** resume or letter text | Recommending which resume to use is in; writing prose is Phase 3 |
+| n8n as pipeline orchestrator         | Same error as a Hermes skill. ADR-008 places it correctly        |
+| Multi-user / SaaS                    | Personal product; auth and LGPD compliance with no upside        |
+| Scraping at scale                    | Not what this is for                                             |
 
 ## 3. Non-negotiable safety rule
 
@@ -94,6 +115,7 @@ paging during inference destroys latency.
 | **Gupy**                 | P0       | HTTP client in TS. Public JSON endpoint: `https://employability-portal.gupy.io/api/v1/jobs` (no auth) |
 | **Google Jobs / Indeed** | P1       | Ephemeral Python container (`--rm`) running `python-jobspy`; prints JSON and exits. Zero RAM at rest  |
 | **LinkedIn**             | P2       | Public visitor endpoints only — see §3                                                                |
+| **Long tail**            | P3       | n8n workflow behind `N8nCollector` (ADR-008). Never the orchestrator, never on the critical path      |
 
 **The Gupy response schema is unverified.** No request has been made from this
 repository. Before trusting the adapter, `npm run fixture:gupy` (M3) must hit the
@@ -309,18 +331,19 @@ about Brazilian postings. See ADR-003.
 
 ## 14. Milestones
 
-| #   | Milestone          | Delivers                                                                                           | Status      |
-| --- | ------------------ | -------------------------------------------------------------------------------------------------- | ----------- |
-| M0  | Bootstrap          | `CLAUDE.md`, `docs/`, `.gitignore`, CI, ADR template, README                                       | in progress |
-| M1  | Domain + stage C   | Entities, fingerprint, score computation, unit tests                                               |             |
-| M2  | Master profile     | Zod schema, loader, `profile.yaml`, period derivation                                              |             |
-| M3  | Gupy collector     | Adapter + `fixture:gupy` + schema fitted to the real response                                      |             |
-| M4  | Persistence        | Drizzle + SQLite, migrations, dedup, `runs` table                                                  |             |
-| M5  | Pre-filter         | Configurable deterministic rules                                                                   |             |
-| M6  | **Vertical slice** | Gupy → SQLite → Telegram with `StubScorer`. A real posting on the phone                            |             |
-| M7  | Real scoring       | Stages A and B, versioned prompts in `prompts/`, 50 labelled postings, calibration table in README |             |
-| M8  | Deployment         | Docker Compose on Atlas, scheduling, backup, broken-adapter alert                                  |             |
-| M9  | API + Hermes       | HTTP endpoints, MCP server, integration                                                            |             |
+| #   | Milestone           | Delivers                                                                                           | Status      |
+| --- | ------------------- | -------------------------------------------------------------------------------------------------- | ----------- |
+| M0  | Bootstrap           | `CLAUDE.md`, `docs/`, `.gitignore`, CI, ADR template, README                                       | in progress |
+| M1  | Domain + stage C    | Entities, fingerprint, score computation, unit tests                                               |             |
+| M2  | Master profile      | Zod schema, loader, `profile.yaml`, period derivation                                              |             |
+| M3  | Gupy collector      | Adapter + `fixture:gupy` + schema fitted to the real response                                      |             |
+| M4  | Persistence         | Drizzle + SQLite, migrations, dedup, `runs` table                                                  |             |
+| M5  | Pre-filter          | Configurable deterministic rules                                                                   |             |
+| M6  | **Vertical slice**  | Gupy → SQLite → Telegram with `StubScorer`. A real posting on the phone                            |             |
+| M7  | Real scoring        | Stages A and B, versioned prompts in `prompts/`, 50 labelled postings, calibration table in README |             |
+| M8  | Deployment          | Docker Compose on Atlas, scheduling, backup, broken-adapter alert                                  |             |
+| M9  | API + Hermes        | HTTP endpoints, MCP server, integration                                                            |             |
+| M10 | Market intelligence | Skill taxonomy, aggregate market analysis, gap analysis, study plan                                |             |
 
 P1/P2 sources (Google Jobs, Indeed, LinkedIn) come after M6, one per pull
 request.

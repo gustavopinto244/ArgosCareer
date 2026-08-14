@@ -9,6 +9,18 @@ be honest about what it can and cannot tell you.
 > **Status: M0 — bootstrap.** Documentation and CI are in place. No pipeline code
 > yet. Milestone table below.
 
+## What it answers
+
+|       | Question                                              | Status                          |
+| ----- | ----------------------------------------------------- | ------------------------------- |
+| **1** | Which are the best postings for me right now?         | v1                              |
+| **2** | What do I need to improve to be a better candidate?   | after calibration               |
+| **3** | How should I present my profile for this opportunity? | v1 — recommends, does not write |
+
+It starts as a job radar and grows into a career assistant driven by real market
+data: the same corpus that ranks postings is what later says which skills the
+market actually asks for, and which of them your profile cannot yet evidence.
+
 ## The problem
 
 Searching for an internship means opening the same job boards every few days,
@@ -114,6 +126,7 @@ See [ADR-001](docs/adr/001-nestjs-as-application-framework.md).
 | M7  | Real scoring — stages A and B, versioned prompts, calibration    |             |
 | M8  | Deployment — Docker Compose, scheduling, backup, alerting        |             |
 | M9  | HTTP API and MCP server                                          |             |
+| M10 | Market intelligence — skill taxonomy, gap analysis, study plan   |             |
 
 ## Documentation
 

@@ -21,7 +21,7 @@ Delivered in PRs #1 and #2, hardened in #3 and #4.
 
 - [x] `CLAUDE.md` answers what to build and what never to do, without the
       original prompt
-- [x] `docs/01`–`10`, ADR template, ADRs 001–007
+- [x] `docs/01`–`10`, ADR template, ADRs 001–008
 - [x] `.gitignore` excludes profile, database, `.env` and raw fixtures — from
       before any other file existed
 - [x] CI green on Node 22 and 24: lint, format, typecheck, test
@@ -55,6 +55,8 @@ Delivered in PRs #1 and #2, hardened in #3 and #4.
       0-indexed month bug would break: August 2026 → 2, March 2027 → 3
 - [ ] `⚠ VERIFY` fields present and visibly unanswered: English level, minimum
       stipend, maximum weekly hours
+- [ ] `resumeVariants` in the schema — named subsets of the profile, holding no
+      prose (`05-domain-model.md`)
 
 ## M3 — Gupy collector
 
@@ -73,6 +75,10 @@ Delivered in PRs #1 and #2, hardened in #3 and #4.
 
 - [ ] Drizzle + SQLite, migrations runnable forward from empty
 - [ ] Schema implementing the stage keys in ADR-007, writes as upserts
+- [ ] **`firstSeenAt` written once and never overwritten by re-collection**, with
+      a test asserting a second upsert leaves it unchanged and moves
+      `lastSeenAt` (ADR-007 amendment)
+- [ ] Rejected postings retained — the corpus is not a cache
 - [ ] `runs` table with per-stage counts
 - [ ] Deduplication: fingerprint layer, then same-company similarity layer
 - [ ] Each stage invocable independently from the CLI — the actual test of
@@ -85,6 +91,8 @@ Delivered in PRs #1 and #2, hardened in #3 and #4.
 - [ ] Every rule from `02-architecture.md`, each configurable in
       `config/criteria.yaml`
 - [ ] Deterministic track classification feeding `trackAlignment`
+- [ ] `location` and `workMode` filtered as separate axes, both allowing
+      `unknown` without silently discarding or accepting
 - [ ] Every rejection records a reason (`05-domain-model.md`)
 - [ ] **The ~70% cut estimate measured** against real collected volume, and
       `docs/02` updated with the real number
@@ -115,6 +123,10 @@ The milestone that proves the project is real.
 - [ ] Parse-failure rate measured per candidate model (ADR-006)
 - [ ] **Calibration table published in the README, including configurations that
       lost**
+- [ ] `seniority` and `experienceYears` extracted as fields, not inferred from
+      the title alone (`05-domain-model.md`)
+- [ ] `recommendedVariant`, `highlights` and `missingTerms` emitted — pure
+      functions over stage B output, no extra model call
 - [ ] Weights and thresholds updated from the results, or explicitly kept with a
       reason
 
@@ -127,6 +139,9 @@ The milestone that proves the project is real.
       and `docs/02` updated with the real figure
 - [ ] Database backup, and a restore actually rehearsed
 - [ ] Alerts from `08-observability.md` live, including consecutive-empty-source
+- [ ] **n8n's memory footprint measured** if adopted. If it does not fit
+      alongside the existing Atlas containers, ADR-008's inbound half is dropped
+      and the outbound half survives
 
 ## M9 — API and Hermes
 
@@ -135,7 +150,31 @@ The milestone that proves the project is real.
 - [ ] MCP server
 - [ ] Hermes consuming it — **with the Tuesday/Friday digest still working while
       Hermes is stopped**, which is the test of whether the boundary is real
+- [ ] n8n consuming the API for side effects — spreadsheet, reminders,
+      cross-post — never on the critical path (ADR-008)
 - [ ] ADR recording the API boundary
+
+## M10 — Market intelligence and gap analysis
+
+Answers question 2: _what do I need to improve?_ Deliberately **after M7**, so
+that "relevant postings" means something calibrated — aggregating over an
+uncalibrated score produces a study plan built on noise.
+
+- [ ] **Skill taxonomy**: canonical skill names with aliases, so `Postgres`,
+      `PostgreSQL` and `postgre` count as one. Global, not derived from the
+      profile — profile aliases would only count what is already known
+- [ ] Taxonomy applied retrospectively over stored stage A extractions, without
+      re-running extraction (ADR-007 makes this possible)
+- [ ] Aggregate queries over the corpus: most requested technologies, recurring
+      competencies, typical experience level, regions, companies hiring most,
+      work-mode distribution
+- [ ] **Gap analysis**: skills frequent in high-compatibility postings and weak
+      or absent in the profile, ranked by frequency — "PostgreSQL appears in 58%
+      of relevant postings"
+- [ ] Time series over `firstSeenAt`, answering how the market moved
+- [ ] Study plan ordered by measured demand, delivered to Telegram on request
+- [ ] Aggregates computed over the **whole corpus including rejected postings**
+      (`05-domain-model.md`)
 
 ## After M6 — additional sources
 
@@ -144,8 +183,27 @@ One per pull request, each meeting the M3 criteria:
 - [ ] Google Jobs / Indeed via ephemeral `--rm` Python container
 - [ ] LinkedIn, public visitor endpoints only — **never authenticated with a
       personal session or cookies** (`CLAUDE.md` §3)
+- [ ] `N8nCollector` behind `CollectorPort`, with one long-tail source proving
+      it (ADR-008). Workflow exported and committed to `n8n/`; core verified
+      unaffected with n8n stopped
+
+## Where question 3 lands
+
+"How should I present my profile?" is not a milestone of its own — it is output
+that falls out of work already planned:
+
+- **M2** adds `resumeVariants` to the profile schema
+- **M7** emits `recommendedVariant`, `highlights` and `missingTerms`
+- **M6/M7** render them in the digest entry
+
+Generating prose is Phase 3 and stays out.
 
 ## Out of v1
 
-Phase 2 feedback (what was applied to, what got a response) and Phase 3 resume
-tailoring. Recorded in `01-vision-and-scope.md` so they stay out.
+Phase 2 feedback (what was applied to, what got a response) and Phase 3
+generated communication — resume text, cover letters, recruiter messages.
+Recorded in `01-vision-and-scope.md` so they stay out.
+
+Junior and entry-level roles are also out, reconsidered and kept out; the
+reasoning and the two observable conditions for revisiting are in
+`01-vision-and-scope.md`.

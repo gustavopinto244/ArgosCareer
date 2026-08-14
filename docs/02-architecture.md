@@ -77,11 +77,11 @@ possible, and it is why stage C contains no LLM call at all.
 
 Three, all defined in the domain layer, all implemented in infrastructure:
 
-| Port            | Contract                                                       | Adapters                                                                         |
-| --------------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `CollectorPort` | `collect(criteria): Promise<CollectionResult>` — never rejects | `GupyCollector` (M3), `JobSpyCollector` (post-M6), `LinkedInCollector` (post-M6) |
-| `ScorerPort`    | `score(posting, profile): Promise<ScoreResult>`                | `StubScorer` (M1), `ApiScorer` (M7), `OllamaScorer` (M7)                         |
-| `NotifierPort`  | `notify(digest): Promise<void>`                                | `TelegramNotifier` (M6)                                                          |
+| Port            | Contract                                                       | Adapters                                                                                                                         |
+| --------------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `CollectorPort` | `collect(criteria): Promise<CollectionResult>` — never rejects | `GupyCollector` (M3), `JobSpyCollector` (post-M6), `LinkedInCollector` (post-M6), `N8nCollector` for long-tail sources (ADR-008) |
+| `ScorerPort`    | `score(posting, profile): Promise<ScoreResult>`                | `StubScorer` (M1), `ApiScorer` (M7), `OllamaScorer` (M7)                                                                         |
+| `NotifierPort`  | `notify(digest): Promise<void>`                                | `TelegramNotifier` (M6)                                                                                                          |
 
 NestJS's DI container is what makes this cheap: a port is an injection token, an
 adapter is a provider, and swapping them is a module change. That is the reason
@@ -227,6 +227,44 @@ Digest text is pt-BR (ADR-003). Sections:
 Section 4 is what makes principle 1 honest: a source that failed is visible in
 the digest rather than silently absent.
 
+### Per-posting message
+
+Each entry carries enough to decide **without opening the posting** — that is the
+whole point of the under-10-minutes goal:
+
+```
+Empresa: Empresa X
+Cargo: Estágio em Desenvolvimento Backend
+Compatibilidade: 84% · candidatar
+Local: Rio de Janeiro · Remoto
+Fonte: Gupy
+Requisitos: Node.js, TypeScript, PostgreSQL, Docker
+
+Pontos fortes: TypeScript, APIs REST e PostgreSQL têm evidência no perfil.
+Lacunas: Docker aparece como requisito e está pouco representado.
+Currículo recomendado: Backend
+Sugestão: destacar o Atlas Manager e experiências com APIs e infraestrutura.
+
+→ <link para a vaga original>
+```
+
+Every line is derived, not written by a model:
+
+| Line                  | Comes from                                               |
+| --------------------- | -------------------------------------------------------- |
+| Compatibilidade       | Stage C score and verdict                                |
+| Pontos fortes         | Matches with status `met`, and their evidence            |
+| Lacunas               | `criticalGaps` and `missingTerms`                        |
+| Currículo recomendado | Variant overlap — a pure function (`05-domain-model.md`) |
+| Sugestão              | Emphasis rules over evidence already in the profile      |
+
+**Nothing here is generated prose.** Producing resume text, cover letters or
+recruiter messages is Phase 3 and out of v1 (`01-vision-and-scope.md`). The
+digest selects and ranks what already exists.
+
+The original posting link is mandatory on every entry. A digest that cannot be
+acted on immediately is a digest that gets postponed.
+
 ## Hermes boundary
 
 ArgosCareer exposes a stable HTTP API, and later an MCP server (M9). Hermes Agent
@@ -253,8 +291,15 @@ cloudflared and two Docker containers.
 | Ollama peaks ~3.2 GB             | **`OLLAMA_KEEP_ALIVE=0`** so the model unloads at end of batch                     |
 | Swap is an OOM net, not headroom | Paging during inference destroys latency; a plan that relies on swap is not a plan |
 | P1 sources                       | Ephemeral Python container (`--rm`), prints JSON and exits — zero RAM at rest      |
+| n8n, if adopted (ADR-008)        | **Unmeasured footprint**, plausibly larger than the whole application budget       |
 
 Docker Compose, M8.
+
+The n8n line is the one to watch. It sits outside the ArgosCareer budget as a
+separate container, and if it does not fit alongside `atlas-manager`, Nginx,
+cloudflared and the existing containers, ADR-008's inbound half is dropped and
+the outbound half — which can run anywhere — survives. Measured in M8, not
+assumed now.
 
 ## Collector etiquette
 

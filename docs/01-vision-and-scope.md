@@ -11,6 +11,21 @@ it is invisible until a posting closes.
 The bottleneck is **finding and triaging** postings, not applying to them. That
 framing decides most of the scope below.
 
+## The three questions
+
+In the long run the system answers three questions automatically. They are the
+spine of the roadmap, and every module exists to answer one of them.
+
+|       | Question                                                       | Answered by                                                      |
+| ----- | -------------------------------------------------------------- | ---------------------------------------------------------------- |
+| **1** | Which are the best postings for me right now?                  | Radar — collect, dedup, score, digest                            |
+| **2** | What do I need to improve to become a better candidate?        | Market intelligence and gap analysis over the accumulated corpus |
+| **3** | How should I present my profile for this specific opportunity? | Resume recommendation and keyword gaps                           |
+
+Question 1 is v1. Questions 2 and 3 are what the stored data makes possible, and
+they are the reason the database is a **corpus**, not a cache — see
+_Evolution_ below.
+
 ## Goals
 
 **Primary — cut weekly triage time to under 10 minutes.**
@@ -48,18 +63,56 @@ Track membership drives the `trackAlignment` term in the score
 master profile. The equal priority is expressed as `dev` and `security` sharing
 the same weight, not as a special case in the formula.
 
+**Internship only — junior and entry-level roles are deliberately out.** This was
+reconsidered when the product vision was expanded and kept as it was. The reason
+to widen would be a bigger funnel; the reasons not to, which won:
+
+- The primary goal is _less_ time triaging. Doubling the funnel to surface roles
+  that mostly will not hire someone in their second period works against it.
+- Junior postings expect delivered professional experience. Scoring them against
+  a profile that has none produces a stream of 40s — noise that makes the digest
+  worse, not richer.
+- Nothing is lost permanently. The corpus keeps every collected posting including
+  rejected ones, so widening later is a filter change plus a re-run, not a
+  re-collection.
+
+Revisit when the academic period reaches 4, or when the digest is consistently
+short. Both are observable, not guesses.
+
 ## Non-goals
 
 Each of these looks useful and is deliberately excluded. Reopening one requires
 an ADR, not a preference.
 
-| Out of scope                  | Reason                                                                                                         |
-| ----------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| Automatic job application     | Ban risk on the platforms that matter, and it optimizes the wrong step — the bottleneck is finding the posting |
-| Per-posting resume generation | A meaningful project on its own; deferred to Phase 3 so it does not swallow v1                                 |
-| Web interface                 | Telegram is the interface in v1. A UI is where this kind of project quietly dies                               |
-| Multi-user / SaaS             | Personal product. Auth, tenancy and LGPD compliance with no upside                                             |
-| Scraping at scale             | Not what this is for, and directly at odds with the polite-collector rules                                     |
+| Out of scope                         | Reason                                                                                                         |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| Automatic job application            | Ban risk on the platforms that matter, and it optimizes the wrong step — the bottleneck is finding the posting |
+| **Generating** resume or letter text | See the distinction below. Recommending is in; writing is Phase 3                                              |
+| Junior / entry-level roles           | Reasoned above under _Search profile_                                                                          |
+| Web interface                        | Telegram is the interface in v1. A UI is where this kind of project quietly dies                               |
+| Multi-user / SaaS                    | Personal product. Auth, tenancy and LGPD compliance with no upside                                             |
+| Scraping at scale                    | Not what this is for, and directly at odds with the polite-collector rules                                     |
+| n8n as pipeline orchestrator         | The core would become third-party configuration. ADR-008 places it where it belongs instead                    |
+
+### Recommending a resume vs. generating one
+
+These look like one feature and are not. The line matters enough to draw it here.
+
+**In scope (question 3):** given a posting, say **which existing resume version
+fits best**, which experiences to foreground, and which posting terms are absent
+from the profile. This is almost free — it reuses `missingTerms` and
+`trackAlignment`, which the scoring model already produces. Nothing is written;
+material that already exists is selected and ranked.
+
+**Out of scope (Phase 3):** producing resume prose, cover letters, recruiter
+messages or application-form answers. That is a module with its own failure mode
+— a model writing about your experience will eventually write something you did
+not do, and the cost of that lands in an interview.
+
+The governing rule for both, now and later: **never invent experience or
+competence.** The system rearranges emphasis on what is already in the profile.
+That rule is why the scoring model demands a verbatim evidence quote, and it
+extends unchanged to anything Phase 3 adds.
 
 ## Success criteria
 
@@ -128,12 +181,44 @@ hires interns and when its bar becomes reachable is planning information.
 
 Derivation rule and its off-by-one trap: `docs/02-architecture.md`.
 
-## Phases beyond v1
+## Evolution
+
+The system is built as a radar and grows into a data-driven career assistant. The
+chain, in dependency order:
+
+```
+Radar → Opportunity corpus → Compatibility scoring → History
+      → Market analysis → Gap analysis → Study plan
+      → Resume recommendation → Personalized communication
+```
+
+Each link needs the one before it, which is why the order is not negotiable: gap
+analysis over an uncalibrated score would produce a study plan built on noise.
+
+**What this requires from the start**, even though the later links are far off:
+
+- **The database is a corpus, not a cache.** Every collected posting is retained,
+  including the ones the pre-filter rejected — "which companies hire most" and
+  "which regions have most openings" need everything, not just what survived
+  filtering.
+- **Postings carry `firstSeenAt` and `lastSeenAt`.** Market evolution over time is
+  unanswerable without them, and they cannot be reconstructed after the fact.
+- **New sources plug in without touching the core.** `CollectorPort` plus, for
+  long-tail sources, ADR-008.
+
+Question 2 depends on one thing that does not exist yet and is not free: a
+**global skill taxonomy**. "PostgreSQL appears in 58% of relevant postings" only
+holds if `Postgres`, `PostgreSQL` and `postgre` collapse into one canonical
+term. The profile's per-competency `aliases` are the wrong tool — they describe
+_this_ profile, so counting with them measures only what is already known. The
+taxonomy is built in M10, over the accumulated corpus.
+
+### Phases beyond v1
 
 Recorded so they stay out of v1, not as commitments.
 
 - **Phase 2 — Feedback.** Record what was applied to and what got a response, and
   feed that back into weighting.
-- **Phase 3 — Resume tailoring.** Use `missingTerms` to propose per-posting
-  resume adjustments. Possibly a Next.js dashboard, reconsidered on its merits at
-  that point.
+- **Phase 3 — Generated communication.** Resume prose, cover letters, recruiter
+  messages, application-form answers. Possibly a dashboard, reconsidered on its
+  merits at that point rather than assumed now.
