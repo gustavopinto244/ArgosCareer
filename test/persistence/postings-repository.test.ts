@@ -157,3 +157,46 @@ describe("PostingsRepository — nothing is ever deleted", () => {
     expect(repository.findByFingerprint(b.posting.fingerprint)).not.toBeNull();
   });
 });
+
+describe("PostingsRepository.findUnnotified / markNotified", () => {
+  it("includes a freshly upserted posting", () => {
+    repository.upsert(posting());
+    expect(repository.findUnnotified()).toHaveLength(1);
+  });
+
+  it("excludes a posting once markNotified has run — never notified twice", () => {
+    const { posting: stored } = repository.upsert(posting());
+    repository.markNotified(stored.fingerprint, new Date());
+
+    expect(repository.findUnnotified()).toHaveLength(0);
+    expect(
+      repository
+        .findUnnotified()
+        .find((p) => p.fingerprint === stored.fingerprint),
+    ).toBeUndefined();
+  });
+
+  it("re-upserting a notified posting does not un-notify it", () => {
+    const { posting: stored } = repository.upsert(posting());
+    repository.markNotified(
+      stored.fingerprint,
+      new Date("2026-08-10T00:00:00Z"),
+    );
+
+    repository.upsert(posting({ workMode: "remote" }));
+
+    expect(repository.findUnnotified()).toHaveLength(0);
+  });
+
+  it("excludes a posting already flagged as a duplicate, even if unnotified", () => {
+    const a = repository.upsert(posting({ sourceId: "1" }));
+    const b = repository.upsert(
+      posting({ sourceId: "2", title: "Estágio Frontend" }),
+    );
+    repository.markDuplicate(b.posting.fingerprint, a.posting.fingerprint);
+
+    const unnotified = repository.findUnnotified();
+    expect(unnotified).toHaveLength(1);
+    expect(unnotified[0]?.fingerprint).toBe(a.posting.fingerprint);
+  });
+});
