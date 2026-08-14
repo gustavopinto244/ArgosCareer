@@ -7,8 +7,8 @@ import { Requirement } from "../domain/types";
  * string — a wording change means a new file (`a-v2`), so the version and
  * the content it names can never drift apart (see `prompts/*.v1.md`'s note).
  */
-export const STAGE_A_PROMPT_VERSION = "a-v1";
-export const STAGE_A_PROMPT_PATH = "./prompts/stage-a-extraction.v1.md";
+export const STAGE_A_PROMPT_VERSION = "a-v2";
+export const STAGE_A_PROMPT_PATH = "./prompts/stage-a-extraction.v2.md";
 
 export const STAGE_B_PROMPT_VERSION = "b-v1";
 export const STAGE_B_PROMPT_PATH = "./prompts/stage-b-matching.v1.md";

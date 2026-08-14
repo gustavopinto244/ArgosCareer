@@ -47,44 +47,68 @@ function posting() {
 describe("StageAExtractor.extract", () => {
   it("calls the model and caches the result on a cache miss", async () => {
     const ask = vi.fn(async () =>
-      JSON.stringify([
-        { text: "Node.js", category: "language", weight: "mandatory" },
-      ]),
+      JSON.stringify({
+        requirements: [
+          { text: "Node.js", category: "language", weight: "mandatory" },
+        ],
+        seniority: "internship",
+        experienceYears: null,
+      }),
     );
     const extractor = new StageAExtractor(ask, extractionsRepo);
 
     const result = await extractor.extract(posting(), () => NOW);
 
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.requirements).toEqual([
+    expect(result).toEqual({
+      ok: true,
+      requirements: [
         { text: "Node.js", category: "language", weight: "mandatory" },
-      ]);
-    }
+      ],
+      seniority: "internship",
+      experienceYears: null,
+    });
     expect(ask).toHaveBeenCalledTimes(1);
-    expect(extractionsRepo.find(posting().fingerprint, "a-v1")).toEqual([
-      { text: "Node.js", category: "language", weight: "mandatory" },
-    ]);
+    expect(extractionsRepo.find(posting().fingerprint, "a-v2")).toEqual({
+      requirements: [
+        { text: "Node.js", category: "language", weight: "mandatory" },
+      ],
+      seniority: "internship",
+      experienceYears: null,
+    });
   });
 
   it("never calls the model on a cache hit", async () => {
     extractionsRepo.upsert(
       posting().fingerprint,
-      "a-v1",
-      [{ text: "SQL", category: "database", weight: "desirable" }],
+      "a-v2",
+      {
+        requirements: [
+          { text: "SQL", category: "database", weight: "desirable" },
+        ],
+        seniority: "trainee",
+        experienceYears: 1,
+      },
       NOW,
     );
-    const ask = vi.fn(async () => "[]");
+    const ask = vi.fn(async () =>
+      JSON.stringify({
+        requirements: [],
+        seniority: null,
+        experienceYears: null,
+      }),
+    );
     const extractor = new StageAExtractor(ask, extractionsRepo);
 
     const result = await extractor.extract(posting(), () => NOW);
 
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.requirements).toEqual([
+    expect(result).toEqual({
+      ok: true,
+      requirements: [
         { text: "SQL", category: "database", weight: "desirable" },
-      ]);
-    }
+      ],
+      seniority: "trainee",
+      experienceYears: 1,
+    });
     expect(ask).not.toHaveBeenCalled();
   });
 
@@ -102,11 +126,38 @@ describe("StageAExtractor.extract", () => {
   });
 
   it("passes an empty array through as a valid extraction — a vague posting is not a failure", async () => {
-    const ask = vi.fn(async () => "[]");
+    const ask = vi.fn(async () =>
+      JSON.stringify({
+        requirements: [],
+        seniority: null,
+        experienceYears: null,
+      }),
+    );
     const extractor = new StageAExtractor(ask, extractionsRepo);
 
     const result = await extractor.extract(posting(), () => NOW);
 
-    expect(result).toEqual({ ok: true, requirements: [] });
+    expect(result).toEqual({
+      ok: true,
+      requirements: [],
+      seniority: null,
+      experienceYears: null,
+    });
+  });
+
+  it("rejects an invented seniority value, treating it like any other schema failure", async () => {
+    const ask = vi.fn(
+      async () =>
+        '{"requirements":[],"seniority":"principal","experienceYears":null}',
+    );
+    const extractor = new StageAExtractor(ask, extractionsRepo);
+
+    const result = await extractor.extract(posting(), () => NOW);
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "extraction_failed",
+      attempts: 3,
+    });
   });
 });

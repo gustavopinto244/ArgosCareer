@@ -367,6 +367,7 @@ async function deliverCommand(): Promise<void> {
       new StageBMatcher(ask, new MatchesRepository(db)),
       profile,
       criteria,
+      new PostingsRepository(db),
     );
   } else {
     console.error(

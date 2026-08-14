@@ -6,8 +6,10 @@ import {
   createDatabase,
   runMigrations,
 } from "../../src/persistence/infrastructure/db";
-import { ExtractionsRepository } from "../../src/persistence/infrastructure/extractions-repository";
-import { Requirement } from "../../src/scoring/domain/types";
+import {
+  ExtractionRecord,
+  ExtractionsRepository,
+} from "../../src/persistence/infrastructure/extractions-repository";
 
 let dir: string;
 let repository: ExtractionsRepository;
@@ -23,11 +25,16 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-function requirements(): Requirement[] {
-  return [
-    { text: "Node.js experience", category: "language", weight: "mandatory" },
-    { text: "SQL", category: "database", weight: "desirable" },
-  ];
+function record(overrides: Partial<ExtractionRecord> = {}): ExtractionRecord {
+  return {
+    requirements: [
+      { text: "Node.js experience", category: "language", weight: "mandatory" },
+      { text: "SQL", category: "database", weight: "desirable" },
+    ],
+    seniority: null,
+    experienceYears: null,
+    ...overrides,
+  };
 }
 
 describe("ExtractionsRepository", () => {
@@ -35,23 +42,35 @@ describe("ExtractionsRepository", () => {
     expect(repository.find("fp1", "a-v1")).toBeNull();
   });
 
-  it("stores and retrieves requirements for a (fingerprint, promptVersion) key", () => {
-    repository.upsert("fp1", "a-v1", requirements(), new Date());
-    expect(repository.find("fp1", "a-v1")).toEqual(requirements());
+  it("stores and retrieves a full extraction record for a (fingerprint, promptVersion) key", () => {
+    repository.upsert("fp1", "a-v1", record(), new Date());
+    expect(repository.find("fp1", "a-v1")).toEqual(record());
+  });
+
+  it("stores seniority and experienceYears alongside requirements", () => {
+    repository.upsert(
+      "fp1",
+      "a-v1",
+      record({ seniority: "internship", experienceYears: 0 }),
+      new Date(),
+    );
+    const found = repository.find("fp1", "a-v1");
+    expect(found?.seniority).toBe("internship");
+    expect(found?.experienceYears).toBe(0);
   });
 
   it("keeps results for different prompt versions of the same posting independent", () => {
-    repository.upsert("fp1", "a-v1", requirements(), new Date());
-    repository.upsert("fp1", "a-v2", [], new Date());
+    repository.upsert("fp1", "a-v1", record(), new Date());
+    repository.upsert("fp1", "a-v2", record({ requirements: [] }), new Date());
 
-    expect(repository.find("fp1", "a-v1")).toEqual(requirements());
-    expect(repository.find("fp1", "a-v2")).toEqual([]);
+    expect(repository.find("fp1", "a-v1")).toEqual(record());
+    expect(repository.find("fp1", "a-v2")?.requirements).toEqual([]);
   });
 
   it("upserting the same (fingerprint, promptVersion) key overwrites, not duplicates", () => {
-    repository.upsert("fp1", "a-v1", requirements(), new Date());
-    repository.upsert("fp1", "a-v1", [], new Date());
+    repository.upsert("fp1", "a-v1", record(), new Date());
+    repository.upsert("fp1", "a-v1", record({ requirements: [] }), new Date());
 
-    expect(repository.find("fp1", "a-v1")).toEqual([]);
+    expect(repository.find("fp1", "a-v1")?.requirements).toEqual([]);
   });
 });

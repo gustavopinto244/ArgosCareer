@@ -1,6 +1,7 @@
 import { classifyTrack } from "../../prefilter/domain/classify-track";
 import { Criteria } from "../../prefilter/domain/criteria";
 import { Posting } from "../../posting/domain/posting";
+import { PostingsRepository } from "../../persistence/infrastructure/postings-repository";
 import { computeScore } from "../domain/score";
 import { ScorerPort, ScoreResult } from "../domain/ports/scorer.port";
 import { StageAExtractor } from "./stage-a-extractor";
@@ -25,6 +26,7 @@ export class ApiScorer implements ScorerPort {
     private readonly matcher: StageBMatcher,
     private readonly profile: Profile,
     private readonly criteria: Criteria,
+    private readonly postingsRepo: PostingsRepository,
   ) {}
 
   async score(posting: Posting, profileHash: string): Promise<ScoreResult> {
@@ -38,6 +40,14 @@ export class ApiScorer implements ScorerPort {
         attempts: extraction.attempts,
       };
     }
+
+    // Written back regardless of cache hit/miss — a cache hit still carries
+    // the seniority/experienceYears extracted the first time (05-domain-model.md).
+    this.postingsRepo.updateExtractedFields(
+      posting.fingerprint,
+      extraction.seniority,
+      extraction.experienceYears,
+    );
 
     const matching = await this.matcher.match(
       posting.fingerprint,

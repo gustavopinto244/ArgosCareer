@@ -43,6 +43,13 @@
       "when": 1786748583133,
       "tag": "0005_zippy_red_hulk",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1786749565478,
+      "tag": "0006_rapid_rawhide_kid",
+      "breakpoints": true
     }
   ]
 }

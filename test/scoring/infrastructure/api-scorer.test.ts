@@ -10,6 +10,7 @@ import {
 } from "../../../src/persistence/infrastructure/db";
 import { ExtractionsRepository } from "../../../src/persistence/infrastructure/extractions-repository";
 import { MatchesRepository } from "../../../src/persistence/infrastructure/matches-repository";
+import { PostingsRepository } from "../../../src/persistence/infrastructure/postings-repository";
 import { Criteria } from "../../../src/prefilter/domain/criteria";
 import { Profile } from "../../../src/profile/domain/profile";
 import { ApiScorer } from "../../../src/scoring/infrastructure/api-scorer";
@@ -20,6 +21,7 @@ let dir: string;
 let db: Db;
 let extractionsRepo: ExtractionsRepository;
 let matchesRepo: MatchesRepository;
+let postingsRepo: PostingsRepository;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "argos-api-scorer-"));
@@ -27,6 +29,7 @@ beforeEach(() => {
   runMigrations(db);
   extractionsRepo = new ExtractionsRepository(db);
   matchesRepo = new MatchesRepository(db);
+  postingsRepo = new PostingsRepository(db);
 });
 
 afterEach(() => {
@@ -90,23 +93,32 @@ function profile(): Profile {
   };
 }
 
+function extractionResponse(): string {
+  return JSON.stringify({
+    requirements: [
+      { text: "Node.js", category: "language", weight: "mandatory" },
+    ],
+    seniority: "internship",
+    experienceYears: null,
+  });
+}
+
+function buildScorer(ask: (prompt: string) => Promise<string>): ApiScorer {
+  const extractor = new StageAExtractor(ask, extractionsRepo);
+  const matcher = new StageBMatcher(ask, matchesRepo);
+  return new ApiScorer(extractor, matcher, profile(), criteria(), postingsRepo);
+}
+
 describe("ApiScorer.score", () => {
   it("runs extraction then matching then stage C, and classifies the track deterministically", async () => {
     const ask = vi
       .fn()
-      .mockResolvedValueOnce(
-        JSON.stringify([
-          { text: "Node.js", category: "language", weight: "mandatory" },
-        ]),
-      )
+      .mockResolvedValueOnce(extractionResponse())
       .mockResolvedValueOnce(
         '{"status":"met","evidence":"Built a Node.js service."}',
       );
 
-    const extractor = new StageAExtractor(ask, extractionsRepo);
-    const matcher = new StageBMatcher(ask, matchesRepo);
-    const scorer = new ApiScorer(extractor, matcher, profile(), criteria());
-
+    const scorer = buildScorer(ask);
     const result = await scorer.score(posting(), "profile-hash-1");
 
     expect(result.ok).toBe(true);
@@ -117,14 +129,28 @@ describe("ApiScorer.score", () => {
     }
   });
 
+  it("writes the extracted seniority and experienceYears back onto the posting row", async () => {
+    postingsRepo.upsert(posting());
+    const ask = vi
+      .fn()
+      .mockResolvedValueOnce(extractionResponse())
+      .mockResolvedValueOnce(
+        '{"status":"met","evidence":"Built a Node.js service."}',
+      );
+
+    const scorer = buildScorer(ask);
+    await scorer.score(posting(), "profile-hash-1");
+
+    const stored = postingsRepo.findByFingerprint(posting().fingerprint);
+    expect(stored?.seniority).toBe("internship");
+    expect(stored?.experienceYears).toBeNull();
+  });
+
   it("returns ok:false with the extraction failure reason without calling the matcher", async () => {
     const ask = vi.fn(async () => "not json");
     const matchSpy = vi.spyOn(StageBMatcher.prototype, "match");
 
-    const extractor = new StageAExtractor(ask, extractionsRepo);
-    const matcher = new StageBMatcher(ask, matchesRepo);
-    const scorer = new ApiScorer(extractor, matcher, profile(), criteria());
-
+    const scorer = buildScorer(ask);
     const result = await scorer.score(posting(), "profile-hash-1");
 
     expect(result).toEqual({
@@ -139,17 +165,10 @@ describe("ApiScorer.score", () => {
   it("returns ok:false with the matching failure reason", async () => {
     const ask = vi
       .fn()
-      .mockResolvedValueOnce(
-        JSON.stringify([
-          { text: "Node.js", category: "language", weight: "mandatory" },
-        ]),
-      )
+      .mockResolvedValueOnce(extractionResponse())
       .mockResolvedValue("not json");
 
-    const extractor = new StageAExtractor(ask, extractionsRepo);
-    const matcher = new StageBMatcher(ask, matchesRepo);
-    const scorer = new ApiScorer(extractor, matcher, profile(), criteria());
-
+    const scorer = buildScorer(ask);
     const result = await scorer.score(posting(), "profile-hash-1");
 
     expect(result).toEqual({
@@ -160,11 +179,11 @@ describe("ApiScorer.score", () => {
   });
 
   it("caps the verdict at review with lowConfidence when extraction returns nothing", async () => {
-    const ask = vi.fn(async () => "[]");
-    const extractor = new StageAExtractor(ask, extractionsRepo);
-    const matcher = new StageBMatcher(ask, matchesRepo);
-    const scorer = new ApiScorer(extractor, matcher, profile(), criteria());
+    const ask = vi.fn(
+      async () => '{"requirements":[],"seniority":null,"experienceYears":null}',
+    );
 
+    const scorer = buildScorer(ask);
     const result = await scorer.score(posting(), "profile-hash-1");
 
     expect(result.ok).toBe(true);
