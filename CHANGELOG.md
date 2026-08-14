@@ -13,6 +13,44 @@ version to attach it to.
 
 ## [Unreleased]
 
+### Added — M2, master profile
+
+- `ProfileSchema` (`src/profile/domain/profile.ts`) for `config/profile.yaml`:
+  competencies with mandatory evidence (min 1, enforced in the schema), a
+  `resumeVariants` array of named subsets of the profile holding no prose —
+  an id, emphasized tracks, and competency references by name rather than
+  duplicated text. Cross-field integrity enforced with `superRefine`:
+  duplicate competency names, duplicate variant ids, and a variant
+  referencing a competency that does not exist are all rejected with the
+  exact field path attached.
+- `loadProfile` (`src/profile/infrastructure/profile-loader.ts`) reads,
+  parses and validates the file synchronously at startup, and names the file
+  path on every failure — an unreadable file, malformed YAML, or a schema
+  violation naming the exact field via `ProfileValidationError`.
+- `computeAcademicPeriod` (`src/profile/domain/academic-period.ts`), counting
+  semester boundaries per `docs/02-architecture.md`, with both mandated
+  checkpoints pinned in tests (August 2026 → 2, March 2027 → 3).
+- `config/profile.example.yaml` — fictional, structurally complete, committed
+  per ADR-004, guarded by a test asserting it stays valid against the schema
+  as it evolves.
+- The real `config/profile.yaml` — gitignored, verified `git add` refuses it
+  both before and after writing real content. 22 competencies, including the
+  `atlas-manager` evidence CLAUDE.md §9 lists as absent from both resume
+  PDFs. Two resume variants matching the two real resumes, not a third one
+  invented for symmetry. `englishLevel`, `minimumStipend` and
+  `maxWeeklyHours` carry the `⚠ VERIFY` placeholder, genuinely unanswered.
+
+### Fixed — timezone-dependent academic period
+
+- `computeAcademicPeriod`'s first implementation used `Date#getMonth()` and
+  `Date#getFullYear()`, which read the process's local timezone. The mandated
+  July-boundary regression test failed under this sandbox's
+  America/Sao_Paulo clock: the same course-start date would silently compute
+  a different period depending on whether the deploying process runs as
+  America/Sao_Paulo or as UTC — the default in most Docker base images, and
+  M8 deploys this in a container. Switched to the UTC getters; verified
+  identical results under both America/Sao_Paulo and `TZ=UTC`.
+
 ### Added — M1, domain and stage C
 
 - `Posting` and `RawPosting` as distinct types (`src/posting/domain/`), with
