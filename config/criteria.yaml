@@ -41,9 +41,18 @@ location:
 
 blockedCompanies: []
 
-# Minimum count of profile keywords that must appear in a posting's title and
-# description before it is worth stage A/B's LLM budget.
-minKeywordAdherence: 1
+# Minimum count of profile keywords that must appear in a posting's title
+# (Posting has no description field yet — the check is title-only today,
+# see src/prefilter/domain/pre-filter.ts) before it is worth stage A/B's LLM
+# budget.
+#
+# Set to 0 after a real Gupy run (2026-08-14) showed this rejecting real,
+# on-track postings — e.g. "Estágio em Desenvolvimento Backend" (remote,
+# track dev) — because a short title rarely repeats a specific competency
+# name like "Node.js" or "TypeScript" verbatim. Revisit once Posting carries
+# a description stage A can read, or once track classification alone proves
+# too coarse a signal.
+minKeywordAdherence: 0
 
 # Keyword classification per track, feeding trackAlignment (docs/04). A
 # posting matching a track's list is classified into it; matching none

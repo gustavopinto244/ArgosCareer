@@ -117,19 +117,19 @@ See [ADR-001](docs/adr/001-nestjs-as-application-framework.md).
 
 ## Milestones
 
-| #   | Milestone                                                        | Status      |
-| --- | ---------------------------------------------------------------- | ----------- |
-| M0  | Bootstrap — docs, CI, ADR practice, repository hygiene           | in progress |
-| M1  | Domain entities, fingerprint, score computation (stage C)        |             |
-| M2  | Master profile — Zod schema, loader, academic-period derivation  |             |
-| M3  | Gupy collector with tolerant schema + fixture capture script     |             |
-| M4  | Persistence — Drizzle + SQLite, migrations, dedup                |             |
-| M5  | Deterministic pre-filter                                         |             |
-| M6  | **Vertical slice** — Gupy → SQLite → Telegram with a stub scorer |             |
-| M7  | Real scoring — stages A and B, versioned prompts, calibration    |             |
-| M8  | Deployment — Docker Compose, scheduling, backup, alerting        |             |
-| M9  | HTTP API and MCP server                                          |             |
-| M10 | Market intelligence — skill taxonomy, gap analysis, study plan   |             |
+| #   | Milestone                                                        | Status |
+| --- | ---------------------------------------------------------------- | ------ |
+| M0  | Bootstrap — docs, CI, ADR practice, repository hygiene           | done   |
+| M1  | Domain entities, fingerprint, score computation (stage C)        | done   |
+| M2  | Master profile — Zod schema, loader, academic-period derivation  | done   |
+| M3  | Gupy collector with tolerant schema + fixture capture script     | done   |
+| M4  | Persistence — Drizzle + SQLite, migrations, dedup                | done   |
+| M5  | Deterministic pre-filter                                         | done   |
+| M6  | **Vertical slice** — Gupy → SQLite → Telegram with a stub scorer | done   |
+| M7  | Real scoring — stages A and B, versioned prompts, calibration    |        |
+| M8  | Deployment — Docker Compose, scheduling, backup, alerting        |        |
+| M9  | HTTP API and MCP server                                          |        |
+| M10 | Market intelligence — skill taxonomy, gap analysis, study plan   |        |
 
 ## Documentation
 
