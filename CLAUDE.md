@@ -7,6 +7,15 @@ if this file is wrong, fix it in the same pull request that proves it wrong.
 
 Deeper material lives in `docs/`. This file is the map.
 
+| Document                         | Read it when                                                 |
+| -------------------------------- | ------------------------------------------------------------ |
+| `docs/01-vision-and-scope.md`    | Deciding whether something is in scope                       |
+| `docs/02-architecture.md`        | Adding a stage, a port or an adapter                         |
+| `docs/03-technical-decisions.md` | Writing an ADR, or wondering why something is the way it is  |
+| `docs/04-scoring-model.md`       | Touching anything that produces a score                      |
+| `docs/05-domain-model.md`        | Defining or changing an entity, or crossing a stage boundary |
+| `docs/06-glossary.md`            | Naming something, or writing digest text                     |
+
 ---
 
 ## 1. What this is
@@ -20,9 +29,9 @@ master profile, and delivers a ranked digest to Telegram. Strictly personal use.
 architecture, LLM integration, persistence, scheduling and deployment on
 self-hosted infrastructure.
 
-**Search profile:** back-end development internships (priority 1); information
-security and infrastructure/automation (priority 2). Rio de Janeiro and its
-metropolitan region, or remote.
+**Search profile:** back-end development **and** information security
+internships (both priority 1, equally); infrastructure/automation (priority 2).
+Rio de Janeiro and its metropolitan region, or remote.
 
 Full detail: `docs/01-vision-and-scope.md`.
 
@@ -47,7 +56,8 @@ LinkedIn is P2 and public visitor endpoints only.
 
 ## 4. Stack — decided, do not reopen without an ADR
 
-- TypeScript, Node 24 (`engines: >=22`)
+- TypeScript, Node 24 (`engines: >=22.12.0` — below that, `require(esm)` is
+  behind a flag and `nodenext` semantics do not hold)
 - **NestJS** — its DI container imposes ports-and-adapters naturally (ADR-001)
 - **Zod** (validation, including LLM output), **Pino** (JSON logs),
   **Vitest** + Supertest (tests), **Drizzle ORM + SQLite** (persistence)
@@ -57,7 +67,8 @@ LinkedIn is P2 and public visitor endpoints only.
 Next.js was rejected: it is a UI framework, and v1 is a headless batch service.
 Reconsider in Phase 3 as a dashboard.
 
-Module system is CommonJS, not the ESM used in `atlas-manager` (ADR-002).
+Module system is CommonJS on `nodenext` resolution, not the ESM used in
+`atlas-manager` (ADR-002 and its amendment).
 
 ## 5. Production environment
 
@@ -156,11 +167,23 @@ Empty category → coverage 1. A **blocking** requirement overrides everything: 
 one fails, the score is capped at 35 and `blockingFailure` records which.
 `partial` also blocks — an ATS knockout question is binary.
 
+`trackAlignment` is a configured weight per track, looked up from the posting's
+track, which the **pre-filter classifies deterministically** by keyword before
+any LLM call. `dev` and `security` share `1.0` because they are equal first
+priorities; `automation` is `0.7`; `unknown` is `0.4` and deliberately non-zero.
+Highest weight wins when a posting matches several tracks.
+
 **Verdict:** ≥70 `apply` · 45–69 `review` · <45 `discard`.
+
+**Invalid LLM output is a normal outcome, not an exception** (ADR-006):
+normalize → validate with Zod → bounded retries → typed failure result. A
+posting that cannot be scored goes to the review section with `lowConfidence`,
+never dropped and never throwing. `ScorerPort` returns a result type, matching
+`CollectorPort`.
 
 All weights and cutoffs are configurable and **provisional until calibration**
 (M7). Reasoning, the `lowConfidence` rule, the honest limits of the model and the
-calibration protocol: `docs/04-scoring-model.md` and ADR-005.
+calibration protocol: `docs/04-scoring-model.md`, ADR-005 and ADR-006.
 
 ## 9. Master profile
 

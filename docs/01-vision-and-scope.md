@@ -34,14 +34,19 @@ paperwork.
 
 |                |                                                                |
 | -------------- | -------------------------------------------------------------- |
-| **Priority 1** | Back-end development internships                               |
-| **Priority 2** | Information security, infrastructure / automation              |
+| **Priority 1** | Back-end development **and** information security internships  |
+| **Priority 2** | Infrastructure / automation                                    |
 | **Location**   | Rio de Janeiro and metropolitan region, or remote              |
 | **Level**      | Internship only — `estágio`, `estagiário`, `intern`, `trainee` |
 
+Back-end and security are **equal** first priorities. Both resumes are real
+positions, not a primary and a fallback, and the search should not quietly
+demote one of them.
+
 Track membership drives the `trackAlignment` term in the score
 (`docs/04-scoring-model.md`) and the `dev` / `security` / `automation` tags in the
-master profile.
+master profile. The equal priority is expressed as `dev` and `security` sharing
+the same weight, not as a special case in the formula.
 
 ## Non-goals
 

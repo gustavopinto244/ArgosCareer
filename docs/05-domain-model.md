@@ -1,0 +1,128 @@
+# 05 — Domain model
+
+This document records **boundaries and invariants**, not type definitions. The
+TypeScript types in `src/**/domain/` are the schema; duplicating their fields
+here would produce a second definition that drifts from the first within a month.
+
+What belongs here is what the types cannot express: why two shapes exist instead
+of one, what is guaranteed at each boundary, and what must never happen.
+
+## The central distinction: `RawPosting` and `Posting`
+
+These are separate types on purpose, and collapsing them would be the single
+most damaging simplification available in this codebase.
+
+**`RawPosting`** is what a source returned. Its shape belongs to the source, it
+may be missing anything, and its fields are whatever Gupy or JobSpy decided to
+call them. It is validated tolerantly — `.passthrough()`, optional fields —
+because the alternative is a collector that throws on an unannounced field, which
+principle 1 forbids.
+
+**`Posting`** is the normalized domain entity. Every later stage — dedup,
+pre-filter, scoring, delivery — consumes only this. Its shape belongs to
+ArgosCareer and changes only when the domain changes, never because a source
+renamed a field.
+
+Normalization is the only place allowed to know both shapes.
+
+### Invariants of `Posting`
+
+| Invariant                                                    | Why                                                                                                               |
+| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `company`, `title`, `source`, `sourceId` are non-empty       | The fingerprint is built from company and title; an empty component silently collapses distinct postings into one |
+| `fingerprint` is present and stable                          | Recomputing it must give the same value forever — it is the deduplication key and is persisted                    |
+| `collectedAt` is set by the collector, not by the database   | Re-running a stage must not change when a posting was found                                                       |
+| `location` is either a resolved place or explicitly `remote` | "Unknown" must be representable; guessing a city to fill the field corrupts the location filter                   |
+| Raw source payload is retained                               | Schema archaeology in M3 and beyond depends on being able to re-normalize without re-collecting (principle 2)     |
+
+### The fingerprint is a domain concept, not a database detail
+
+```
+fingerprint = sha256(normalize(company) + normalize(title) + normalize(city))
+normalize  = lowercase → strip accents → strip punctuation → collapse whitespace
+```
+
+It lives in the domain layer, is a pure function, and is unit-tested
+independently of persistence. Two consequences follow and both are binding:
+
+- **The normalization function is frozen once postings are persisted.** Changing
+  it changes every fingerprint, which silently re-notifies the entire history.
+  A change to it is a migration, not an edit.
+- **Fingerprint equality means "already seen", never "identical".** Two postings
+  with the same fingerprint may differ in description, salary or deadline. The
+  first one seen wins; later ones are recorded as re-sightings, not merged.
+
+## Stage boundaries and what each guarantees
+
+Each arrow is a persisted boundary, which is what makes principle 2 —
+independent re-execution — possible rather than aspirational.
+
+| Boundary            | Guarantee entering it                                      | Guarantee leaving it                                       |
+| ------------------- | ---------------------------------------------------------- | ---------------------------------------------------------- |
+| Collect → Normalize | Nothing. Source-shaped, possibly empty, possibly an error  | —                                                          |
+| Normalize → Dedup   | A valid `Posting`, or the record is rejected with a reason | Every invariant above holds                                |
+| Dedup → Pre-filter  | Fingerprint computed                                       | Posting is new, or the run stops for it here               |
+| Pre-filter → Score  | Posting passed every deterministic rule                    | Only postings worth LLM budget continue                    |
+| Score → Deliver     | Requirements extracted and matched, or a typed failure     | A `ScoreResult`, successful or failed — never an exception |
+
+**Rejection is always recorded with a reason.** A posting that disappears between
+two stages without a recorded reason is a bug, not a filter. This is what makes
+the pre-filter's ~70% cut auditable instead of a black hole.
+
+## Failure is a value, in every port
+
+All three ports express failure as data rather than as a thrown exception:
+
+- `CollectorPort` → `CollectionResult` with `error` set and an empty list
+  (`docs/02-architecture.md`, principle 1)
+- `ScorerPort` → a discriminated `ScoreResult` (ADR-006)
+- `NotifierPort` → follows the same convention
+
+This is a convention with teeth: a port implementation that throws violates its
+contract, and adapter tests assert that it does not — including for the ugly
+cases, like a socket timeout mid-response.
+
+The reason for the uniformity is that the pipeline is a batch: an exception
+escaping any stage takes down the whole run, and the whole run is the Friday
+digest.
+
+## Requirements, matches and scores
+
+The scoring types are specified in `04-scoring-model.md` and their reasoning in
+ADR-005 and ADR-006. Two invariants belong here rather than there, because they
+are enforced in the domain and not in a prompt:
+
+- **`evidence: null` forces `not_met`.** Enforced in code after parsing. A model
+  returning `met` with no evidence has returned an invalid result.
+- **A `Match` cannot outlive the profile it was computed against.** Matches are
+  cached by `(posting, profileHash)`; editing the profile must invalidate them.
+  A stale match is worse than a missing one — it is a wrong answer that looks
+  computed.
+
+## Identity, and why `sourceId` is not the identity
+
+A posting has three identifiers and they are not interchangeable:
+
+| Identifier    | Scope                    | Used for                                  |
+| ------------- | ------------------------ | ----------------------------------------- |
+| `sourceId`    | Unique within one source | Re-fetching, linking back to the original |
+| `fingerprint` | Cross-source             | Deduplication — "have I seen this job?"   |
+| Internal id   | Database                 | Foreign keys                              |
+
+The same job posted to both Gupy and Indeed has **two** `sourceId` values and
+**one** `fingerprint`. Using `sourceId` as the dedup key would deliver that job
+twice, which fails success criterion 2 in `01-vision-and-scope.md`.
+
+## What is deliberately not modelled in v1
+
+Recorded so their absence is a decision rather than an oversight:
+
+- **Application state.** Nothing tracks what was applied to; that is Phase 2
+  feedback and would pull the non-goal of automatic application closer.
+- **Company as an entity.** Company is a normalized string. Modelling companies
+  properly implies deduplicating company names, which is a harder problem than
+  the one being solved.
+- **Salary as a comparable number.** Stipend appears as text when the posting
+  states it. Parsing Brazilian salary strings into comparable numbers is its own
+  project, and the pre-filter's stipend floor is a coarse text rule until it
+  proves insufficient.

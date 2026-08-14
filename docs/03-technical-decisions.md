@@ -17,6 +17,7 @@ revisited on its merits instead of re-argued from memory.
 | [003](adr/003-english-repository-language.md)        | Write the repository in English, deliver the digest in pt-BR | Accepted | 2026-08-14 |
 | [004](adr/004-public-repository-privacy-boundary.md) | Draw an explicit privacy boundary for a public repository    | Accepted | 2026-08-14 |
 | [005](adr/005-llm-does-not-produce-the-score.md)     | Keep score computation out of the LLM                        | Accepted | 2026-08-14 |
+| [006](adr/006-llm-output-failure-policy.md)          | Treat invalid LLM output as a normal outcome                 | Accepted | 2026-08-14 |
 
 ## When an ADR is required
 
@@ -50,9 +51,16 @@ supersedes the old one, and the old one is marked `Superseded by ADR-NNN` and
 kept. The history of what was believed and when is the point; editing it away
 leaves a document that is merely correct.
 
-The exception is amendment for a consequence discovered in practice — for
-example, if `exactOptionalPropertyTypes` turns out to fight NestJS in M1, ADR-002
-gets an amendment noting it, not a silent edit.
+The exception is **amendment**, when new evidence refines a decision without
+reversing it. The amendment is appended, the original text is left untouched, and
+the `Status` line points at it. ADR-002 carries a worked example: it was accepted
+with `moduleResolution: node16` and later amended to `nodenext` after measuring
+that Node supports `require(esm)` unflagged from 22.12.0. The core decision —
+CommonJS with a strict configuration — never changed, so it was an amendment
+rather than a supersession.
+
+The test for which one applies: if the _Decision_ section would now be wrong,
+write a new ADR. If it would only be incomplete, amend.
 
 **Numbering is sequential and never reused**, including for superseded records.
 

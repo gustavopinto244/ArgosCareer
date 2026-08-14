@@ -124,6 +124,8 @@ See [ADR-001](docs/adr/001-nestjs-as-application-framework.md).
 | [`docs/02-architecture.md`](docs/02-architecture.md)               | Pipeline, principles, ports, cadence, resource budget |
 | [`docs/03-technical-decisions.md`](docs/03-technical-decisions.md) | ADR index and when an ADR is required                 |
 | [`docs/04-scoring-model.md`](docs/04-scoring-model.md)             | The scoring model in full                             |
+| [`docs/05-domain-model.md`](docs/05-domain-model.md)               | Entity boundaries and invariants                      |
+| [`docs/06-glossary.md`](docs/06-glossary.md)                       | Domain vocabulary and the code/digest translation     |
 
 ## Development
 
