@@ -13,7 +13,50 @@ version to attach it to.
 
 ## [Unreleased]
 
-### Added
+### Added — M1, domain and stage C
+
+- `Posting` and `RawPosting` as distinct types (`src/posting/domain/`), with
+  `createPosting` enforcing the invariants from `docs/05-domain-model.md` at
+  construction — non-empty company/title/source/sourceId, a fingerprint
+  derived rather than supplied.
+- Fingerprint as a pure, unit-tested function: lowercase, strip accents, strip
+  punctuation, collapse whitespace, sha256. Documented, not silently patched:
+  punctuation stripping without a space means a hyphenated title fingerprints
+  differently from its spaced form — the known gap layer 2 similarity exists
+  to catch.
+- Stage C (`computeScore`) as a pure function covering the full formula: per-
+  weight coverage with the empty-category rule, the blocking cap (`partial`
+  blocks same as `not_met`, and the cap never raises an already-low score),
+  `lowConfidence` capping the verdict at `review` without ever upgrading a
+  `discard`, `trackAlignment` with highest-weight-wins on multi-track
+  postings, and `criticalGaps`.
+- `CollectorPort`, `ScorerPort` (ADR-006's typed failure result) and
+  `NotifierPort`, all returning failure as a value, never throwing.
+- A NestJS skeleton that actually boots: `npm run build && npm run start`
+  produces a real `AppModule dependencies initialized` log line, not just a
+  passing typecheck.
+- `test/typescript-metadata.test.ts` — a permanent regression check for
+  `emitDecoratorMetadata` plus Nest's DI container, added to make the
+  TypeScript 7 reassessment answerable.
+- `dev`, `build` and `start` scripts, deferred from M0 because there was no
+  entry point for them to run.
+
+### Changed
+
+- `npm test` no longer carries `--passWithNoTests` — the project has real
+  tests now.
+- `tsconfig.json` gained an explicit `"types": ["node"]`. It was previously
+  working by accident: `@types/node` was only being pulled in transitively
+  through `vitest.config.ts` and the test files being part of the compiled
+  set, which broke silently the moment `tsconfig.build.json` excluded both.
+- ADR-002 gained Amendment 2: TypeScript 7 was reassessed with real Nest code
+  in place. The original concern — decorator metadata under the native-port
+  compiler — turned out to be unfounded; typecheck, build, a real compiled
+  boot and the full test suite all pass under 7.0.2. The actual blocker is
+  that `typescript-eslint` refuses to run under TS 7.0 at all. Staying on
+  6.0.3, for a different and now better-understood reason.
+
+### Added — foundations
 
 - `CLAUDE.md`, carrying the full project context so no session depends on the
   original prompt.

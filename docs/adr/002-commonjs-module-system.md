@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted — amended 2026-08-14, see [Amendment](#amendment--2026-08-14-node16--nodenext)
+Accepted — amended 2026-08-14, see
+[Amendment 1](#amendment-1--2026-08-14-node16--nodenext) and
+[Amendment 2](#amendment-2--2026-08-14-typescript-7-reassessed-and-rejected)
 
 ## Date
 
@@ -80,7 +82,7 @@ Strict compiler flags carried over from `atlas-manager`: `strict`,
   it fights Nest in M1, relaxing that single flag is preferable to relaxing
   `strict` — and requires amending this ADR rather than editing it silently.
 
-## Amendment — 2026-08-14: `node16` → `nodenext`
+## Amendment 1 — 2026-08-14: `node16` → `nodenext`
 
 The text above is kept as originally accepted. This section records a change to
 the resolution mode. The core decision — CommonJS with a strict configuration —
@@ -132,3 +134,63 @@ would make the declared support range a false claim.
   upgrade breaks the build.
 - The supported Node range narrows. Node 22.0–22.11 is no longer supported; CI
   covers current 22.x and 24.x, both well past the threshold.
+
+## Amendment 2 — 2026-08-14: TypeScript 7 reassessed and rejected
+
+The original decision deferred TypeScript 7 because Nest's DI resolves
+constructor parameter types from `emitDecoratorMetadata` reflection, and that
+combination was untested under the native-port compiler. M1 adds the first
+real Nest code — an `AppModule`, `main.ts`, and an `@Injectable()` class with
+a constructor-injected dependency — which made the question answerable
+instead of theoretical.
+
+### What was measured
+
+Two regression tests were added
+(`test/typescript-metadata.test.ts`): one asserting `Reflect.getMetadata`
+returns the correct constructor parameter types for a decorated class, one
+resolving a constructor-injected dependency through Nest's actual DI
+container. Both pass under TypeScript 6.0.3.
+
+TypeScript was then bumped to 7.0.2 and the full matrix re-run:
+
+| Check                                               | Result under TS 7.0.2                       |
+| --------------------------------------------------- | ------------------------------------------- |
+| `tsc --noEmit`                                      | Pass                                        |
+| `tsc -p tsconfig.build.json`                        | Pass                                        |
+| `node dist/main.js` (compiled boot)                 | Pass — `AppModule dependencies initialized` |
+| Full test suite, including both DI regression tests | 50/50 pass                                  |
+| `eslint .`                                          | **Fatal error**                             |
+
+The `emitDecoratorMetadata` concern that motivated deferring TS 7 turned out
+to be unfounded — decorator metadata, Nest DI, build and boot all work
+correctly under TS 7.0.2. The actual blocker is different and unrelated:
+
+```
+typescript-eslint does not support TS 7.0.
+Please see https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/#running-side-by-side-with-typescript-6.0
+```
+
+This is not a warning. `eslint .` exits non-zero and CI's lint step fails
+outright.
+
+### Decision
+
+Stay on TypeScript 6.0.3. Not because of the concern this ADR originally
+raised — that one is resolved and no longer a reason to wait — but because
+`typescript-eslint` refuses to run under TS 7.0 at all, and CI requires lint
+to pass.
+
+### Consequences
+
+- The original justification for pinning TS 6 (unverified decorator metadata)
+  is retired; the two regression tests are the permanent replacement for the
+  uncertainty, not a one-time check. If TypeScript is revisited again, these
+  tests are what would catch a real regression.
+- The new, real blocker is external and outside this project's control:
+  `typescript-eslint` shipping TS 7 support. Revisit by bumping `typescript`
+  and `typescript-eslint` together and rerunning the linter — the moment it
+  does not crash, TS 7 is viable on the evidence already gathered here.
+- No code changes were required by this reassessment in either direction;
+  `package.json` stays at `^6.0.3`. The two DI regression tests are the only
+  lasting artifact, committed regardless of the outcome.

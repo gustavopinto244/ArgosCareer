@@ -35,6 +35,14 @@
     "resolveJsonModule": true,
     "skipLibCheck": true,
 
+    // Explicit rather than relying on automatic @types/* acquisition: that
+    // acquisition was silently dependent on vitest.config.ts and the test
+    // files being part of the compiled set. tsconfig.build.json excludes
+    // both, which made "node:crypto" and friends unresolvable there with no
+    // change to compilerOptions — this line is what makes Node's ambient
+    // types available regardless of which files happen to be included.
+    "types": ["node"],
+
     "outDir": "dist",
     "rootDir": ".",
     "sourceMap": true,

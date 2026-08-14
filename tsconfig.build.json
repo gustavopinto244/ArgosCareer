@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "dist",
+    // Overrides the base config's rootDir of "." — the base needs "." to
+    // cover test/ and vitest.config.ts too, but this config's file set is
+    // src/**/*.ts only, so output collapses to dist/main.js instead of
+    // dist/src/main.js.
+    "rootDir": "./src"
+  },
+  "exclude": ["node_modules", "dist", "test/**/*.ts", "vitest.config.ts"]
+}
