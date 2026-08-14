@@ -3,6 +3,7 @@ import { Criteria } from "../../prefilter/domain/criteria";
 import { Posting } from "../../posting/domain/posting";
 import { PostingsRepository } from "../../persistence/infrastructure/postings-repository";
 import { computeScore } from "../domain/score";
+import { computeRecommendation } from "../domain/recommendation";
 import { ScorerPort, ScoreResult } from "../domain/ports/scorer.port";
 import { StageAExtractor } from "./stage-a-extractor";
 import { StageBMatcher } from "./stage-b-matcher";
@@ -68,6 +69,10 @@ export class ApiScorer implements ScorerPort {
       tracks,
       buildScoringConfig(this.criteria),
     );
-    return { ok: true, ...outcome };
+    const recommendation = computeRecommendation(
+      matching.matches,
+      this.profile,
+    );
+    return { ok: true, ...outcome, ...recommendation };
   }
 }

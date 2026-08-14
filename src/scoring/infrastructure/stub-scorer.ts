@@ -2,6 +2,7 @@ import { classifyTrack } from "../../prefilter/domain/classify-track";
 import { Criteria } from "../../prefilter/domain/criteria";
 import { Posting } from "../../posting/domain/posting";
 import { computeScore } from "../domain/score";
+import { EMPTY_RECOMMENDATION } from "../domain/recommendation";
 import { ScorerPort, ScoreResult } from "../domain/ports/scorer.port";
 import { buildScoringConfig } from "./scoring-config";
 
@@ -27,6 +28,6 @@ export class StubScorer implements ScorerPort {
     const tracks = classifyTrack(posting.title, this.criteria.tracks);
     const outcome = computeScore([], tracks, buildScoringConfig(this.criteria));
 
-    return Promise.resolve({ ok: true, ...outcome });
+    return Promise.resolve({ ok: true, ...outcome, ...EMPTY_RECOMMENDATION });
   }
 }

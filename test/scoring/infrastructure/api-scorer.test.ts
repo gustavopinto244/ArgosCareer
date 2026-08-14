@@ -126,6 +126,9 @@ describe("ApiScorer.score", () => {
       expect(result.breakdown.mandatoryCoverage).toBe(1);
       expect(result.breakdown.trackAlignment).toBe(1.0);
       expect(result.lowConfidence).toBe(false);
+      expect(result.recommendedVariant).toBe("backend");
+      expect(result.highlights).toEqual(["Built a Node.js service."]);
+      expect(result.missingTerms).toEqual([]);
     }
   });
 
