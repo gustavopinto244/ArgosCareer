@@ -60,6 +60,7 @@ export function normalizeGupyJob(raw: RawPosting, now: Date): Posting | null {
       workMode: mapWorkMode(job.workplaceType),
       applicationDeadline: mapApplicationDeadline(job),
       sourceUrl: job.jobUrl ?? null,
+      description: job.description ?? null,
       collectedAt: now,
       firstSeenAt: now,
       lastSeenAt: now,

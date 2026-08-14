@@ -141,4 +141,48 @@ describe("normalizeGupyJob", () => {
     );
     expect(posting?.applicationDeadline).toBeNull();
   });
+
+  it("maps jobUrl to sourceUrl", () => {
+    const posting = normalizeGupyJob(
+      rawPosting({
+        id: 1,
+        name: "x",
+        careerPageName: "Y",
+        jobUrl: "https://example.gupy.io/job/1",
+      }),
+      NOW,
+    );
+    expect(posting?.sourceUrl).toBe("https://example.gupy.io/job/1");
+  });
+
+  it("is null, not a thrown error, when jobUrl is absent", () => {
+    const posting = normalizeGupyJob(
+      rawPosting({ id: 1, name: "x", careerPageName: "Y" }),
+      NOW,
+    );
+    expect(posting?.sourceUrl).toBeNull();
+  });
+
+  it("maps the job description", () => {
+    const posting = normalizeGupyJob(
+      rawPosting({
+        id: 1,
+        name: "x",
+        careerPageName: "Y",
+        description: "Vaga para estágio em backend com Node.js.",
+      }),
+      NOW,
+    );
+    expect(posting?.description).toBe(
+      "Vaga para estágio em backend com Node.js.",
+    );
+  });
+
+  it("is null, not a thrown error, when the description is absent", () => {
+    const posting = normalizeGupyJob(
+      rawPosting({ id: 1, name: "x", careerPageName: "Y" }),
+      NOW,
+    );
+    expect(posting?.description).toBeNull();
+  });
 });

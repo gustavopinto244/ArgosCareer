@@ -29,6 +29,13 @@
       "when": 1786745474335,
       "tag": "0003_flat_scalphunter",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1786748479431,
+      "tag": "0004_useful_daimon_hellstrom",
+      "breakpoints": true
     }
   ]
 }

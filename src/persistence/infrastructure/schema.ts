@@ -45,6 +45,9 @@ export const postings = sqliteTable(
     // Null when the source provided no link. The digest (M6) treats the
     // original posting link as mandatory on every entry it can fill in.
     sourceUrl: text("source_url"),
+    // Null when the source provided none — stage A (M7) has nothing to
+    // extract requirements from, distinct from a genuinely empty posting.
+    description: text("description"),
     firstSeenAt: integer("first_seen_at", { mode: "timestamp_ms" }).notNull(),
     lastSeenAt: integer("last_seen_at", { mode: "timestamp_ms" }).notNull(),
     rawPayload: text("raw_payload").notNull(),
