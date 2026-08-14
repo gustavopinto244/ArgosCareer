@@ -20,6 +20,18 @@ function mapLocation(job: GupyJob): Location {
 }
 
 /**
+ * Null on anything unparseable, not a thrown error — an unexpected deadline
+ * format must not fail normalization over one optional field. The pre-filter
+ * treats a null deadline as unknown, not automatically expired or current
+ * (M5).
+ */
+function mapApplicationDeadline(job: GupyJob): Date | null {
+  if (!job.applicationDeadline) return null;
+  const parsed = new Date(job.applicationDeadline);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+/**
  * `RawPosting` → `Posting`, for Gupy specifically. `firstSeenAt` and
  * `lastSeenAt` are both set to `now` here — this is a fresh, not-yet-persisted
  * observation; deciding whether an existing row's `firstSeenAt` survives is
@@ -46,6 +58,7 @@ export function normalizeGupyJob(raw: RawPosting, now: Date): Posting | null {
       title: job.name,
       location: mapLocation(job),
       workMode: mapWorkMode(job.workplaceType),
+      applicationDeadline: mapApplicationDeadline(job),
       collectedAt: now,
       firstSeenAt: now,
       lastSeenAt: now,

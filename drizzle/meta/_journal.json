@@ -8,6 +8,13 @@
       "when": 1786740840040,
       "tag": "0000_gray_mentallo",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1786742428875,
+      "tag": "0001_minor_mockingbird",
+      "breakpoints": true
     }
   ]
 }

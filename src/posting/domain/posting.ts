@@ -26,6 +26,10 @@ export interface Posting {
   readonly workMode: WorkMode;
   readonly seniority: Seniority | null;
   readonly experienceYears: number | null;
+  /** Null when the source did not state one — absence is not evidence the
+   * posting never expires, and the pre-filter's expiry rule treats it as
+   * such (M5): unknown, not automatically pass or fail. */
+  readonly applicationDeadline: Date | null;
   readonly collectedAt: Date;
   readonly firstSeenAt: Date;
   readonly lastSeenAt: Date;
@@ -41,6 +45,7 @@ export type CreatePostingInput = {
   workMode: WorkMode;
   seniority?: Seniority | null;
   experienceYears?: number | null;
+  applicationDeadline?: Date | null;
   collectedAt: Date;
   firstSeenAt: Date;
   lastSeenAt: Date;
@@ -78,6 +83,7 @@ export function createPosting(input: CreatePostingInput): Posting {
     workMode: input.workMode,
     seniority: input.seniority ?? null,
     experienceYears: input.experienceYears ?? null,
+    applicationDeadline: input.applicationDeadline ?? null,
     collectedAt: input.collectedAt,
     firstSeenAt: input.firstSeenAt,
     lastSeenAt: input.lastSeenAt,

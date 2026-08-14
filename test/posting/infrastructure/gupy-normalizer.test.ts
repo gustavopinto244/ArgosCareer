@@ -107,4 +107,38 @@ describe("normalizeGupyJob", () => {
     );
     expect(posting?.rawPayload).toMatchObject({ id: 1, name: "x" });
   });
+
+  it("parses a well-formed applicationDeadline", () => {
+    const posting = normalizeGupyJob(
+      rawPosting({
+        id: 1,
+        name: "x",
+        careerPageName: "Y",
+        applicationDeadline: "2026-10-01",
+      }),
+      NOW,
+    );
+    expect(posting?.applicationDeadline).toEqual(new Date("2026-10-01"));
+  });
+
+  it("is null, not a thrown error, when applicationDeadline is absent", () => {
+    const posting = normalizeGupyJob(
+      rawPosting({ id: 1, name: "x", careerPageName: "Y" }),
+      NOW,
+    );
+    expect(posting?.applicationDeadline).toBeNull();
+  });
+
+  it("is null, not a thrown error, when applicationDeadline is unparseable", () => {
+    const posting = normalizeGupyJob(
+      rawPosting({
+        id: 1,
+        name: "x",
+        careerPageName: "Y",
+        applicationDeadline: "not a date",
+      }),
+      NOW,
+    );
+    expect(posting?.applicationDeadline).toBeNull();
+  });
 });

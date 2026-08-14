@@ -37,6 +37,11 @@ export const postings = sqliteTable(
     // postings normalize with no seniority signal of their own.
     seniority: text("seniority"),
     experienceYears: integer("experience_years"),
+    // Null when the source did not state one — the pre-filter's expiry rule
+    // (M5) treats this as unknown, not automatically pass or fail.
+    applicationDeadline: integer("application_deadline", {
+      mode: "timestamp_ms",
+    }),
     firstSeenAt: integer("first_seen_at", { mode: "timestamp_ms" }).notNull(),
     lastSeenAt: integer("last_seen_at", { mode: "timestamp_ms" }).notNull(),
     rawPayload: text("raw_payload").notNull(),
