@@ -18,6 +18,12 @@ function baseCriteria(overrides: Partial<Criteria> = {}): Criteria {
       automation: ["automação"],
     },
     trackWeights: { dev: 1.0, security: 1.0, automation: 0.7, unknown: 0.4 },
+    scoring: {
+      weights: { mandatory: 65, desirable: 20, trackAlignment: 15 },
+      thresholds: { apply: 70, review: 45 },
+      minExtractedRequirements: 1,
+      blockingCapScore: 35,
+    },
     ...overrides,
   };
 }

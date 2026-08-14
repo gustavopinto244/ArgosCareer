@@ -15,6 +15,13 @@
       "when": 1786742428875,
       "tag": "0001_minor_mockingbird",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1786744948358,
+      "tag": "0002_quiet_steel_serpent",
+      "breakpoints": true
     }
   ]
 }

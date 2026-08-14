@@ -49,6 +49,10 @@ export const postings = sqliteTable(
     // near-duplicate, under a different fingerprint, of an earlier one.
     // Null means "not a known duplicate of anything."
     duplicateOfFingerprint: text("duplicate_of_fingerprint"),
+    // Null until delivered. Set once and never cleared — a posting already
+    // notified is never notified again (ADR-007, M6), the same "write once"
+    // discipline firstSeenAt already follows.
+    notifiedAt: integer("notified_at", { mode: "timestamp_ms" }),
   },
   (table) => [
     uniqueIndex("postings_fingerprint_unique").on(table.fingerprint),
@@ -74,4 +78,9 @@ export const runs = sqliteTable("runs", {
   newCount: integer("new_count").notNull().default(0),
   alreadySeenCount: integer("already_seen_count").notNull().default(0),
   duplicateCount: integer("duplicate_count").notNull().default(0),
+  // Populated by a "deliver" run (M6): postings that passed the pre-filter,
+  // were scored, and were included in the digest actually sent.
+  filteredCount: integer("filtered_count").notNull().default(0),
+  scoredCount: integer("scored_count").notNull().default(0),
+  deliveredCount: integer("delivered_count").notNull().default(0),
 });

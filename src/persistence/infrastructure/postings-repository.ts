@@ -1,4 +1,4 @@
-import { eq, isNull } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { Location, Posting, WorkMode } from "../../posting/domain/posting";
 import { Db } from "./db";
 import { postings } from "./schema";
@@ -162,5 +162,33 @@ export class PostingsRepository {
       .where(isNull(postings.duplicateOfFingerprint))
       .all();
     return rows.map(rowToPosting);
+  }
+
+  /**
+   * Active postings not yet notified — the candidate pool for a digest.
+   * `notifiedAt` is set once and never cleared (ADR-007's "write once"
+   * discipline, applied to delivery): a posting already notified is never
+   * notified again, so it drops out of this pool permanently once sent.
+   */
+  findUnnotified(): Posting[] {
+    const rows = this.db
+      .select()
+      .from(postings)
+      .where(
+        and(
+          isNull(postings.duplicateOfFingerprint),
+          isNull(postings.notifiedAt),
+        ),
+      )
+      .all();
+    return rows.map(rowToPosting);
+  }
+
+  markNotified(fingerprint: string, notifiedAt: Date): void {
+    this.db
+      .update(postings)
+      .set({ notifiedAt })
+      .where(eq(postings.fingerprint, fingerprint))
+      .run();
   }
 }

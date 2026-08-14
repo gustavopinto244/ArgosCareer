@@ -11,6 +11,9 @@ export interface RunCounts {
   readonly newCount?: number;
   readonly alreadySeenCount?: number;
   readonly duplicateCount?: number;
+  readonly filteredCount?: number;
+  readonly scoredCount?: number;
+  readonly deliveredCount?: number;
 }
 
 /**

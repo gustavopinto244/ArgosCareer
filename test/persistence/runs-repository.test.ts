@@ -66,6 +66,20 @@ describe("RunsRepository", () => {
     expect(row?.collectedCount).toBe(0);
   });
 
+  it("records filtered, scored and delivered counts for a deliver run", () => {
+    const runId = repository.start("deliver", new Date());
+    repository.finish(runId, new Date(), "success", {
+      filteredCount: 12,
+      scoredCount: 12,
+      deliveredCount: 5,
+    });
+
+    const row = repository.findById(runId);
+    expect(row?.filteredCount).toBe(12);
+    expect(row?.scoredCount).toBe(12);
+    expect(row?.deliveredCount).toBe(5);
+  });
+
   it("records a failed outcome", () => {
     const runId = repository.start("collect", new Date());
     repository.finish(runId, new Date(), "failed");
