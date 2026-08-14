@@ -71,11 +71,12 @@ scoring:
   thresholds: # apply 70, review 45
   minExtractedRequirements: # lowConfidence trigger
   maxScoreRetries: # ADR-006
-schedule:
-  collection: # daily
-  digest: # Tuesday, Friday
+schedule: # two independent crons, ADR-009
+  collection: # interval, default every 4h — no LLM
+  scoreAndDeliver: # daily time + timezone, default 03:00 America/Sao_Paulo
 alerts:
-  consecutiveEmptyRuns:
+  consecutiveEmptyCollectionRuns: # tolerant — collection is frequent
+  missedScoreAndDeliverRun: # not tolerant — this is the digest
   scoreFailureRateThreshold:
 ```
 

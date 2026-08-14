@@ -118,7 +118,7 @@ extends unchanged to anything Phase 3 adds.
 
 v1 is done when all of these hold:
 
-1. A digest arrives on Telegram every Tuesday and Friday without manual action.
+1. A digest arrives on Telegram every night without manual action (ADR-009).
 2. A posting already seen is never shown twice.
 3. Triage from digest to shortlist takes under 10 minutes.
 4. One source failing degrades the digest instead of stopping it.

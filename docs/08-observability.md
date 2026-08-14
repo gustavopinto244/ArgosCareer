@@ -36,15 +36,20 @@ worth asking.
 ### Every log line carries the run
 
 ```
-runId        ULID, one per pipeline execution
+runId        ULID, one per cron trigger
+kind         collection | scoreAndDeliver — the two schedules of ADR-009
 stage        collect | normalize | dedup | prefilter | score | deliver
 source       when the line concerns one source
 fingerprint  when the line concerns one posting
 ```
 
-`runId` is what makes a batch reconstructable after the fact. Without it, logs
-from a daily collection and a Friday delivery interleave in journald and cannot
-be told apart.
+Two independent crons (ADR-009) means two kinds of run, each with its own
+`runId`: a `collection` run touches `collect` through `prefilter`; a
+`scoreAndDeliver` run touches `score` and `deliver` only, over postings the
+collection runs already placed in the corpus. `runId` plus `kind` is what makes
+a specific run reconstructable after the fact — without them, logs from several
+collection cycles and one nightly delivery interleave in journald and cannot be
+told apart.
 
 **No personal data in logs.** No profile text, no evidence quotes, no recruiter
 contact details. Logs go to journald on a server and get read casually; ADR-004's
@@ -70,17 +75,21 @@ currently carries as an unverified guess.
 Delivered through the same Telegram notifier as the digest. A separate alerting
 channel for a personal project would be infrastructure nobody maintains.
 
-| Condition                                              | Why it matters                              | Action                       |
-| ------------------------------------------------------ | ------------------------------------------- | ---------------------------- |
-| A source returns **zero postings** on consecutive runs | The canonical silent failure of principle 1 | Alert naming the source      |
-| A source **errors** on consecutive runs                | Adapter broken or blocked                   | Alert with the error         |
-| **Scoring failure rate** above threshold               | Model or prompt regression (ADR-006)        | Alert with the rate          |
-| A run **did not start** when scheduled                 | Scheduler or container down                 | Alert on next successful run |
-| Delivery failed                                        | The product did not reach the user          | Retry, then alert            |
+| Condition                                                             | Why it matters                              | Action                      |
+| --------------------------------------------------------------------- | ------------------------------------------- | --------------------------- |
+| A source returns **zero postings** on consecutive **collection** runs | The canonical silent failure of principle 1 | Alert naming the source     |
+| A source **errors** on consecutive collection runs                    | Adapter broken or blocked                   | Alert with the error        |
+| **Scoring failure rate** above threshold                              | Model or prompt regression (ADR-006)        | Alert with the rate         |
+| The **`scoreAndDeliver`** run did not start when scheduled            | No digest that day (ADR-009)                | Alert immediately           |
+| A **`collection`** run did not start when scheduled                   | Self-heals next cycle, a few hours later    | Alert only after two misses |
+| Delivery failed                                                       | The product did not reach the user          | Retry, then alert           |
 
-**Consecutive, not single.** A source returning nothing on one run is normal — a
-quiet Tuesday is not an incident. Alerting on single runs trains you to ignore
-alerts, which is worse than not having them.
+**Consecutive, not single — and the two run kinds need different patience.**
+Collection runs every few hours (ADR-009), so one empty or missed cycle is
+routine; a missed `collection` run alerts only after two in a row. A missed
+`scoreAndDeliver` run means no digest that day, so it alerts on the first miss.
+Conflating the two thresholds would either desensitize you to a missed digest or
+page you for a normal quiet collection cycle.
 
 ### The run summary is the everyday signal
 

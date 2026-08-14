@@ -133,7 +133,8 @@ The milestone that proves the project is real.
 ## M8 — Deployment
 
 - [ ] Docker Compose on Atlas
-- [ ] Scheduling live: collection daily, digest Tuesday and Friday
+- [ ] Scheduling live: collection every few hours, score+deliver in the nightly
+      off-peak window (ADR-009)
 - [ ] `OLLAMA_KEEP_ALIVE=0` verified — the model actually unloads after a batch
 - [ ] **Memory measured under real load** against the ~150 MB / ~250 MB budget,
       and `docs/02` updated with the real figure
@@ -148,7 +149,7 @@ The milestone that proves the project is real.
 - [ ] HTTP endpoints for stage re-execution and run inspection
 - [ ] Health endpoint reporting last successful run per kind
 - [ ] MCP server
-- [ ] Hermes consuming it — **with the Tuesday/Friday digest still working while
+- [ ] Hermes consuming it — **with the nightly digest still working while
       Hermes is stopped**, which is the test of whether the boundary is real
 - [ ] n8n consuming the API for side effects — spreadsheet, reminders,
       cross-post — never on the critical path (ADR-008)

@@ -131,8 +131,8 @@ contract, and adapter tests assert that it does not — including for the ugly
 cases, like a socket timeout mid-response.
 
 The reason for the uniformity is that the pipeline is a batch: an exception
-escaping any stage takes down the whole run, and the whole run is the Friday
-digest.
+escaping any stage takes down the whole run, and the whole run is that
+night's digest.
 
 ## Requirements, matches and scores
 

@@ -95,6 +95,17 @@ assistant". Reconciling it with what was documented produced these changes.
 - **Per-posting digest format** specified in `docs/02`, with a table showing
   every line's derivation, so nothing in it can quietly become generated text.
 
+### Changed — cadence
+
+- **ADR-009 — the digest moves from twice-weekly to daily, confined to a
+  nightly window.** Collection now runs every few hours, low volume, no LLM.
+  Scoring and delivery run once nightly, in a configured off-peak window
+  (default `03:00 America/Sao_Paulo`) — the only point the LLM runs and the
+  only time the digest is delivered. Worst-case discovery-to-delivery latency
+  drops from up to four days to under 24 hours, and the model now loads once
+  per day instead of at unspecified times that could contend with Atlas's
+  daytime traffic.
+
 ### Fixed
 
 - **ADR-007 amended: upserts must preserve first sighting.** The original
