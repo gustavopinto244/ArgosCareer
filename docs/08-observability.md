@@ -67,8 +67,8 @@ counts — collected, rejected in normalization, deduplicated, filtered out,
 scored, failed to score, delivered.
 
 Those counters are not decoration. They are the input to every alert below, and
-the evidence for the "~70% pre-filter" estimate that `02-architecture.md`
-currently carries as an unverified guess.
+the evidence behind the pre-filter cut numbers `02-architecture.md` measures
+(84-97%, city-dependent).
 
 ## Alerting
 

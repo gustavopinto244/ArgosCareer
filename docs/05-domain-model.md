@@ -115,7 +115,8 @@ independent re-execution — possible rather than aspirational.
 
 **Rejection is always recorded with a reason.** A posting that disappears between
 two stages without a recorded reason is a bug, not a filter. This is what makes
-the pre-filter's ~70% cut auditable instead of a black hole.
+the pre-filter's cut (measured at 84-97%, city-dependent — docs/02) auditable
+instead of a black hole.
 
 ## Failure is a value, in every port
 

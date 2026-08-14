@@ -1,5 +1,4 @@
-import { readFileSync } from "node:fs";
-import { parse as parseYaml } from "yaml";
+import { readYamlFile } from "../../config/infrastructure/read-yaml-file";
 import { Profile, ProfileSchema } from "../domain/profile";
 
 /**
@@ -33,19 +32,7 @@ export class ProfileValidationError extends Error {
  * field (principle 3's "fail loudly at startup" requirement).
  */
 export function loadProfile(filePath: string): Profile {
-  let raw: string;
-  try {
-    raw = readFileSync(filePath, "utf8");
-  } catch (cause) {
-    throw new Error(`Cannot read profile file at ${filePath}`, { cause });
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = parseYaml(raw);
-  } catch (cause) {
-    throw new Error(`Cannot parse profile YAML at ${filePath}`, { cause });
-  }
+  const parsed = readYamlFile(filePath);
 
   const result = ProfileSchema.safeParse(parsed);
   if (!result.success) {

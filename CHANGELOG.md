@@ -13,6 +13,46 @@ version to attach it to.
 
 ## [Unreleased]
 
+### Added — M5, pre-filter
+
+- `applyPreFilter` (`src/prefilter/domain/pre-filter.ts`): six deterministic
+  rules — title blocklist, title required, blocked companies, expired,
+  location, minimum keyword adherence — short-circuiting at the first
+  failure so every rejection records exactly one reason. Order runs cheapest
+  and most decisive first.
+- Location and `workMode` rejected only when **both** axes are known-bad;
+  either being `unknown` passes rather than silently discarding or accepting
+  (ADR-011) — an unknown `workMode` cannot be ruled out as remote, an unknown
+  `location` cannot be ruled out as the target region.
+- `classifyTrack` — deterministic, keyword-based track classification from
+  `config/criteria.yaml`, feeding `computeTrackAlignment` from M1 directly;
+  verified through the real scoring function, not reimplemented.
+- `CriteriaSchema` and `loadCriteria` for `config/criteria.yaml`, committed
+  (not gitignored — criteria are neither secret nor personal). `tracks`
+  requires an entry for every track via Zod's record-over-an-enum
+  completeness check, so a track silently missing its keyword list fails
+  loudly instead of quietly classifying everything into `unknown`.
+- `Posting.applicationDeadline`, added mid-milestone once the expiry rule
+  needed somewhere to read a deadline from. New forward migration; verified
+  against a database already migrated to the prior schema, not only from
+  empty.
+- ADR-011: the six rules, their order, and the unknown-axis leniency rule as
+  actual decisions rather than principles left to interpret per call site.
+- `readYamlFile` extracted out of `profile-loader.ts` once `criteria-loader.ts`
+  needed the identical read-and-parse logic — genuine duplication removed on
+  its second occurrence, not speculatively factored out on its first.
+
+### Changed — the ~70% pre-filter estimate replaced with two measured numbers
+
+- `npm run measure:prefilter` measured the real cut against two real
+  collections, both against the live Gupy API: **97.1%** nationwide, **84.2%**
+  city-narrowed to Rio de Janeiro. The gap is the actionable finding, not
+  either number alone — most of what the pre-filter cuts is geography, and
+  geography is free to filter server-side via Gupy's `city` parameter before
+  a single unwanted posting is downloaded. Recorded as a concrete consequence
+  for M8's collection strategy. Updated across `CLAUDE.md`, `README.md`,
+  `docs/02`, `docs/05` and `docs/08`.
+
 ### Added — M4, persistence
 
 - Drizzle + SQLite schema: `postings` (one row per fingerprint, never

@@ -1,0 +1,99 @@
+# config/criteria.yaml
+#
+# Committed, not gitignored — criteria are neither secret nor personal, and
+# committing them is what makes "why did I stop seeing infra postings?"
+# answerable with `git log` (principle 3, docs/09-configuration.md).
+#
+# Schema: src/prefilter/domain/criteria.ts
+# Rules and thresholds reasoned through in ADR-011.
+
+titleBlocklist:
+  - sênior
+  - senior
+  - pleno
+  - especialista
+  - coordenador
+  - gerente
+  - tech lead
+  - III
+  - IV
+
+titleRequired:
+  - estágio
+  - estagiário
+  - intern
+  - trainee
+
+location:
+  # Rio de Janeiro and metropolitan region (CLAUDE.md §6).
+  cities:
+    - Rio de Janeiro
+    - Niterói
+    - São Gonçalo
+    - Duque de Caxias
+    - Nova Iguaçu
+    - Belford Roxo
+    - São João de Meriti
+    - Itaboraí
+    - Maricá
+    - Mesquita
+  allowRemote: true
+
+blockedCompanies: []
+
+# Minimum count of profile keywords that must appear in a posting's title and
+# description before it is worth stage A/B's LLM budget.
+minKeywordAdherence: 1
+
+# Keyword classification per track, feeding trackAlignment (docs/04). A
+# posting matching a track's list is classified into it; matching none
+# leaves it unknown (trackWeights.unknown), not rejected.
+tracks:
+  dev:
+    - backend
+    - back-end
+    - back end
+    - node
+    - node.js
+    - nodejs
+    - typescript
+    - javascript
+    - api
+    - apis
+    - desenvolvimento
+    - desenvolvedor
+    - software
+    - fullstack
+    - full-stack
+    - programação
+    - programador
+  security:
+    - segurança
+    - security
+    - infraestrutura
+    - infrastructure
+    - firewall
+    - siem
+    - soc
+    - pentest
+    - cibersegurança
+    - ciber
+  automation:
+    - automação
+    - automation
+    - devops
+    - sre
+    - ci/cd
+    - cicd
+    - terraform
+    - ansible
+    - kubernetes
+    - docker
+
+# Provisional until M7 calibration (docs/04-scoring-model.md). dev and
+# security share 1.0 — equal first priorities (docs/01-vision-and-scope.md).
+trackWeights:
+  dev: 1.0
+  security: 1.0
+  automation: 0.7
+  unknown: 0.4
