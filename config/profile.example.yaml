@@ -1,0 +1,83 @@
+# config/profile.example.yaml
+#
+# Structural example with fictional data — committed on purpose (ADR-004).
+# The real config/profile.yaml is gitignored: it carries a full resume, and
+# this repository is public.
+#
+# To set up a local profile:
+#   cp config/profile.example.yaml config/profile.yaml
+# then replace every value below with your own.
+#
+# Schema: src/profile/domain/profile.ts
+
+courseStart: 2026-03-01
+courseEnd: 2029-12-01
+
+# Present and visible rather than omitted — replace with a real answer.
+# See CLAUDE.md §9 for why these three specifically are flagged.
+englishLevel: "⚠ VERIFY"
+minimumStipend: "⚠ VERIFY"
+maxWeeklyHours: "⚠ VERIFY"
+
+competencies:
+  - name: TypeScript
+    tracks: [dev]
+    aliases: [TS]
+    evidence:
+      - "Primary language for the Example Portfolio API, a REST service with
+        layered architecture and full test coverage."
+
+  - name: Express
+    tracks: [dev]
+    aliases: ["Express.js"]
+    evidence:
+      - "Built REST endpoints with authentication, validation and CRUD in the
+        Example Portfolio API."
+
+  - name: PostgreSQL
+    tracks: [dev]
+    aliases: [Postgres]
+    evidence:
+      - "Used PostgreSQL as the relational store for the Example Portfolio API."
+
+  - name: Automated testing
+    tracks: [dev, automation]
+    aliases: [Vitest, Jest, "unit testing"]
+    evidence:
+      - "Example Portfolio API's CI runs Vitest with full coverage of the
+        service layer."
+
+  - name: Linux server administration
+    tracks: [security, automation]
+    aliases: ["Ubuntu Server", Linux]
+    evidence:
+      - "Administer a personal homelab on Ubuntu Server: SSH, firewall rules,
+        reverse proxy, container deployment."
+
+  - name: Firewall and intrusion prevention
+    tracks: [security]
+    aliases: [UFW, Fail2ban, firewall]
+    evidence:
+      - "Configured UFW firewall rules and Fail2ban on the homelab server."
+
+  - name: Containers and process management
+    tracks: [automation, dev]
+    aliases: [Docker, PM2, containers]
+    evidence:
+      - "Deployed the Example Portfolio API with Docker and managed it with PM2."
+
+resumeVariants:
+  - id: backend
+    tracks: [dev]
+    competencyNames:
+      - TypeScript
+      - Express
+      - PostgreSQL
+      - Automated testing
+
+  - id: infra-security
+    tracks: [security, automation]
+    competencyNames:
+      - Linux server administration
+      - Firewall and intrusion prevention
+      - Containers and process management
