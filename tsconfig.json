@@ -51,6 +51,11 @@
   },
   // vitest.config.ts is listed so the project has at least one input file
   // before src/ exists, and so the config itself is typechecked.
-  "include": ["src/**/*.ts", "test/**/*.ts", "vitest.config.ts"],
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts",
+    "scripts/**/*.ts",
+    "vitest.config.ts"
+  ],
   "exclude": ["node_modules", "dist"]
 }
