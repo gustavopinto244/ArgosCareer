@@ -1,0 +1,45 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+
+    // CommonJS rather than the ESM used by atlas-manager: NestJS's supported
+    // path is CJS, and its CLI and parts of the ecosystem assume it.
+    // See docs/adr/002.
+    //
+    // node16 rather than the classic commonjs/node pair: package.json declares
+    // no "type", so node16 resolves and emits CommonJS anyway, and the legacy
+    // "node" resolution is deprecated in TypeScript 6 and removed in 7.
+    "module": "node16",
+    "moduleResolution": "node16",
+
+    // NestJS dependency injection resolves constructor parameter types from
+    // metadata emitted by these two flags.
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "forceConsistentCasingInFileNames": true,
+
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+
+    "outDir": "dist",
+    "rootDir": ".",
+    "sourceMap": true,
+    "declaration": false,
+    "noEmit": true
+  },
+  // vitest.config.mts is listed so the project has at least one input file
+  // before src/ exists, and so the config itself is typechecked. It is .mts
+  // because vitest/config is ESM-only and cannot be required from CommonJS.
+  "include": ["src/**/*.ts", "test/**/*.ts", "vitest.config.mts"],
+  "exclude": ["node_modules", "dist"]
+}
