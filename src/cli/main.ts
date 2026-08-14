@@ -33,6 +33,12 @@ import { deriveProfileKeywords } from "../profile/domain/profile-keywords";
 import { hashProfile } from "../profile/domain/profile-hash";
 import { ScorerPort } from "../scoring/domain/ports/scorer.port";
 import { StubScorer } from "../scoring/infrastructure/stub-scorer";
+import { ApiScorer } from "../scoring/infrastructure/api-scorer";
+import { StageAExtractor } from "../scoring/infrastructure/stage-a-extractor";
+import { StageBMatcher } from "../scoring/infrastructure/stage-b-matcher";
+import { OpenRouterClient } from "../scoring/infrastructure/openrouter-client";
+import { ExtractionsRepository } from "../persistence/infrastructure/extractions-repository";
+import { MatchesRepository } from "../persistence/infrastructure/matches-repository";
 import { NotifierPort } from "../delivery/domain/ports/notifier.port";
 import { composeDigest, ScoredPosting } from "../delivery/domain/digest";
 import { TelegramNotifier } from "../delivery/infrastructure/telegram-notifier";
@@ -332,24 +338,47 @@ async function deliverCommand(): Promise<void> {
     process.env.PROFILE_PATH ?? "./config/profile.yaml",
   );
 
+  const db = openDatabase();
   const adapter = process.env.SCORER_ADAPTER ?? "stub";
-  if (adapter !== "stub") {
+  let scorer: ScorerPort;
+
+  if (adapter === "stub") {
+    scorer = new StubScorer(criteria);
+  } else if (adapter === "api") {
+    const apiKey = process.env.LLM_API_KEY;
+    const model = process.env.LLM_MODEL;
+    if (!apiKey || !model) {
+      console.error(
+        "deliver: SCORER_ADAPTER=api requires LLM_API_KEY and LLM_MODEL (ADR-012)",
+      );
+      process.exitCode = 1;
+      return;
+    }
+    const client = new OpenRouterClient({
+      apiKey,
+      model,
+      ...(process.env.LLM_BASE_URL
+        ? { baseUrl: process.env.LLM_BASE_URL }
+        : {}),
+    });
+    const ask = client.complete.bind(client);
+    scorer = new ApiScorer(
+      new StageAExtractor(ask, new ExtractionsRepository(db)),
+      new StageBMatcher(ask, new MatchesRepository(db)),
+      profile,
+      criteria,
+    );
+  } else {
     console.error(
-      `deliver: SCORER_ADAPTER=${adapter} is not implemented yet — only "stub" exists before M7`,
+      `deliver: SCORER_ADAPTER=${adapter} is not implemented — "stub" and "api" exist before M8's OllamaScorer`,
     );
     process.exitCode = 1;
     return;
   }
-  const scorer = new StubScorer(criteria);
+
   const notifier = new TelegramNotifier(loadTelegramConfig());
 
-  const outcome = await executeDeliver(
-    openDatabase(),
-    scorer,
-    notifier,
-    criteria,
-    profile,
-  );
+  const outcome = await executeDeliver(db, scorer, notifier, criteria, profile);
 
   if (outcome.error) {
     console.error(`deliver (run ${outcome.runId}) failed: ${outcome.error}`);

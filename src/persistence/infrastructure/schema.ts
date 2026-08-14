@@ -45,6 +45,9 @@ export const postings = sqliteTable(
     // Null when the source provided no link. The digest (M6) treats the
     // original posting link as mandatory on every entry it can fill in.
     sourceUrl: text("source_url"),
+    // Null when the source provided none — stage A (M7) has nothing to
+    // extract requirements from, distinct from a genuinely empty posting.
+    description: text("description"),
     firstSeenAt: integer("first_seen_at", { mode: "timestamp_ms" }).notNull(),
     lastSeenAt: integer("last_seen_at", { mode: "timestamp_ms" }).notNull(),
     rawPayload: text("raw_payload").notNull(),
@@ -60,6 +63,64 @@ export const postings = sqliteTable(
   (table) => [
     uniqueIndex("postings_fingerprint_unique").on(table.fingerprint),
     index("postings_company_idx").on(table.company),
+  ],
+);
+
+/**
+ * Stage A's cache (ADR-007: keyed `(fingerprint, promptVersion)`). One row
+ * per posting per prompt version — re-extracting the same posting under the
+ * same prompt is a cache hit, and a prompt change during M7 calibration
+ * produces a new key rather than invalidating what came before, so old and
+ * new prompt results can be compared side by side.
+ *
+ * `requirements` is the JSON-serialized `Requirement[]` (docs/04). Stored as
+ * text, not normalized into rows, because it is never queried by field —
+ * only ever read back whole for stage B or the digest.
+ */
+export const extractions = sqliteTable(
+  "extractions",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    fingerprint: text("fingerprint").notNull(),
+    promptVersion: text("prompt_version").notNull(),
+    requirements: text("requirements").notNull(),
+    extractedAt: integer("extracted_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("extractions_fingerprint_prompt_unique").on(
+      table.fingerprint,
+      table.promptVersion,
+    ),
+  ],
+);
+
+/**
+ * Stage B's cache (ADR-007: keyed `(fingerprint, profileHash, promptVersion)`).
+ * `profileHash` is what makes this cache correct rather than merely fast:
+ * editing the profile must invalidate every match that used the old one, and
+ * a stale match is worse than a missing one — it is a wrong answer that
+ * looks computed (`05-domain-model.md`).
+ *
+ * `matches` is the JSON-serialized `Match[]` for every requirement in the
+ * corresponding extraction, for the same reason `requirements` above is text:
+ * read back whole, never queried by field.
+ */
+export const matches = sqliteTable(
+  "matches",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    fingerprint: text("fingerprint").notNull(),
+    profileHash: text("profile_hash").notNull(),
+    promptVersion: text("prompt_version").notNull(),
+    matches: text("matches").notNull(),
+    matchedAt: integer("matched_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("matches_fingerprint_profile_prompt_unique").on(
+      table.fingerprint,
+      table.profileHash,
+      table.promptVersion,
+    ),
   ],
 );
 
