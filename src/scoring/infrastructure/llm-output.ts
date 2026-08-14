@@ -64,7 +64,18 @@ export async function parseModelOutputWithRetries<T>(
   let lastError = "no attempts made";
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const raw = await ask(prompt);
+    let raw: string;
+    try {
+      raw = await ask(prompt);
+    } catch (cause) {
+      // A transport failure (timeout, non-2xx) is not "invalid_output" in
+      // spirit, but it is bounded by the same attempt budget and never
+      // thrown past this loop — matching every other port's failure-as-value
+      // convention (CollectorPort, NotifierPort).
+      lastError = `Request failed: ${(cause as Error).message}`;
+      prompt = buildRetryPrompt(initialPrompt, lastError);
+      continue;
+    }
     const normalized = normalizeModelOutput(raw);
 
     let parsedJson: unknown;

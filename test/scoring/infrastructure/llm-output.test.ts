@@ -108,6 +108,27 @@ describe("parseModelOutputWithRetries — exhausted retries, never throws", () =
     expect(ask).toHaveBeenCalledTimes(3);
   });
 
+  it("treats a rejected ask() call as a failed attempt rather than throwing", async () => {
+    const ask = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("network unreachable"))
+      .mockResolvedValueOnce('{"status":"met"}');
+
+    const result = await parseModelOutputWithRetries(Schema, ask, "prompt");
+
+    expect(result.ok).toBe(true);
+    expect(ask).toHaveBeenCalledTimes(2);
+  });
+
+  it("exhausts attempts and returns ok:false when ask() always rejects", async () => {
+    const ask = vi.fn().mockRejectedValue(new Error("timeout"));
+    const result = await parseModelOutputWithRetries(Schema, ask, "prompt", 2);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.lastError).toContain("timeout");
+    expect(ask).toHaveBeenCalledTimes(2);
+  });
+
   it("respects a custom maxAttempts", async () => {
     const ask = vi.fn(async () => "not json");
     const result = await parseModelOutputWithRetries(Schema, ask, "prompt", 1);
