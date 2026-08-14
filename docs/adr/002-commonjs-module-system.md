@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted — amended 2026-08-14, see [Amendment](#amendment--2026-08-14-node16--nodenext)
 
 ## Date
 
@@ -79,3 +79,56 @@ Strict compiler flags carried over from `atlas-manager`: `strict`,
 - `exactOptionalPropertyTypes` occasionally conflicts with framework typings. If
   it fights Nest in M1, relaxing that single flag is preferable to relaxing
   `strict` — and requires amending this ADR rather than editing it silently.
+
+## Amendment — 2026-08-14: `node16` → `nodenext`
+
+The text above is kept as originally accepted. This section records a change to
+the resolution mode. The core decision — CommonJS with a strict configuration —
+is unchanged, which is why this is an amendment rather than a superseding ADR.
+
+### What prompted it
+
+A question about why `moduleResolution: "node"` was deprecated exposed a
+conflation worth writing down: `node10`, `node16` and `nodenext` name
+_resolution algorithms_, not target runtime versions. `node16` means "the
+algorithm Node 16 introduced", which Node 18, 20, 22 and 24 all still use.
+
+That reframing raised a question the original decision never asked: whether
+`nodenext`, which tracks current Node semantics, models something `node16` does
+not.
+
+### What was measured
+
+It does. Node has supported `require()` of an ES module unflagged since
+**22.12.0** — flagged before that on the 22.x line, and unflagged on 23.x. Only
+`nodenext` models this.
+
+Verified locally on Node 24.19.0: with `nodenext`, `tsc --noEmit` accepts
+`import { defineConfig } from "vitest/config"` inside a CommonJS `.ts` file, and
+`require("vitest/config")` resolves at runtime. Under `node16` the same file
+fails to compile with TS1479.
+
+### Decision
+
+`module` and `moduleResolution` become `nodenext`. `vitest.config.mts` reverts
+to `vitest.config.ts`. `engines.node` tightens from `>=22` to `>=22.12.0`.
+
+The engines change is the load-bearing part: between 22.0 and 22.11 `require(esm)`
+sits behind a flag, so leaving `>=22` while depending on `nodenext` semantics
+would make the declared support range a false claim.
+
+### Consequences
+
+- The consequence above stating that `vitest.config.mts` must be `.mts` **no
+  longer holds**. `eslint.config.mjs` still must be `.mjs`, because ESLint loads
+  flat config itself rather than through TypeScript.
+- ESM-only dependencies stop being awkward, which was the largest ongoing cost
+  the original decision accepted.
+- Module resolution now matches `atlas-manager`'s `NodeNext`, removing one of
+  the three divergences between the repositories.
+- **New cost:** `nodenext` is a moving target. Its semantics may shift between
+  TypeScript releases, where `node16` was pinned. This is the trade accepted in
+  exchange for the above, and it is the thing to check first if a TypeScript
+  upgrade breaks the build.
+- The supported Node range narrows. Node 22.0–22.11 is no longer supported; CI
+  covers current 22.x and 24.x, both well past the threshold.

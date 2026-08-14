@@ -106,9 +106,47 @@ score = 65 × mandatoryCoverage
 **Empty category → coverage 1.** A posting that lists no "nice to haves" must not
 score worse than one that lists them and has them met.
 
-`trackAlignment` measures fit against the search profile tracks (`dev`,
-`security`, `automation`) — a back-end posting scores higher on this term than an
-infrastructure one, per the priorities in `01-vision-and-scope.md`.
+### `trackAlignment`
+
+This term answers "is this the _kind_ of job I am looking for?", which is
+separate from "do I meet its requirements?". A posting can match every stated
+requirement and still be the wrong track — a data-analysis internship whose
+requirements happen to be SQL and Python is a good match and a bad target.
+
+**The posting's track is classified deterministically in the pre-filter**, by
+keyword against a configured table, before any LLM call. Stage C then reads a
+weight for that track. This keeps stage C a pure function and keeps a 15-point
+term out of a small model's judgment.
+
+```
+trackAlignment = trackWeights[posting.track]
+```
+
+```yaml
+# config — provisional until M7 calibration
+trackWeights:
+  dev: 1.0 # priority 1
+  security: 1.0 # priority 1, equal to dev
+  automation: 0.7 # priority 2
+  unknown: 0.4
+```
+
+`dev` and `security` share the weight `1.0` because they are equal first
+priorities (`01-vision-and-scope.md`). Equal priority is expressed here, in
+configuration, rather than as a branch in the formula.
+
+`unknown: 0.4` is deliberately non-zero. A posting the classifier cannot place
+is a classifier gap, not a bad posting, and zeroing 15 points on a classification
+failure would hide the gap by pushing the posting out of the digest. A run
+producing many `unknown` postings is a signal to extend the keyword table.
+
+**When a posting matches more than one track, the highest weight wins.** A
+"DevSecOps intern" posting hitting both `security` and `automation` scores 1.0.
+Averaging would penalize breadth, which is the opposite of the intent.
+
+The weights are configuration and provisional, like every other number on this
+page. Changing search strategy — adding a track, reweighting one — must not
+require touching the application (principle 3).
 
 ### Blocking requirements override everything
 
