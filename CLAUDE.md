@@ -332,19 +332,19 @@ about Brazilian postings. See ADR-003.
 
 ## 14. Milestones
 
-| #   | Milestone           | Delivers                                                                                           | Status      |
-| --- | ------------------- | -------------------------------------------------------------------------------------------------- | ----------- |
-| M0  | Bootstrap           | `CLAUDE.md`, `docs/`, `.gitignore`, CI, ADR template, README                                       | in progress |
-| M1  | Domain + stage C    | Entities, fingerprint, score computation, unit tests                                               |             |
-| M2  | Master profile      | Zod schema, loader, `profile.yaml`, period derivation                                              |             |
-| M3  | Gupy collector      | Adapter + `fixture:gupy` + schema fitted to the real response                                      |             |
-| M4  | Persistence         | Drizzle + SQLite, migrations, dedup, `runs` table                                                  |             |
-| M5  | Pre-filter          | Configurable deterministic rules                                                                   |             |
-| M6  | **Vertical slice**  | Gupy → SQLite → Telegram with `StubScorer`. A real posting on the phone                            |             |
-| M7  | Real scoring        | Stages A and B, versioned prompts in `prompts/`, 50 labelled postings, calibration table in README |             |
-| M8  | Deployment          | Docker Compose on Atlas, scheduling, backup, broken-adapter alert                                  |             |
-| M9  | API + Hermes        | HTTP endpoints, MCP server, integration                                                            |             |
-| M10 | Market intelligence | Skill taxonomy, aggregate market analysis, gap analysis, study plan                                |             |
+| #   | Milestone           | Delivers                                                                                           | Status |
+| --- | ------------------- | -------------------------------------------------------------------------------------------------- | ------ |
+| M0  | Bootstrap           | `CLAUDE.md`, `docs/`, `.gitignore`, CI, ADR template, README                                       | done   |
+| M1  | Domain + stage C    | Entities, fingerprint, score computation, unit tests                                               | done   |
+| M2  | Master profile      | Zod schema, loader, `profile.yaml`, period derivation                                              | done   |
+| M3  | Gupy collector      | Adapter + `fixture:gupy` + schema fitted to the real response                                      | done   |
+| M4  | Persistence         | Drizzle + SQLite, migrations, dedup, `runs` table                                                  | done   |
+| M5  | Pre-filter          | Configurable deterministic rules                                                                   | done   |
+| M6  | **Vertical slice**  | Gupy → SQLite → Telegram with `StubScorer`. A real posting on the phone                            | done   |
+| M7  | Real scoring        | Stages A and B, versioned prompts in `prompts/`, 50 labelled postings, calibration table in README |        |
+| M8  | Deployment          | Docker Compose on Atlas, scheduling, backup, broken-adapter alert                                  |        |
+| M9  | API + Hermes        | HTTP endpoints, MCP server, integration                                                            |        |
+| M10 | Market intelligence | Skill taxonomy, aggregate market analysis, gap analysis, study plan                                |        |
 
 P1/P2 sources (Google Jobs, Indeed, LinkedIn) come after M6, one per pull
 request.

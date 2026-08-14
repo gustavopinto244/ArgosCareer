@@ -13,6 +13,36 @@ version to attach it to.
 
 ## [Unreleased]
 
+### Added — M6, vertical slice 🎯
+
+- The real `Digest` shape (`src/delivery/domain/digest.ts`), replacing the M1
+  placeholder: recommended/review/period-blocked sections and a run summary
+  (collected, deduped, filtered, scored, failed sources), plus a pure pt-BR
+  renderer translating only at the `NotifierPort` boundary
+  (`06-glossary.md`).
+- `TelegramNotifier` (`src/delivery/infrastructure/`): a direct, dumb
+  Telegram client. Fails as a value, never throws; splits a digest across
+  multiple `sendMessage` calls when it exceeds Telegram's 4096-character
+  limit.
+- `argos deliver` (`src/cli/main.ts`): pre-filter → `StubScorer` →
+  compose → notify over every active, not-yet-notified posting. Only
+  postings that appear in a successfully sent digest are marked notified
+  (ADR-007) — a failed send or a rejected posting stays a candidate for the
+  next run.
+- `Posting.sourceUrl` (migration 0003) — the architecture doc marks the
+  original posting link as mandatory on every digest entry.
+- `deriveProfileKeywords`, `hashProfile` (`src/profile/domain/`) — needed to
+  call the pre-filter and `ScorerPort.score` from `deliver`.
+- **Run for real** against the live Gupy API on 2026-08-14: collected,
+  deduplicated, pre-filtered and delivered 6 real dev-track postings to
+  Telegram, including a strong match ("Estágio em Desenvolvimento Backend",
+  remote, 100%). **A real posting arrived on the phone.**
+- **Real-run finding:** `minKeywordAdherence` matches only a posting's
+  title — `Posting` has no `description` field yet — and real Gupy titles
+  are too short to repeat a specific competency name verbatim. This
+  rejected good, on-track matches, so `config/criteria.yaml` sets it to `0`
+  until `Posting` carries a description stage A can read.
+
 ### Added — M5, pre-filter
 
 - `applyPreFilter` (`src/prefilter/domain/pre-filter.ts`): six deterministic

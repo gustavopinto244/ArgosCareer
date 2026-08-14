@@ -119,18 +119,31 @@ Delivered in PRs #1 and #2, hardened in #3 and #4.
 - [x] Unit tests per rule, plus ordering — 24 tests including 4 proving the
       short-circuit sequence on postings that fail multiple rules at once
 
-## M6 — Vertical slice 🎯
+## M6 — Vertical slice ✅ 🎯
 
 The milestone that proves the project is real.
 
-- [ ] Gupy → SQLite → Telegram end to end with `StubScorer`
-- [ ] **A real posting arrives on the phone**
-- [ ] Digest in pt-BR per the `06-glossary.md` mapping
-- [ ] Period-blocked postings in their own section ("opens for you in 2027.1")
-- [ ] Run summary in the digest: collected, deduped, filtered, scored, plus any
+- [x] Gupy → SQLite → Telegram end to end with `StubScorer` — `argos collect`
+      → `argos dedup` → `argos deliver`, run for real against the live Gupy
+      API on 2026-08-14
+- [x] **A real posting arrives on the phone** — 6 real postings, delivered
+- [x] Digest in pt-BR per the `06-glossary.md` mapping
+- [x] Period-blocked postings in their own section ("opens for you in
+      2027.1") — the section renders and is tested, but nothing populates it
+      with real data yet: no stage exists before M7 that reads a posting's
+      text closely enough to detect a stated period requirement, so this
+      section is honestly empty in every real run so far
+- [x] Run summary in the digest: collected, deduped, filtered, scored, plus any
       source that failed
-- [ ] A posting already notified is never notified again (ADR-007)
-- [ ] One end-to-end test with a notifier double
+- [x] A posting already notified is never notified again (ADR-007)
+- [x] One end-to-end test with a notifier double
+
+**Real-run finding, folded back into `config/criteria.yaml`:**
+`minKeywordAdherence` matches only against a posting's _title_ — `Posting`
+has no `description` field yet — and real Gupy titles are short enough that
+this rejected good, on-track matches (e.g. "Estágio em Desenvolvimento
+Backend", remote). Set to `0` until `Posting` carries a description stage A
+can read.
 
 ## M7 — Real scoring
 
