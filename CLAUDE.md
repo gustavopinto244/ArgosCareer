@@ -149,9 +149,10 @@ Scheduler → Collect (adapters) → Normalize → Dedup → Pre-filter
 
 **Ports:** `CollectorPort`, `ScorerPort`, `NotifierPort`.
 
-**Cadence:** collection runs **daily** at low volume; the digest goes out
-**Tuesdays and Fridays**. Decoupling the two reduces blocking risk and shortens
-the discovery window.
+**Cadence** (ADR-009): collection runs **every few hours**, low volume, no LLM.
+Scoring and delivery run **once nightly**, in a configured off-peak window
+(default `03:00 America/Sao_Paulo`) — the only window the model runs in, and
+the only time the digest is delivered. **Daily**, not twice a week.
 
 **Dedup:** `sha256(normalize(company) + normalize(title) + normalize(city))`,
 where normalize = lowercase, strip accents, strip punctuation, collapse
@@ -274,9 +275,8 @@ with no reviewable code of its own, tied to a v0.x project that ships every two
 weeks.
 
 **Correct boundary:** ArgosCareer exposes a stable HTTP API (and later an MCP
-server). Hermes is a **consumer, never the critical path.** The Tuesday and
-Friday digest goes out through a direct, dumb Telegram client that works with
-Hermes down.
+server). Hermes is a **consumer, never the critical path.** The nightly digest
+goes out through a direct, dumb Telegram client that works with Hermes down.
 
 ## 11. Git workflow
 

@@ -24,7 +24,7 @@ three different words that all get casually called "job".
 | **Evidence**                  | A verbatim quote from the profile supporting a `Match`                                       | A paraphrase — a non-verbatim "quote" is a failed match                       |
 | **Verdict**                   | `apply`, `review` or `discard`, derived from the score                                       | The score itself                                                              |
 | **Run**                       | One execution of the pipeline, collection or delivery                                        | _Digest_, which is what a delivery run produces                               |
-| **Digest**                    | The message delivered to Telegram on Tuesdays and Fridays                                    | _Run_                                                                         |
+| **Digest**                    | The message delivered to Telegram nightly (ADR-009)                                          | _Run_                                                                         |
 | **Profile**                   | The master profile in `config/profile.yaml`, source of truth                                 | The resume PDFs, which are projections of it                                  |
 | **Resume variant**            | A named subset of the profile — which tracks and competencies it foregrounds. Holds no prose | A resume file; the variant is a view over the profile                         |
 | **Work mode**                 | `remote`, `hybrid`, `onsite` or `unknown`                                                    | _Location_, which is a place. Different axes                                  |

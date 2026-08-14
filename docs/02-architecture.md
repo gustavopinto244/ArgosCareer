@@ -41,7 +41,7 @@ type CollectionResult = {
 };
 ```
 
-Gupy changing a field name must degrade Friday's digest, not cancel it. The
+Gupy changing a field name must degrade that night's digest, not cancel it. The
 consequence to accept: a silently empty source looks identical to a source with
 no matching postings, so M8 adds an alert on a source returning zero results
 across consecutive runs. Without that alert this principle hides failures instead
@@ -93,21 +93,39 @@ adapters, `composition/` wires them.
 
 ## Scheduling and cadence
 
-**Collection runs daily.** **The digest goes out Tuesdays and Fridays.**
+Two independent schedules, deliberately different in frequency and in cost
+(ADR-009):
 
-Decoupling the two is deliberate:
+**Collection runs frequently — every few hours, low volume, no LLM.** It
+collects, normalizes, deduplicates and pre-filters. None of that needs a model,
+so none of it is confined to a time window.
 
-- Daily collection at low volume looks like a person checking a job board.
-  Twice-weekly collection of the same total volume looks like a burst, which is
-  what rate limiting is designed to catch.
-- A posting appearing Wednesday morning is discovered Wednesday and delivered
-  Friday, rather than being discovered Friday alongside everything else. The
-  discovery window shrinks from days to hours even though delivery does not
-  change.
-- Scoring can be spread across daily runs instead of concentrated into two
-  batches, which matters when the scorer is a 4B model on a mini PC with no GPU.
+**Scoring and delivery run once nightly**, in a configured off-peak window
+(default `03:00 America/Sao_Paulo`). This is the only window in which the LLM
+runs, the only point where `OLLAMA_KEEP_ALIVE=0` matters, and the only time the
+digest is delivered — **daily**, not twice a week.
 
-Implemented with `@nestjs/schedule`. Both schedules are configuration.
+Reasoning:
+
+- Frequent, low-volume collection still looks like a person checking a job
+  board rather than a burst, which is what rate limiting is designed to catch.
+  Running it every few hours instead of once a day only improves this.
+- A posting appearing at 9am is now discovered within a few hours and delivered
+  that same night — worst case, once nightly. Under the old twice-weekly
+  digest, a posting appearing right after Friday's send waited until the
+  following Tuesday. **This is a strict latency improvement, not only a
+  resource optimization.**
+- Confining the LLM to one nightly window means the model loads once, runs one
+  bounded batch, and unloads — instead of contending with `atlas-manager`,
+  Nginx and the other Atlas services during hours when they are actually
+  serving traffic.
+- `firstSeenAt` (ADR-007 amendment) is now accurate to within the collection
+  interval rather than to within a day, which matters once M10's market
+  analysis reads it.
+
+Implemented with `@nestjs/schedule`, as two independent cron jobs. Both
+intervals — collection frequency and the nightly window's time and timezone —
+are configuration (`docs/09-configuration.md`).
 
 ## Deduplication
 
@@ -275,7 +293,7 @@ destroy the project: the core would become configuration of a third-party tool,
 leaving no reviewable code of its own, coupled to a v0.x project that ships every
 two weeks. See `CLAUDE.md` §10.
 
-The Tuesday/Friday digest works with Hermes down. That is the test of whether the
+The nightly digest works with Hermes down. That is the test of whether the
 boundary is real.
 
 ## Deployment and resource budget

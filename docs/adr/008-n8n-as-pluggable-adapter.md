@@ -45,7 +45,7 @@ artifact would be an exported workflow JSON. This is the Hermes decision
 (`02-architecture.md`) applied to a different vendor, and the answer does not
 change because the vendor does.
 
-It also puts a container on the critical path of the Tuesday and Friday digest.
+It also puts a container on the critical path of the nightly digest.
 
 ### n8n replaces `@nestjs/schedule`
 
@@ -85,7 +85,7 @@ n8n polls or receives a webhook; ArgosCareer neither knows nor cares.
 
 **Boundary rules, non-negotiable:**
 
-1. n8n is **never on the critical path.** The Tuesday and Friday digest goes out
+1. n8n is **never on the critical path.** The nightly digest goes out
    through the direct Telegram client with n8n stopped. This is the same test
    applied to Hermes, and it is a test, not a slogan — M9 verifies it.
 2. **No domain logic in a workflow.** A workflow fetches and reshapes. Scoring,

@@ -29,7 +29,7 @@ signature of `ScorerPort`, which M1 defines.
 Two constraints shape it. A batch runs unattended on a schedule, so nothing can
 block on a human. And principle 1 — a broken source degrades the digest rather
 than cancelling it — applies here by analogy: a posting that cannot be scored
-must not take the Friday digest down with it.
+must not take that night's digest down with it.
 
 ## Considered options
 

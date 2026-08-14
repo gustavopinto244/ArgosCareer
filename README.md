@@ -35,10 +35,11 @@ The bottleneck is finding and triaging postings, not applying to them.
 
 ```
 Scheduler → Collect → Normalize → Dedup → Pre-filter → Score → Telegram digest
-             (daily)                        (~70% cut)  (LLM)   (Tue / Fri)
+           (every 4h)                     (~70% cut)  (LLM, nightly, off-peak)
 ```
 
-Collection runs daily at low volume; the digest goes out Tuesdays and Fridays.
+Collection runs every few hours, low volume, no LLM; scoring and delivery run
+once nightly in an off-peak window (ADR-009). The digest goes out daily.
 Decoupling the two shortens the discovery window from days to hours and keeps
 request patterns unremarkable.
 
