@@ -26,7 +26,9 @@ in `criteria.yaml`, where it can be diffed.
 TELEGRAM_BOT_TOKEN=       # required
 TELEGRAM_CHAT_ID=         # required
 SCORER_ADAPTER=           # stub | api | ollama
-LLM_API_KEY=              # required when SCORER_ADAPTER=api
+LLM_API_KEY=              # required when SCORER_ADAPTER=api (OpenRouter, ADR-012)
+LLM_BASE_URL=             # default https://openrouter.ai/api/v1
+LLM_MODEL=                # model slug, e.g. openrouter/auto — the calibration variable
 OLLAMA_BASE_URL=          # required when SCORER_ADAPTER=ollama
 N8N_WEBHOOK_URL=          # required when an n8n-backed source is enabled
 N8N_WEBHOOK_TOKEN=        # shared secret for that webhook

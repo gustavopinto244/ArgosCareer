@@ -10,19 +10,20 @@ revisited on its merits instead of re-argued from memory.
 
 ## Index
 
-| ADR                                                  | Title                                                          | Status   | Date       |
-| ---------------------------------------------------- | -------------------------------------------------------------- | -------- | ---------- |
-| [001](adr/001-nestjs-as-application-framework.md)    | Use NestJS as the application framework                        | Accepted | 2026-08-14 |
-| [002](adr/002-commonjs-module-system.md)             | Build on CommonJS with a strict TypeScript configuration       | Accepted | 2026-08-14 |
-| [003](adr/003-english-repository-language.md)        | Write the repository in English, deliver the digest in pt-BR   | Accepted | 2026-08-14 |
-| [004](adr/004-public-repository-privacy-boundary.md) | Draw an explicit privacy boundary for a public repository      | Accepted | 2026-08-14 |
-| [005](adr/005-llm-does-not-produce-the-score.md)     | Keep score computation out of the LLM                          | Accepted | 2026-08-14 |
-| [006](adr/006-llm-output-failure-policy.md)          | Treat invalid LLM output as a normal outcome                   | Accepted | 2026-08-14 |
-| [007](adr/007-stage-re-execution-and-idempotency.md) | Make stages re-runnable through persisted state                | Accepted | 2026-08-14 |
-| [008](adr/008-n8n-as-pluggable-adapter.md)           | Use n8n as a pluggable adapter, never as the orchestrator      | Accepted | 2026-08-14 |
-| [009](adr/009-nightly-batch-window.md)               | Confine scoring and delivery to a single nightly window        | Accepted | 2026-08-14 |
-| [010](adr/010-similarity-dedup-algorithm.md)         | Character-bigram Dice similarity for layer 2 dedup             | Accepted | 2026-08-14 |
-| [011](adr/011-pre-filter-rules-and-thresholds.md)    | Pre-filter rules, ordering, and the unknown-axis leniency rule | Accepted | 2026-08-14 |
+| ADR                                                     | Title                                                          | Status   | Date       |
+| ------------------------------------------------------- | -------------------------------------------------------------- | -------- | ---------- |
+| [001](adr/001-nestjs-as-application-framework.md)       | Use NestJS as the application framework                        | Accepted | 2026-08-14 |
+| [002](adr/002-commonjs-module-system.md)                | Build on CommonJS with a strict TypeScript configuration       | Accepted | 2026-08-14 |
+| [003](adr/003-english-repository-language.md)           | Write the repository in English, deliver the digest in pt-BR   | Accepted | 2026-08-14 |
+| [004](adr/004-public-repository-privacy-boundary.md)    | Draw an explicit privacy boundary for a public repository      | Accepted | 2026-08-14 |
+| [005](adr/005-llm-does-not-produce-the-score.md)        | Keep score computation out of the LLM                          | Accepted | 2026-08-14 |
+| [006](adr/006-llm-output-failure-policy.md)             | Treat invalid LLM output as a normal outcome                   | Accepted | 2026-08-14 |
+| [007](adr/007-stage-re-execution-and-idempotency.md)    | Make stages re-runnable through persisted state                | Accepted | 2026-08-14 |
+| [008](adr/008-n8n-as-pluggable-adapter.md)              | Use n8n as a pluggable adapter, never as the orchestrator      | Accepted | 2026-08-14 |
+| [009](adr/009-nightly-batch-window.md)                  | Confine scoring and delivery to a single nightly window        | Accepted | 2026-08-14 |
+| [010](adr/010-similarity-dedup-algorithm.md)            | Character-bigram Dice similarity for layer 2 dedup             | Accepted | 2026-08-14 |
+| [011](adr/011-pre-filter-rules-and-thresholds.md)       | Pre-filter rules, ordering, and the unknown-axis leniency rule | Accepted | 2026-08-14 |
+| [012](adr/012-openrouter-as-the-api-scorer-provider.md) | Use OpenRouter as the `ApiScorer` provider                     | Accepted | 2026-08-14 |
 
 ## When an ADR is required
 
