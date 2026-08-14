@@ -103,17 +103,21 @@ Delivered in PRs #1 and #2, hardened in #3 and #4.
       (ADR-010), including a real false-positive found running against live
       data, not only the cases used to pick the threshold
 
-## M5 — Pre-filter
+## M5 — Pre-filter ✅
 
-- [ ] Every rule from `02-architecture.md`, each configurable in
+- [x] Every rule from `02-architecture.md`, each configurable in
       `config/criteria.yaml`
-- [ ] Deterministic track classification feeding `trackAlignment`
-- [ ] `location` and `workMode` filtered as separate axes, both allowing
-      `unknown` without silently discarding or accepting
-- [ ] Every rejection records a reason (`05-domain-model.md`)
-- [ ] **The ~70% cut estimate measured** against real collected volume, and
-      `docs/02` updated with the real number
-- [ ] Unit tests per rule, plus ordering
+- [x] Deterministic track classification feeding `trackAlignment` — verified
+      through the real `computeTrackAlignment` function, not reimplemented
+- [x] `location` and `workMode` filtered as separate axes, both allowing
+      `unknown` without silently discarding or accepting (ADR-011)
+- [x] Every rejection records a reason (`05-domain-model.md`)
+- [x] **The ~70% cut estimate measured** against real collected volume, and
+      `docs/02` updated with the real number — turned out to be two numbers,
+      97.1% nationwide and 84.2% city-narrowed, with the gap itself the
+      actionable finding for M8's collection strategy
+- [x] Unit tests per rule, plus ordering — 24 tests including 4 proving the
+      short-circuit sequence on postings that fail multiple rules at once
 
 ## M6 — Vertical slice 🎯
 
