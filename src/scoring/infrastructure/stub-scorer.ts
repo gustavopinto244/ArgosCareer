@@ -2,8 +2,8 @@ import { classifyTrack } from "../../prefilter/domain/classify-track";
 import { Criteria } from "../../prefilter/domain/criteria";
 import { Posting } from "../../posting/domain/posting";
 import { computeScore } from "../domain/score";
-import { ScoringConfig } from "../domain/types";
 import { ScorerPort, ScoreResult } from "../domain/ports/scorer.port";
+import { buildScoringConfig } from "./scoring-config";
 
 /**
  * `StubScorer` for M6's vertical slice: never calls an LLM, still runs the
@@ -25,16 +25,7 @@ export class StubScorer implements ScorerPort {
 
   async score(posting: Posting, _profileHash: string): Promise<ScoreResult> {
     const tracks = classifyTrack(posting.title, this.criteria.tracks);
-
-    const config: ScoringConfig = {
-      weights: this.criteria.scoring.weights,
-      thresholds: this.criteria.scoring.thresholds,
-      trackWeights: this.criteria.trackWeights,
-      minExtractedRequirements: this.criteria.scoring.minExtractedRequirements,
-      blockingCapScore: this.criteria.scoring.blockingCapScore,
-    };
-
-    const outcome = computeScore([], tracks, config);
+    const outcome = computeScore([], tracks, buildScoringConfig(this.criteria));
 
     return Promise.resolve({ ok: true, ...outcome });
   }
