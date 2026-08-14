@@ -47,19 +47,22 @@ Delivered in PRs #1 and #2, hardened in #3 and #4.
       Amendment 2) — the metadata concern is unfounded, `typescript-eslint`
       refusing to run under TS 7.0 is the real blocker; staying on 6.0.3
 
-## M2 — Master profile
+## M2 — Master profile ✅
 
-- [ ] Zod schema for `config/profile.yaml`, rejecting a competency with no
+- [x] Zod schema for `config/profile.yaml`, rejecting a competency with no
       `evidence`
-- [ ] Loader failing loudly at startup with the file and field named
-- [ ] `config/profile.example.yaml` committed, fictional, structurally complete
-- [ ] Real `config/profile.yaml` written, including the `atlas-manager` evidence
+- [x] Loader failing loudly at startup with the file and field named
+- [x] `config/profile.example.yaml` committed, fictional, structurally complete
+      — guarded by a test asserting it stays valid against the schema
+- [x] Real `config/profile.yaml` written, including the `atlas-manager` evidence
       absent from both resumes
-- [ ] Academic period derived at runtime, unit-tested at the two boundaries the
-      0-indexed month bug would break: August 2026 → 2, March 2027 → 3
-- [ ] `⚠ VERIFY` fields present and visibly unanswered: English level, minimum
+- [x] Academic period derived at runtime, unit-tested at the two boundaries the
+      0-indexed month bug would break: August 2026 → 2, March 2027 → 3.
+      Also fixed to UTC getters after the local-timezone form failed under
+      this sandbox's America/Sao_Paulo clock — see the commit
+- [x] `⚠ VERIFY` fields present and visibly unanswered: English level, minimum
       stipend, maximum weekly hours
-- [ ] `resumeVariants` in the schema — named subsets of the profile, holding no
+- [x] `resumeVariants` in the schema — named subsets of the profile, holding no
       prose (`05-domain-model.md`)
 
 ## M3 — Gupy collector
