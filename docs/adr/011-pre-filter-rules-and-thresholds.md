@@ -100,11 +100,14 @@ shortlist (`05-domain-model.md`).
   against a source that under-reports `workMode` than it would be against one
   that always states it. Worth watching if Gupy's `workMode` completeness
   changes.
-- **The ~70% cut estimate is replaced with a measured number** against real
-  collected data — see the companion commit and the updated
-  `docs/02-architecture.md`. Unlike the estimate it replaces, this number is
-  achievable to keep current: re-run the pre-filter over the corpus any time
-  and compare.
+- **The ~70% cut estimate is replaced with two measured numbers, not one** —
+  97.1% against a nationwide collection, 84.2% against one narrowed to Rio de
+  Janeiro server-side (`docs/02-architecture.md`, `scripts/measure-prefilter-cut.ts`).
+  The gap between them is the actual finding: most of what the pre-filter cuts
+  is geography, and geography is cheaper to filter at the source than after
+  downloading it. Unlike the estimate it replaces, both numbers are
+  reproducible on demand — re-run `npm run measure:prefilter` over the corpus
+  any time and compare.
 - `minKeywordAdherence` checking title-only rather than title+description is
   the shallowest of the six rules. If it proves too shallow to matter (every
   posting either has 0 or hits any nonzero floor trivially), that is itself a

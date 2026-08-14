@@ -19,6 +19,7 @@
     "fixture:gupy": "tsx scripts/fixture-gupy.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",
+    "measure:prefilter": "tsx scripts/measure-prefilter-cut.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",

@@ -11,7 +11,7 @@ Scheduler
    │      ▼
    │   Dedup          fingerprint, then similarity
    │      ▼
-   │   Pre-filter     deterministic, cuts ~70%
+   │   Pre-filter     deterministic, cuts 84-97% (measured, city-dependent)
    │      ▼
    │   Score          stage A + B (LLM), stage C (code)
    │      ▼
@@ -160,24 +160,47 @@ implements it.
 
 ## Pre-filter
 
-Deterministic rules, run **before** any LLM call. This cuts roughly 70% of
-collected postings and is the single thing that makes a local model viable — the
-difference between scoring 200 postings and scoring 60 is the difference between
-a batch that finishes and one that gets killed.
+Deterministic rules, run **before** any LLM call and **after** dedup — dedup is
+cheaper than filtering and shrinks the input to every later stage.
 
 | Rule                      | Behavior                                                                                        |
 | ------------------------- | ----------------------------------------------------------------------------------------------- |
 | Title blocklist           | `sênior`, `senior`, `pleno`, `especialista`, `coordenador`, `gerente`, `tech lead`, `III`, `IV` |
 | Title requirement         | Must match `estágio` / `estagiário` / `intern` / `trainee`                                      |
-| Location                  | Rio de Janeiro + metropolitan region, or remote                                                 |
 | Blocked companies         | Configurable list                                                                               |
 | Expired                   | Closed or past application deadline                                                             |
-| Minimum keyword adherence | Must hit a floor of profile keywords before spending LLM budget                                 |
+| Location                  | Rio de Janeiro metro, or remote — either axis `unknown` passes (ADR-011)                        |
+| Minimum keyword adherence | Must hit a floor of profile keywords in the title before spending LLM budget                    |
 
-All rules are configuration (principle 3). Rules and thresholds get an ADR in M5.
+All rules are configuration (principle 3). Rule order, the unknown-axis
+leniency, and the keyword-adherence scope decision are reasoned through in
+ADR-011.
 
-**Ordering note:** the pre-filter runs after dedup, not before. Dedup is cheaper
-than filtering and shrinks the input to every later stage.
+### The cut is measured, not estimated — and collection strategy matters more than the filter
+
+`npm run measure:prefilter` (`scripts/measure-prefilter-cut.ts`) runs the real
+pre-filter over whatever is actually in the database. Run twice, against two
+different real collection strategies, both against the live API:
+
+| Collection query                         | Active postings scanned | Cut       | Dominant rejection reason                                                                                                     |
+| ---------------------------------------- | ----------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `jobName=estágio`, no city (nationwide)  | 171                     | **97.1%** | `location_not_allowed` (117/166 — 70% of all rejections)                                                                      |
+| `jobName=estágio`, `city=Rio de Janeiro` | 76                      | **84.2%** | `insufficient_keyword_adherence` (49/64 — most Rio internships are not tech-track at all: law, finance, environmental, sales) |
+
+Both numbers are real and both replace the ~70% guess this section carried
+through M0–M4 — the guess was low either way, and the gap between the two real
+numbers is itself the finding worth acting on: **most of the "cut" the
+pre-filter performs is location, and location can be filtered server-side
+instead.** Gupy's `city` query parameter (this document's "Verified: the Gupy
+response shape" section) does this for free, before a single unwanted posting
+is even downloaded.
+
+**Consequence for collection strategy (M8):** query Gupy with `city` (and
+`isRemoteWork`) narrowed at the source rather than fetching nationwide and
+discarding 97% of it after the fact. The pre-filter still exists and still
+matters — even city-narrowed, 84% of what comes back is not tech-track — but
+it should not be doing geography's job when the source can do that for free
+and every discarded fetch is still a request Gupy answered for nothing.
 
 ## Scoring
 
@@ -381,5 +404,4 @@ Recorded so they are not mistaken for facts.
 | Assumption                                             | Status                                                      |
 | ------------------------------------------------------ | ----------------------------------------------------------- |
 | A 4B local model is accurate enough for stages A and B | **Unverified.** Decided by the M7 benchmark, not in advance |
-| The pre-filter cuts ~70%                               | **Estimate.** Measured in M5 against real collected volume  |
 | ~150 MB at rest fits alongside current Atlas load      | **Estimate.** Verified in M8 under real load                |

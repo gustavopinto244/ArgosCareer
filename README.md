@@ -35,7 +35,7 @@ The bottleneck is finding and triaging postings, not applying to them.
 
 ```
 Scheduler → Collect → Normalize → Dedup → Pre-filter → Score → Telegram digest
-           (every 4h)                     (~70% cut)  (LLM, nightly, off-peak)
+           (every 4h)                  (84-97% cut)  (LLM, nightly, off-peak)
 ```
 
 Collection runs every few hours, low volume, no LLM; scoring and delivery run
@@ -43,8 +43,10 @@ once nightly in an off-peak window (ADR-009). The digest goes out daily.
 Decoupling the two shortens the discovery window from days to hours and keeps
 request patterns unremarkable.
 
-A deterministic pre-filter runs before any LLM call. Cutting roughly 70% of
-postings up front is what makes a 4B model on a GPU-less mini PC viable at all.
+A deterministic pre-filter runs before any LLM call. Measured against real
+collected data, it cuts 84-97% of postings up front depending on how narrowly
+collection is targeted — this is what makes a 4B model on a GPU-less mini PC
+viable at all.
 
 ### Scoring: the LLM does not produce the number
 

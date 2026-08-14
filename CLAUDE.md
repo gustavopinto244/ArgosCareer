@@ -160,7 +160,8 @@ whitespace. Second layer by textual similarity between postings from the same
 company in the same window. A posting already seen is never reprocessed and never
 re-notified.
 
-**Deterministic pre-filter before the LLM** — it cuts roughly 70% and is what
+**Deterministic pre-filter before the LLM** — measured at 84-97% (city-dependent,
+docs/02) and is what
 makes a local model viable at all: title blocklist (senior, pleno, especialista,
 coordenador, gerente, tech lead, III, IV), title requirement (estágio /
 estagiário / intern / trainee), location, blocked companies, expired posting,
