@@ -129,6 +129,20 @@ actual CLI-level test M4 asks for.
   M7 process. If M10's market analysis reveals systematic over- or
   under-merging, revisit the threshold with real measured false-positive and
   false-negative rates — this ADR's table is a starting point, not a result.
+
+  A concrete one turned up immediately running the M4 CLI against live data:
+  "Pessoa Estagiária | Tributário Contencioso" and "Pessoa Estagiária |
+  Contencioso Cível Estratégico", two postings from the same law firm,
+  scored 0.49 and were merged — but read as prose, these look like two
+  genuinely different open roles (tax litigation vs. civil litigation), not
+  the same job twice. The long shared word "contencioso" (11 characters, ~10
+  bigrams) contributes far more to the score than the shorter words that
+  actually distinguish the two roles ("tributário" vs. "cível estratégico").
+  Character-bigram similarity structurally favors long shared substrings over
+  short distinguishing ones — worth weighing against IDF-style down-weighting
+  of common long words, or a length-normalized measure, if this pattern
+  repeats once there is more than one example to generalize from.
+
 - Character-bigram Dice is O(title length) per comparison and the grouping is
   O(n) per company — irrelevant at this project's volume, and would need
   reconsidering only if the corpus grew by orders of magnitude.
