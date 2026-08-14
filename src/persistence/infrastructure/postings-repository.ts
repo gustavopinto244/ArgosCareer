@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, isNull } from "drizzle-orm";
 import { Location, Posting, WorkMode } from "../../posting/domain/posting";
 import { Db } from "./db";
 import { postings } from "./schema";
@@ -144,5 +144,20 @@ export class PostingsRepository {
 
   count(): number {
     return this.db.select().from(postings).all().length;
+  }
+
+  /**
+   * Postings not already flagged as a known duplicate — the candidate pool
+   * for the similarity dedup layer (ADR-0010). A posting already marked
+   * duplicate is excluded rather than compared again; only canonical
+   * postings are compared against each other.
+   */
+  findActive(): Posting[] {
+    const rows = this.db
+      .select()
+      .from(postings)
+      .where(isNull(postings.duplicateOfFingerprint))
+      .all();
+    return rows.map(rowToPosting);
   }
 }

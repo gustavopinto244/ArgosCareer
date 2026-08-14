@@ -13,6 +13,45 @@ version to attach it to.
 
 ## [Unreleased]
 
+### Added — M4, persistence
+
+- Drizzle + SQLite schema: `postings` (one row per fingerprint, never
+  deleted, `rawPayload` retained so Normalize can be re-run without a network
+  request) and `runs` (one row per pipeline execution). Verified against a
+  real file, not only typechecked: migrations create both tables from an
+  empty database and re-running them is idempotent.
+- `normalizeGupyJob` — `RawPosting` → `Posting`, mapping `workplaceType` onto
+  the domain's `WorkMode` and city presence onto `Location`'s known/unknown
+  split. Returns `null` rather than throwing on an unnormalizable payload.
+- `PostingsRepository.upsert` — the core M4 requirement. A second upsert of
+  the same fingerprint leaves `firstSeenAt` unchanged and moves `lastSeenAt`,
+  verified against a real temporary SQLite file. Implemented as an explicit
+  select-then-branch inside a transaction so which columns refresh on a
+  re-sighting stays readable instead of implicit in a SQL `SET` clause.
+- Similarity dedup layer 2 (ADR-010): same-company, 14-day-window,
+  character-bigram Dice similarity on stopword-stripped titles, threshold
+  0.35. The algorithm was measured against the project's own motivating
+  example and changed twice before being accepted — word-set Jaccard scored
+  it 0.14, unweighted character bigrams scored an unrelated pair higher than
+  the real duplicate. `dedupSimilarPostings` is independently re-runnable
+  over the existing corpus with no collector and no network involved.
+- `RunsRepository` — `start`/`finish` around a run's lifecycle, `runId` as a
+  ULID per `docs/08-observability.md`.
+- CLI (`argos collect`, `argos dedup`), the actual test of principle 2 for
+  this milestone. Verified three ways: unit tests against a stub collector
+  and a real temporary SQLite file, the dev CLI against the live Gupy API end
+  to end, and the compiled `dist/cli/main.js` the `bin` entry points at.
+
+### Fixed — a real false positive found running against live data
+
+- Two postings from the same law firm — "Tributário Contencioso" and
+  "Contencioso Cível Estratégico" — scored 0.49 and were merged by the
+  similarity dedup layer, but read as prose look like two different open
+  roles. Folded into ADR-010 as a concrete, measured limitation rather than
+  filed away separately: character-bigram similarity structurally favors long
+  shared substrings ("contencioso") over the shorter words that actually
+  distinguish two titles.
+
 ### Added — M3, Gupy collector
 
 - `npm run fixture:gupy` (`scripts/fixture-gupy.ts`), run for real against

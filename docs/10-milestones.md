@@ -80,20 +80,28 @@ Delivered in PRs #1 and #2, hardened in #3 and #4.
 - [x] `docs/02` updated: the Gupy schema moves out of "unverified assumptions"
       into a documented, verified shape
 
-## M4 — Persistence
+## M4 — Persistence ✅
 
-- [ ] Drizzle + SQLite, migrations runnable forward from empty
-- [ ] Schema implementing the stage keys in ADR-007, writes as upserts
-- [ ] **`firstSeenAt` written once and never overwritten by re-collection**, with
+- [x] Drizzle + SQLite, migrations runnable forward from empty — verified
+      against a real file: both tables created from empty, re-run idempotent
+- [x] Schema implementing the stage keys in ADR-007, writes as upserts
+- [x] **`firstSeenAt` written once and never overwritten by re-collection**, with
       a test asserting a second upsert leaves it unchanged and moves
       `lastSeenAt` (ADR-007 amendment)
-- [ ] Rejected postings retained — the corpus is not a cache
-- [ ] `runs` table with per-stage counts
-- [ ] Deduplication: fingerprint layer, then same-company similarity layer
-- [ ] Each stage invocable independently from the CLI — the actual test of
-      principle 2
-- [ ] Integration tests against a real temporary SQLite file
-- [ ] ADR recording the dedup algorithm and its similarity threshold
+- [x] Rejected postings retained — the corpus is not a cache. Nothing in the
+      codebase deletes a posting row; `markDuplicate` flags without removing
+- [x] `runs` table with per-stage counts
+- [x] Deduplication: fingerprint layer (the repository's unique index), then
+      same-company similarity layer (ADR-010). Algorithm changed twice during
+      development after being measured against the docs' own motivating
+      example and failing it — see ADR-010's Considered options
+- [x] Each stage invocable independently from the CLI — the actual test of
+      principle 2. `dedup` re-scans the corpus with no collector and no
+      network involved at all
+- [x] Integration tests against a real temporary SQLite file
+- [x] ADR recording the dedup algorithm and its similarity threshold
+      (ADR-010), including a real false-positive found running against live
+      data, not only the cases used to pick the threshold
 
 ## M5 — Pre-filter
 

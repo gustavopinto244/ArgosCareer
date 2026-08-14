@@ -21,6 +21,7 @@ revisited on its merits instead of re-argued from memory.
 | [007](adr/007-stage-re-execution-and-idempotency.md) | Make stages re-runnable through persisted state              | Accepted | 2026-08-14 |
 | [008](adr/008-n8n-as-pluggable-adapter.md)           | Use n8n as a pluggable adapter, never as the orchestrator    | Accepted | 2026-08-14 |
 | [009](adr/009-nightly-batch-window.md)               | Confine scoring and delivery to a single nightly window      | Accepted | 2026-08-14 |
+| [010](adr/010-similarity-dedup-algorithm.md)         | Character-bigram Dice similarity for layer 2 dedup           | Accepted | 2026-08-14 |
 
 ## When an ADR is required
 
