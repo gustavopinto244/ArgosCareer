@@ -26,22 +26,26 @@ Delivered in PRs #1 and #2, hardened in #3 and #4.
       before any other file existed
 - [x] CI green on Node 22 and 24: lint, format, typecheck, test
 
-## M1 — Domain and stage C
+## M1 — Domain and stage C ✅
 
-- [ ] `Posting` and `RawPosting` as distinct types, with the invariants in
+- [x] `Posting` and `RawPosting` as distinct types, with the invariants in
       `05-domain-model.md` enforced
-- [ ] Fingerprint as a pure, unit-tested function in the domain layer
-- [ ] Stage C score computation: pure, deterministic, no I/O
-- [ ] `CollectorPort`, `ScorerPort`, `NotifierPort` defined, all returning
+- [x] Fingerprint as a pure, unit-tested function in the domain layer
+- [x] Stage C score computation: pure, deterministic, no I/O
+- [x] `CollectorPort`, `ScorerPort`, `NotifierPort` defined, all returning
       failure as a value
-- [ ] NestJS skeleton with the `domain` / `application` / `infrastructure` /
-      `composition` layering; domain imports no framework
-- [ ] Unit tests covering every scoring branch: blocking cap including
+- [x] NestJS skeleton (`AppModule`, `main.ts`, built and boots for real) with
+      the `domain` / `application` / `infrastructure` / `composition` layering
+      established; domain imports no framework. `application`,
+      `infrastructure` and `composition` folders are not scaffolded empty —
+      they land per bounded context starting M2, when something needs them
+- [x] Unit tests covering every scoring branch: blocking cap including
       `partial`, empty-category coverage, `lowConfidence`, verdict boundaries at
       exactly 45 and 70, `trackAlignment` including `unknown` and multi-track
-- [ ] **`--passWithNoTests` removed from `npm test`**
-- [ ] TypeScript 7 reassessed against Nest's `emitDecoratorMetadata` (ADR-002),
-      and the result recorded either way
+- [x] **`--passWithNoTests` removed from `npm test`**
+- [x] TypeScript 7 reassessed against Nest's `emitDecoratorMetadata` (ADR-002
+      Amendment 2) — the metadata concern is unfounded, `typescript-eslint`
+      refusing to run under TS 7.0 is the real blocker; staying on 6.0.3
 
 ## M2 — Master profile
 

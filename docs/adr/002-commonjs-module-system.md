@@ -188,9 +188,9 @@ to pass.
   uncertainty, not a one-time check. If TypeScript is revisited again, these
   tests are what would catch a real regression.
 - The new, real blocker is external and outside this project's control:
-  `typescript-eslint` shipping TS 7 support. Revisit by rerunning `npx eslint
-.` after bumping `typescript` and `typescript-eslint` together — the moment
-  it does not crash, TS 7 is viable on the evidence already gathered here.
+  `typescript-eslint` shipping TS 7 support. Revisit by bumping `typescript`
+  and `typescript-eslint` together and rerunning the linter — the moment it
+  does not crash, TS 7 is viable on the evidence already gathered here.
 - No code changes were required by this reassessment in either direction;
   `package.json` stays at `^6.0.3`. The two DI regression tests are the only
   lasting artifact, committed regardless of the outcome.
