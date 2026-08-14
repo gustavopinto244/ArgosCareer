@@ -126,6 +126,10 @@ See [ADR-001](docs/adr/001-nestjs-as-application-framework.md).
 | [`docs/04-scoring-model.md`](docs/04-scoring-model.md)             | The scoring model in full                             |
 | [`docs/05-domain-model.md`](docs/05-domain-model.md)               | Entity boundaries and invariants                      |
 | [`docs/06-glossary.md`](docs/06-glossary.md)                       | Domain vocabulary and the code/digest translation     |
+| [`docs/07-testing-strategy.md`](docs/07-testing-strategy.md)       | Test levels, and the curated-fixture workflow         |
+| [`docs/08-observability.md`](docs/08-observability.md)             | Logging, run records and alerting                     |
+| [`docs/09-configuration.md`](docs/09-configuration.md)             | Secrets, profile and criteria                         |
+| [`docs/10-milestones.md`](docs/10-milestones.md)                   | Acceptance criteria per milestone                     |
 
 ## Development
 
