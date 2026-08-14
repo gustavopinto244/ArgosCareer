@@ -14,8 +14,8 @@
   "scripts": {
     "dev": "tsx watch src/main.ts",
     "build": "tsc -p tsconfig.build.json",
-    "start": "node dist/main.js",
-    "cli": "tsx src/cli/main.ts",
+    "start": "node --env-file-if-exists=.env dist/main.js",
+    "cli": "tsx --env-file-if-exists=.env src/cli/main.ts",
     "fixture:gupy": "tsx scripts/fixture-gupy.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",

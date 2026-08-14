@@ -6,6 +6,7 @@
  *
  *   argos collect [--job-name <text>] [--city <text>] [--max-results <n>]
  *   argos dedup [--similarity-threshold <0-1>] [--window-days <n>]
+ *   argos deliver
  */
 import { parseArgs } from "node:util";
 import { CollectorPort } from "../posting/domain/ports/collector.port";
@@ -23,6 +24,19 @@ import {
 } from "../persistence/infrastructure/db";
 import { PostingsRepository } from "../persistence/infrastructure/postings-repository";
 import { RunsRepository } from "../persistence/infrastructure/runs-repository";
+import { applyPreFilter } from "../prefilter/domain/pre-filter";
+import { Criteria } from "../prefilter/domain/criteria";
+import { loadCriteria } from "../prefilter/infrastructure/criteria-loader";
+import { Profile } from "../profile/domain/profile";
+import { loadProfile } from "../profile/infrastructure/profile-loader";
+import { deriveProfileKeywords } from "../profile/domain/profile-keywords";
+import { hashProfile } from "../profile/domain/profile-hash";
+import { ScorerPort } from "../scoring/domain/ports/scorer.port";
+import { StubScorer } from "../scoring/infrastructure/stub-scorer";
+import { NotifierPort } from "../delivery/domain/ports/notifier.port";
+import { composeDigest, ScoredPosting } from "../delivery/domain/digest";
+import { TelegramNotifier } from "../delivery/infrastructure/telegram-notifier";
+import { loadTelegramConfig } from "../delivery/infrastructure/telegram-config";
 
 export interface CollectOutcome {
   readonly runId: string;
@@ -124,6 +138,132 @@ export function executeDedup(
   };
 }
 
+export interface DeliverOutcome {
+  readonly runId: string;
+  readonly filtered: number;
+  readonly scored: number;
+  readonly delivered: number;
+  readonly error?: string;
+}
+
+/**
+ * The testable core of `deliver`: pre-filter → score → compose → notify,
+ * over every active, not-yet-notified posting (`findUnnotified`). A posting
+ * that fails the pre-filter or scores `discard` is not marked notified — it
+ * stays a candidate for the next run, the same "corpus is never deleted"
+ * discipline the rest of the pipeline follows (ADR-007). Only postings that
+ * actually appear in a *successfully sent* digest are marked, so a failed
+ * send never causes a silent skip (ADR-007's re-run test).
+ *
+ * `collected`/`deduplicated` in the run summary are read from `collect` and
+ * `dedup` runs since the last successful delivery, not from this run
+ * itself — this run does not collect. `deduplicated` approximates "new
+ * postings surviving dedup" as `newCount - duplicateCount` over that window,
+ * clamped at zero, rather than joining against which specific postings were
+ * marked duplicate; exact enough for a summary line, not for accounting.
+ */
+export async function executeDeliver(
+  db: Db,
+  scorer: ScorerPort,
+  notifier: NotifierPort,
+  criteria: Criteria,
+  profile: Profile,
+  now: () => Date = () => new Date(),
+): Promise<DeliverOutcome> {
+  const postingsRepo = new PostingsRepository(db);
+  const runsRepo = new RunsRepository(db);
+  const runId = runsRepo.start("scoreAndDeliver", now());
+  const startedAt = now();
+
+  const lastDelivery = runsRepo.findLatestFinished(
+    "scoreAndDeliver",
+    "success",
+  );
+  const since = lastDelivery?.finishedAt ?? null;
+  const collectRuns = runsRepo.findRunsSince("collect", since);
+  const dedupRuns = runsRepo.findRunsSince("dedup", since);
+
+  const collected = collectRuns.reduce((sum, r) => sum + r.collectedCount, 0);
+  const newCount = collectRuns.reduce((sum, r) => sum + r.newCount, 0);
+  const duplicateCount = dedupRuns.reduce(
+    (sum, r) => sum + r.duplicateCount,
+    0,
+  );
+  const deduplicated = Math.max(0, newCount - duplicateCount);
+  // Only one collector exists in M6 (Gupy) and runs carry no per-source
+  // breakdown yet — a failed collect run in the window is reported as
+  // "gupy" until a multi-source run records which source actually failed.
+  const failedSources = collectRuns.some((r) => r.outcome === "failed")
+    ? ["gupy"]
+    : [];
+
+  const profileKeywords = deriveProfileKeywords(profile);
+  const profileHash = hashProfile(profile);
+
+  const filtered = postingsRepo
+    .findUnnotified()
+    .filter(
+      (posting) =>
+        applyPreFilter(posting, criteria, profileKeywords, startedAt).passed,
+    );
+
+  const scoredEntries: ScoredPosting[] = [];
+  for (const posting of filtered) {
+    const result = await scorer.score(posting, profileHash);
+    if (result.ok) scoredEntries.push({ posting, outcome: result });
+  }
+
+  const digest = composeDigest({
+    runId,
+    generatedAt: startedAt,
+    scored: scoredEntries,
+    periodBlocked: [],
+    summary: {
+      collected,
+      deduplicated,
+      filtered: filtered.length,
+      scored: scoredEntries.length,
+      failedSources,
+    },
+  });
+
+  const notifyResult = await notifier.notify(digest);
+
+  if (!notifyResult.ok) {
+    runsRepo.finish(runId, now(), "failed", {
+      filteredCount: filtered.length,
+      scoredCount: scoredEntries.length,
+      deliveredCount: 0,
+    });
+    return {
+      runId,
+      filtered: filtered.length,
+      scored: scoredEntries.length,
+      delivered: 0,
+      error: notifyResult.error.message,
+    };
+  }
+
+  const deliveredAt = now();
+  const sent = [...digest.recommended, ...digest.review];
+  for (const entry of sent) {
+    postingsRepo.markNotified(entry.posting.fingerprint, deliveredAt);
+  }
+
+  runsRepo.finish(runId, deliveredAt, "success", {
+    filteredCount: filtered.length,
+    scoredCount: scoredEntries.length,
+    deliveredCount: sent.length,
+  });
+
+  return {
+    runId,
+    filtered: filtered.length,
+    scored: scoredEntries.length,
+    delivered: sent.length,
+  };
+}
+
 function openDatabase(): Db {
   const databasePath = process.env.DATABASE_PATH ?? "./data/argos.db";
   const db = createDatabase(databasePath);
@@ -184,6 +324,45 @@ function dedupCommand(args: string[]): void {
   );
 }
 
+async function deliverCommand(): Promise<void> {
+  const criteria = loadCriteria(
+    process.env.CRITERIA_PATH ?? "./config/criteria.yaml",
+  );
+  const profile = loadProfile(
+    process.env.PROFILE_PATH ?? "./config/profile.yaml",
+  );
+
+  const adapter = process.env.SCORER_ADAPTER ?? "stub";
+  if (adapter !== "stub") {
+    console.error(
+      `deliver: SCORER_ADAPTER=${adapter} is not implemented yet — only "stub" exists before M7`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+  const scorer = new StubScorer(criteria);
+  const notifier = new TelegramNotifier(loadTelegramConfig());
+
+  const outcome = await executeDeliver(
+    openDatabase(),
+    scorer,
+    notifier,
+    criteria,
+    profile,
+  );
+
+  if (outcome.error) {
+    console.error(`deliver (run ${outcome.runId}) failed: ${outcome.error}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  console.log(
+    `deliver (run ${outcome.runId}): ${outcome.filtered} passed the pre-filter, ` +
+      `${outcome.scored} scored, ${outcome.delivered} delivered`,
+  );
+}
+
 async function main(): Promise<void> {
   const [, , command, ...rest] = process.argv;
 
@@ -194,8 +373,11 @@ async function main(): Promise<void> {
     case "dedup":
       dedupCommand(rest);
       break;
+    case "deliver":
+      await deliverCommand();
+      break;
     default:
-      console.error("Usage: argos <collect|dedup> [options]");
+      console.error("Usage: argos <collect|dedup|deliver> [options]");
       process.exitCode = 1;
   }
 }
