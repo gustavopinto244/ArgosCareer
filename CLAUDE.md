@@ -15,6 +15,10 @@ Deeper material lives in `docs/`. This file is the map.
 | `docs/04-scoring-model.md`       | Touching anything that produces a score                      |
 | `docs/05-domain-model.md`        | Defining or changing an entity, or crossing a stage boundary |
 | `docs/06-glossary.md`            | Naming something, or writing digest text                     |
+| `docs/07-testing-strategy.md`    | Writing a test, or creating a fixture                        |
+| `docs/08-observability.md`       | Adding a log line, a counter or an alert                     |
+| `docs/09-configuration.md`       | Adding a setting, a secret or a criterion                    |
+| `docs/10-milestones.md`          | Starting or finishing a milestone                            |
 
 ---
 

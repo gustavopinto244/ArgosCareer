@@ -18,6 +18,7 @@ revisited on its merits instead of re-argued from memory.
 | [004](adr/004-public-repository-privacy-boundary.md) | Draw an explicit privacy boundary for a public repository    | Accepted | 2026-08-14 |
 | [005](adr/005-llm-does-not-produce-the-score.md)     | Keep score computation out of the LLM                        | Accepted | 2026-08-14 |
 | [006](adr/006-llm-output-failure-policy.md)          | Treat invalid LLM output as a normal outcome                 | Accepted | 2026-08-14 |
+| [007](adr/007-stage-re-execution-and-idempotency.md) | Make stages re-runnable through persisted state              | Accepted | 2026-08-14 |
 
 ## When an ADR is required
 
@@ -39,12 +40,25 @@ uses two spaces is a repository where nobody reads the ADRs.
 **An ADR ships in the same commit as the code that implements it.** A decision
 record written afterward is a summary; written alongside, it is the reasoning.
 
-This is why the M0 ADRs cover only the repository itself — framework, module
-system, language, privacy boundary, and the scoring architecture that shapes
-everything after it. The decisions on deduplication, pre-filter rules, scorer
-adapters, persistence schema and the Hermes API boundary are already reasoned
-through in `02-architecture.md` and `04-scoring-model.md`, but they become ADRs
-in M4, M5, M7 and M9, next to the code that implements them.
+This is why the first five ADRs cover only the repository itself — framework,
+module system, language, privacy boundary, and the scoring architecture that
+shapes everything after it.
+
+**The exception: a decision that constrains a milestone must be made before that
+milestone starts.** ADR-006 and ADR-007 were written ahead of their code, on
+purpose. ADR-006 changes the `ScorerPort` signature that M1 defines, and ADR-007
+is a constraint on the schema M4 designs rather than a feature built on top of
+one. Discovering either during implementation means rewriting what was already
+built.
+
+The test is whether the decision is _about_ the code or _upstream of_ it. If
+implementation would settle the question, wait and write the ADR alongside. If
+implementation would be shaped by the answer, decide first.
+
+Deduplication's algorithm and similarity threshold, the pre-filter's rule set,
+scorer adapter selection and the Hermes API boundary are all reasoned through in
+`02-architecture.md` and `04-scoring-model.md` but remain the first kind — they
+become ADRs in M4, M5, M7 and M9, next to the code.
 
 **ADRs are immutable once accepted.** A decision that changes gets a new ADR that
 supersedes the old one, and the old one is marked `Superseded by ADR-NNN` and
