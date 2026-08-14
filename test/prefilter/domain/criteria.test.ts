@@ -14,6 +14,12 @@ function validCriteria() {
       automation: ["automação", "devops"],
     },
     trackWeights: { dev: 1.0, security: 1.0, automation: 0.7, unknown: 0.4 },
+    scoring: {
+      weights: { mandatory: 65, desirable: 20, trackAlignment: 15 },
+      thresholds: { apply: 70, review: 45 },
+      minExtractedRequirements: 1,
+      blockingCapScore: 35,
+    },
   };
 }
 
@@ -63,6 +69,21 @@ describe("CriteriaSchema", () => {
     // @ts-expect-error deliberately incomplete for the test
     delete criteria.trackWeights.unknown;
     expect(CriteriaSchema.safeParse(criteria).success).toBe(false);
+  });
+
+  it("requires the scoring section", () => {
+    const { scoring: _scoring, ...rest } = validCriteria();
+    expect(CriteriaSchema.safeParse(rest).success).toBe(false);
+  });
+
+  it("parses scoring's weights and thresholds correctly", () => {
+    const result = CriteriaSchema.parse(validCriteria());
+    expect(result.scoring.weights).toEqual({
+      mandatory: 65,
+      desirable: 20,
+      trackAlignment: 15,
+    });
+    expect(result.scoring.thresholds).toEqual({ apply: 70, review: 45 });
   });
 
   it("location defaults allowRemote to true and cities to empty when omitted", () => {

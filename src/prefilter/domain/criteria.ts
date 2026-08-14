@@ -8,6 +8,25 @@ export const LocationCriteriaSchema = z.object({
 });
 
 /**
+ * Stage C's inputs (`src/scoring/domain/types.ts`'s `ScoringConfig`, minus
+ * `trackWeights` — that lives at the top level of `Criteria` already, shared
+ * with the pre-filter's track classification rather than duplicated here).
+ */
+export const ScoringConfigSchema = z.object({
+  weights: z.object({
+    mandatory: z.number(),
+    desirable: z.number(),
+    trackAlignment: z.number(),
+  }),
+  thresholds: z.object({
+    apply: z.number(),
+    review: z.number(),
+  }),
+  minExtractedRequirements: z.number().int().nonnegative(),
+  blockingCapScore: z.number(),
+});
+
+/**
  * `config/criteria.yaml`'s shape (docs/09-configuration.md). Committed, not
  * gitignored — criteria are neither secret nor personal, and committing them
  * is what makes "why did I stop seeing infra postings?" answerable with
@@ -34,7 +53,9 @@ export const CriteriaSchema = z.object({
     automation: z.number(),
     unknown: z.number(),
   }),
+  scoring: ScoringConfigSchema,
 });
 
 export type Criteria = z.infer<typeof CriteriaSchema>;
 export type LocationCriteria = z.infer<typeof LocationCriteriaSchema>;
+export type ScoringConfigCriteria = z.infer<typeof ScoringConfigSchema>;
