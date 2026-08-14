@@ -222,6 +222,25 @@ This feeds resume tailoring before applying, and it is deliberately separate fro
 `criticalGaps`: one is "I need to learn this", the other is "I need to say this
 differently".
 
+### `recommendedVariant` and `highlights`
+
+Question 3 of `01-vision-and-scope.md` — "how should I present my profile for
+this posting?" — is answered here, and it is nearly free because everything it
+needs already exists.
+
+`recommendedVariant` picks the resume variant whose emphasized tracks and
+competencies overlap most with the posting's matched requirements.
+`highlights` names the profile evidence to foreground, drawn from the matches
+that scored `met` on `mandatory` or `blocking` requirements.
+
+**Both are pure functions over data stage B already produced.** No extra model
+call, no generated text, nothing invented — the system selects and ranks material
+that is already in the profile. That constraint is not a limitation to work
+around; it is what keeps the recommendation trustworthy.
+
+Together with `missingTerms`, these three fields are the whole of question 3 in
+v1. Writing prose — resumes, cover letters, recruiter messages — is Phase 3.
+
 ## Calibration protocol — M7
 
 Mandatory before any weight is treated as settled. Without it, the formula is an

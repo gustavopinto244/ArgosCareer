@@ -67,10 +67,51 @@ version to attach it to.
   to ADR-002 rather than an edit, since the original text claimed the `.mts`
   extension was load-bearing.
 
+### Realigned against the expanded product vision
+
+The project brief was expanded from "job radar" to "data-driven career
+assistant". Reconciling it with what was documented produced these changes.
+
+- **The three questions** are now the spine of `docs/01`, `CLAUDE.md` and the
+  README: which postings are best, what to improve, how to present the profile.
+- **M10 — market intelligence and gap analysis** added, deliberately after M7.
+  Aggregating over an uncalibrated score would produce a study plan built on
+  noise.
+- **Skill taxonomy** identified as a prerequisite for question 2 and scheduled
+  for M10. The profile's per-competency aliases are the wrong tool: they
+  describe one profile, so counting with them measures only what is already
+  known.
+- **Resume recommendation is in v1; generating prose is not.** `docs/01` draws
+  the line, and `docs/04` adds `recommendedVariant` and `highlights` as pure
+  functions over stage B output — no extra model call, nothing invented.
+- **Junior and entry-level roles reconsidered and kept out**, with the reasoning
+  and two observable conditions for revisiting recorded rather than left
+  implicit.
+- **`location` and `workMode` split into separate axes**, and `seniority` and
+  `experienceYears` promoted to extracted fields rather than title patterns.
+- **ADR-008** places n8n as a pluggable collector adapter and an outbound API
+  consumer, never as the orchestrator — the Hermes boundary applied to a
+  different vendor.
+- **Per-posting digest format** specified in `docs/02`, with a table showing
+  every line's derivation, so nothing in it can quietly become generated text.
+
+### Fixed
+
+- **ADR-007 amended: upserts must preserve first sighting.** The original
+  decision made every collection an upsert keyed by `(source, sourceId)`, which
+  a naive implementation would use to overwrite `collectedAt` — making every
+  posting look like it was found today, silently and irrecoverably. `Posting`
+  now carries `firstSeenAt` (written once, never modified) and `lastSeenAt`
+  (overwritten each sighting). Lands in M4 with the schema, because it is
+  trivial to add now and impossible to backfill later.
+
 ### Known gaps
 
 Carried deliberately, and tracked where they will be closed:
 
+- **n8n's memory footprint is unmeasured.** An idle instance is plausibly larger
+  than ArgosCareer's entire ~150 MB budget. Measured in M8; if it does not fit,
+  ADR-008's inbound half is dropped and the outbound half survives.
 - The Gupy response schema is **unverified** — no request has been made from
   this repository (M3).
 - The "~70% pre-filter cut" is an estimate, not a measurement (M5).

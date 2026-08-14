@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted — amended 2026-08-14, see [Amendment](#amendment--2026-08-14-upserts-must-preserve-first-sighting)
 
 ## Date
 
@@ -118,3 +118,59 @@ requirement.
   change it; it is now also the key to every cached stage output.
 - Every stage write costs a key lookup. Irrelevant at this volume, and it is what
   buys everything above.
+
+## Amendment — 2026-08-14: upserts must preserve first sighting
+
+The text above is kept as accepted. This section closes a data-loss hazard the
+original decision created, found while realigning the roadmap against the
+expanded product vision.
+
+### The hazard
+
+The decision above makes collection an upsert keyed by source and `sourceId`. A
+posting re-collected daily is therefore written repeatedly under the same key.
+
+A naive upsert overwrites the whole row, including `collectedAt`. The invariant
+in `05-domain-model.md` — "`collectedAt` is set by the collector, not by the
+database" — is satisfied by that, and the result is still wrong: after a week of
+daily collection, every posting looks like it was found today.
+
+**This destroys history silently and irrecoverably.** Nothing errors, no counter
+moves, and the loss is invisible until someone asks a question that needs the
+answer.
+
+The questions that need it are not hypothetical. "How has the market evolved?",
+"how long do internship postings stay open?", and "is this company posting
+constantly or did it post once?" all depend on knowing when a posting was _first_
+seen. Question 2 of `01-vision-and-scope.md` rests on this.
+
+### Decision
+
+A posting carries two timestamps with different write rules:
+
+| Field         | Written               | On re-collection   |
+| ------------- | --------------------- | ------------------ |
+| `firstSeenAt` | Once, on first insert | **Never modified** |
+| `lastSeenAt`  | Every collection      | Overwritten        |
+
+The upsert sets `firstSeenAt` **only on insert**, never on conflict.
+`lastSeenAt` is updated on every sighting. Re-running collection remains
+idempotent in every respect that matters, while first sighting stays immutable.
+
+This is a schema-level guarantee, not a convention: writing it as a database
+default on insert plus an explicit exclusion in the conflict clause is what makes
+it impossible to get wrong later. A unit test asserts that a second upsert leaves
+`firstSeenAt` unchanged and moves `lastSeenAt`.
+
+`lastSeenAt` also earns its keep independently — a posting that stops appearing
+is a posting that probably closed, which is a cheap expiry signal for the
+pre-filter that costs nothing extra to record.
+
+### Why now, when market analysis is deferred
+
+Market analysis lands in M10, after calibration. This amendment lands in **M4**,
+with the schema.
+
+The two timestamps are cheap to add now and impossible to backfill later. Every
+day M4 runs without them is a day of history that does not exist. That asymmetry
+— trivial cost now, unrecoverable loss otherwise — is the whole argument.
