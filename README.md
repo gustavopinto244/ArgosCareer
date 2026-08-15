@@ -1,13 +1,14 @@
 # ArgosCareer
 
 Collects internship postings, scores them against a master profile, and delivers
-a ranked digest to Telegram twice a week.
+a ranked digest to Telegram every night.
 
 Personal project. Built to cut weekly job-triage time to under 10 minutes, and to
 be honest about what it can and cannot tell you.
 
-> **Status: M0 — bootstrap.** Documentation and CI are in place. No pipeline code
-> yet. Milestone table below.
+> **Status: M7 done, M8 next.** Real scoring (stages A/B, calibrated against a
+> preliminary 16-posting sample) is live. Deployment to Atlas is up next.
+> Milestone table below.
 
 ## What it answers
 
@@ -91,24 +92,77 @@ The question this answers reliably is narrower:
 
 Postings also lie by omission and copy boilerplate between roles, so the system
 scores declared text, not the actual job. Every weight and cutoff above is
-provisional until the M7 calibration.
+provisional — see Calibration below for what has and has not been measured.
 
 ### Calibration
 
-M7's infrastructure (stages A/B, `ApiScorer`, `OllamaScorer`, the measurement
-tooling) is built; the calibration run itself is not done yet. 16 real
-postings are labelled by hand so far (real Gupy volume for this search profile
-is thinner than 50), and two attempts against OpenRouter's free tier both
-failed for infrastructure reasons — an auto-router that changes model per
-request, then a 50-requests/day cap too low to finish one pass — not model
-quality. `OllamaScorer` exists to run this locally instead. Once a full run
-completes: correlation and verdict precision/recall, varying one thing at a
-time — model, prompt, weights, cutoffs. **The results table will be published here, including
-the configurations that lost.**
+**Preliminary — 16 hand-labelled postings, not the 50 the protocol calls for.**
+Real Gupy volume for this search profile is thin (consistent with the
+pre-filter's own 84–97% cut, [ADR-011](docs/adr/011-pre-filter-rules-and-thresholds.md)):
+16 is what exists to label today. Expanding to 50 happens as more real
+postings accumulate in the corpus, not on demand — tracked in
+[`docs/10-milestones.md`](docs/10-milestones.md), re-run from here whenever that
+happens.
+
+| #   | Configuration                                                                                                                             | n   | Scored | Parse-failure | Correlation           | Verdict recall (apply / review / discard)                                                                          | Cost                                      |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------- | --- | ------ | ------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- |
+| 1   | `openrouter/free` auto-router                                                                                                             | —   | —      | —             | n/a                   | Never produced a measurement — router swaps the underlying model every request, so "model" was never held constant |
+| 2   | Any `:free` OpenRouter model                                                                                                              | —   | —      | —             | n/a                   | Never produced a measurement — shared 50 req/day cap, one posting's match calls alone exceed it                    |
+| 3   | `qwen3:4b` via `OllamaScorer`, local                                                                                                      | 16  | 2      | 88%           | n/a (too little data) | 0% / n/a / 0%                                                                                                      | not recorded (usage tracking added later) |
+| 4   | `deepseek-v4-flash-0731` via `ApiScorer`, `b-v2` prompt — **inputs later found broken** (see below)                                       | 16  | 16     | 0%            | -0.097                | not recorded per-verdict — the aggregate correlation is what triggered the audit below                             | not recorded (usage tracking added later) |
+| 5   | Same as #4, **after** the description backfill, `verifiable`-exclusion and `trackExclusions` fixes                                        | 16  | 16     | 0%            | **0.522**             | 0% / 0% / 100% (64% precision)                                                                                     | $0.0326                                   |
+| 6   | Same as #5, **after** completing the profile's declared fields (English, availability) — worst-5-deviation subset only, not a full re-run | 5   | 5      | 0%            | **0.835**             | 20% / n/a / n/a (100% precision)                                                                                   | $0.0059                                   |
+
+**Configurations #1–#3 lost for infrastructure reasons, not model quality** —
+worth keeping because the fix (`OllamaScorer` as a fixed local model,
+`ApiScorer`/OpenRouter with a named, pinned model) is itself a documented
+decision ([ADR-012](docs/adr/012-openrouter-as-the-api-scorer-provider.md),
+[ADR-013](docs/adr/013-deepseek-v4-flash-and-cache-friendly-stage-b.md)).
+
+**#4 → #5 is the one deliberate, single-variable comparison in this table** —
+same model, same prompt, only the inputs changed. Auditing #4 posting-by-posting
+(not just its aggregate correlation) found the -0.097 was almost entirely
+broken inputs, not a bad model or a bad formula:
+
+- **129 of 523 collected postings had a silently empty `description`** (a
+  migration added the column without backfilling it) — Stage A extracted
+  nothing from them, and the empty-category rule scored them near the top.
+  Fixed by a data migration, not a rule change.
+- **The profile could not evidence current academic enrollment** — the field
+  existed but was never rendered as quotable text for stage B, so "cursando
+  \<course\>" (the most common blocking requirement in this corpus) failed
+  regardless of the real answer.
+- **28% of mandatory/blocking requirements were unfalsifiable traits**
+  ("dinamismo", "proatividade") that no portfolio can evidence — counted as
+  failures, penalizing the best-fitting postings hardest.
+- **`trackAlignment` correlated -0.022 on its own** — "desenvolvimento" and
+  "segurança" are overloaded words in Portuguese job titles; 19% of the whole
+  corpus was misclassified on those two words alone.
+
+Full reasoning, what was fixed and — as important — **what was deliberately
+left alone** (the empty-category rule itself, `trackAlignment`'s weight):
+[ADR-014](docs/adr/014-calibration-input-integrity.md) and
+[ADR-015](docs/adr/015-verifiable-requirements-and-track-exclusions.md).
+
+**#5 → #6**: the same class of gap as the enrollment fix above turned out to
+apply to three more fields — `englishLevel`, `maxWeeklyHours` and
+`minimumStipend` had existed on `Profile` since M2 but were, likewise, never
+rendered as evidence. Filling them in and wiring them up, plus adding evidence
+for Office and AI-assisted tooling, was checked against only the five
+worst-deviating postings from #5 rather than a full re-run — a real
+improvement on that subset, not yet confirmed at n=16. The next full run is
+deferred to 50 postings rather than spent re-confirming this on the same 16.
+
+**Weights and thresholds** (`mandatory: 65, desirable: 20, trackAlignment: 15`,
+`apply ≥ 70, review ≥ 45`) are **kept unchanged, deliberately** — not because
+they are known to be right, but because the one complete measurement available
+came from inputs later found broken, and 16 samples is too few to retune
+against without overfitting to noise. Revisit once 50 labelled postings exist.
 
 A scoring system that has never been measured against ground truth is a number
-generator. Until this table exists, treat the scores as a plausible hypothesis
-with a formula behind it.
+generator. This one now has one real measurement, three documented structural
+fixes derived from auditing it, and a known amount of data still missing before
+the next number means more than this one does.
 
 ## Stack
 
@@ -123,19 +177,19 @@ See [ADR-001](docs/adr/001-nestjs-as-application-framework.md).
 
 ## Milestones
 
-| #   | Milestone                                                        | Status      |
-| --- | ---------------------------------------------------------------- | ----------- |
-| M0  | Bootstrap — docs, CI, ADR practice, repository hygiene           | done        |
-| M1  | Domain entities, fingerprint, score computation (stage C)        | done        |
-| M2  | Master profile — Zod schema, loader, academic-period derivation  | done        |
-| M3  | Gupy collector with tolerant schema + fixture capture script     | done        |
-| M4  | Persistence — Drizzle + SQLite, migrations, dedup                | done        |
-| M5  | Deterministic pre-filter                                         | done        |
-| M6  | **Vertical slice** — Gupy → SQLite → Telegram with a stub scorer | done        |
-| M7  | Real scoring — stages A and B, versioned prompts, calibration    | in progress |
-| M8  | Deployment — Docker Compose, scheduling, backup, alerting        |             |
-| M9  | HTTP API and MCP server                                          |             |
-| M10 | Market intelligence — skill taxonomy, gap analysis, study plan   |             |
+| #   | Milestone                                                        | Status                            |
+| --- | ---------------------------------------------------------------- | --------------------------------- |
+| M0  | Bootstrap — docs, CI, ADR practice, repository hygiene           | done                              |
+| M1  | Domain entities, fingerprint, score computation (stage C)        | done                              |
+| M2  | Master profile — Zod schema, loader, academic-period derivation  | done                              |
+| M3  | Gupy collector with tolerant schema + fixture capture script     | done                              |
+| M4  | Persistence — Drizzle + SQLite, migrations, dedup                | done                              |
+| M5  | Deterministic pre-filter                                         | done                              |
+| M6  | **Vertical slice** — Gupy → SQLite → Telegram with a stub scorer | done                              |
+| M7  | Real scoring — stages A and B, versioned prompts, calibration    | done (preliminary, 16/50 samples) |
+| M8  | Deployment — Docker Compose, scheduling, backup, alerting        | in progress                       |
+| M9  | HTTP API and MCP server                                          |                                   |
+| M10 | Market intelligence — skill taxonomy, gap analysis, study plan   |                                   |
 
 ## Documentation
 

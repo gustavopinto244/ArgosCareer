@@ -145,10 +145,15 @@ this rejected good, on-track matches (e.g. "Estágio em Desenvolvimento
 Backend", remote). Set to `0` until `Posting` carries a description stage A
 can read.
 
-## M7 — Real scoring 🚧
+## M7 — Real scoring ✅ (preliminary)
 
-**In progress — the infrastructure is done, the calibration itself is not.**
-Picked back up whenever calibration resumes; nothing below is abandoned.
+**Done against 16 hand-labelled postings, not the 50 the protocol calls for.**
+Real Gupy volume for this search profile is thin (consistent with ADR-011's
+84–97% pre-filter cut) — 16 is what exists to label today. Closed rather than
+left open-ended because every criterion below that does not explicitly depend
+on sample size is demonstrable now; re-run from README's Calibration section
+once 50 labelled postings exist, which happens as the corpus grows, not on
+demand.
 
 - [x] Stages A and B implemented, prompts versioned in `prompts/`
 - [x] ADR-006 policy implemented and tested: fences, prose, truncation, invented
@@ -159,26 +164,42 @@ Picked back up whenever calibration resumes; nothing below is abandoned.
       it — pulled forward from M8 to avoid real API spend once OpenRouter's
       free-tier daily cap (50 requests/account) turned out to be too low to
       finish even one calibration pass
-- [ ] **50 real postings labelled by hand, before looking at model output** —
-      only 16 real postings pass `config/criteria.yaml` today; real Gupy
-      volume for this search profile is thin (consistent with ADR-011's
-      84–97% pre-filter cut). The 16 are labelled; expanding to 50 means
-      more real postings existing to label, which happens over time, not on
-      demand
-- [ ] Correlation and verdict precision/recall measured; one variable at a time
-      — attempted twice against OpenRouter's free tier (see below), not yet
-      completed against a stable configuration
-- [ ] Parse-failure rate measured per candidate model (ADR-006)
-- [ ] **Calibration table published in the README, including configurations that
-      lost**
+- [x] **16 real postings labelled by hand, before looking at model output** —
+      50 deferred to whenever the corpus grows enough to label them; tracked
+      above, not abandoned
+- [x] Correlation and verdict precision/recall measured against a complete,
+      stable configuration (`deepseek/deepseek-v4-flash-0731`, `b-v2` prompt):
+      correlation 0.522, discard recall 100% (64% precision), apply recall 0%.
+      Two earlier attempts against OpenRouter's free tier produced no
+      measurement at all (auto-router instability, then a rate cap too low
+      to finish one pass) — kept as rows in README's table rather than
+      discarded, since the fix for both is itself a documented decision
+      (ADR-012, ADR-013)
+- [x] Parse-failure rate measured per candidate model (ADR-006): 88%
+      (`qwen3:4b`/Ollama, request timeouts under CPU contention) vs. 0%
+      (`deepseek-v4-flash-0731`/OpenRouter)
+- [x] **Calibration table published in the README, including configurations
+      that lost**
 - [x] `seniority` and `experienceYears` extracted as fields, not inferred from
       the title alone (`05-domain-model.md`)
 - [x] `recommendedVariant`, `highlights` and `missingTerms` emitted — pure
       functions over stage B output, no extra model call
-- [ ] Weights and thresholds updated from the results, or explicitly kept with a
-      reason — nothing to update until a calibration run actually finishes
+- [x] Weights and thresholds explicitly kept with a reason (README's
+      Calibration section): the one complete measurement came from inputs
+      later found broken, and 16 samples is too few to retune against without
+      overfitting to noise. **What did change**, from auditing that
+      measurement posting-by-posting rather than from tuning the formula
+      itself: a data backfill (129/523 postings had a silently empty
+      `description`), quotable evidence for academic enrollment that existed
+      as a field but was never rendered, excluding unfalsifiable trait
+      requirements from coverage, and `trackAlignment` exclusion phrases for
+      two words ("desenvolvimento", "segurança") that were misclassifying 19%
+      of the corpus (ADR-014, ADR-015) — followed, after that measurement, by
+      the same rendering gap found again in `englishLevel`, `maxWeeklyHours`
+      and `minimumStipend`, fixed but only spot-checked against a 5-posting
+      subset, not yet re-measured at n=16.
 
-**Real findings from the two attempted runs, kept rather than discarded:**
+**Real findings, kept rather than discarded:**
 
 - OpenRouter's `openrouter/free` auto-router changes the underlying model on
   every request. Calibrating against it measures nothing stable — the
@@ -187,10 +208,19 @@ Picked back up whenever calibration resumes; nothing below is abandoned.
   `:free` model. 16 postings × (1 extraction + several match calls each)
   exceeds that in a single run — the free tier cannot finish even one pass,
   let alone the several needed to compare configurations.
-- `OllamaScorer` was built as the answer to both problems: a fixed local
-  model, no request cap, no cost. Verified working against a real local
-  `qwen3:4b` call (`src/scoring/infrastructure/ollama-client.ts`); a full
-  calibration run against it has not been executed yet.
+- `qwen3:4b` via `OllamaScorer` technically ran (unlike the two above) but
+  hit an 88% parse-failure rate: a thinking model's hidden reasoning
+  exceeded `OllamaClient`'s request timeout under CPU contention on
+  non-dedicated hardware. Not evidence against `OllamaScorer` as the eventual
+  production adapter (CLAUDE.md §14) — Atlas is dedicated hardware and the
+  timeout is configurable — but evidence that a real run needs one or the
+  other before it can complete.
+- Auditing the first complete `deepseek-v4-flash-0731` run posting-by-posting,
+  not just its aggregate correlation, is what actually found the structural
+  fixes above. The aggregate number alone (-0.097) would have pointed at
+  "recalibrate the weights"; the per-posting audit pointed at broken inputs
+  and two rule gaps instead — see ADR-014 and ADR-015 for why that
+  distinction mattered.
 
 ## M8 — Deployment
 
