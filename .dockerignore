@@ -1,0 +1,17 @@
+node_modules
+dist
+.git
+.github
+data
+backups
+*.log
+.env
+.env.*
+config/profile.yaml
+test
+docs
+prompts
+CHANGELOG.md
+CONTRIBUTING.md
+SECURITY.md
+README.md

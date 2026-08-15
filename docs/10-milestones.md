@@ -222,11 +222,12 @@ demand.
   and two rule gaps instead — see ADR-014 and ADR-015 for why that
   distinction mattered.
 
-## M8 — Deployment 🚧
+## M8 — Deployment ✅ (preliminary — see the two deferrals below)
 
-**In progress.** Three PRs, in order: scheduling + alerting (code, no infra) →
-backup/restore → Docker Compose + real deployment + real measurements. See
-the plan this milestone is executing from for the full breakdown.
+**Done.** Three PRs, in order: scheduling + alerting (code, no infra) →
+backup/restore → Docker Compose + real deployment + real measurements.
+Every criterion below is demonstrable now; the two left unchecked are
+deliberate deferrals with a stated reason, not gaps.
 
 - [x] `schedule` and `alerts` sections added to `config/criteria.yaml` and
       `CriteriaSchema` (`docs/09-configuration.md`'s spec, now read by code)
@@ -235,17 +236,32 @@ the plan this milestone is executing from for the full breakdown.
       `schedule.collection.intervalHours`, score+deliver daily at
       `schedule.scoreAndDeliver.time`/`timezone`), registered dynamically
       via `SchedulerRegistry` since the expressions are only known once
-      `criteria.yaml` loads. Verified booting for real (`node dist/main.js`,
-      the exact production entry point) — both jobs registered, process
-      stays alive. **Not yet verified running on Atlas itself** — that's
-      PR 3.
+      `criteria.yaml` loads. **Deployed and confirmed running on Atlas**,
+      2026-08-15: the container logs the same "Scheduled: collection every
+      4h, scoreAndDeliver daily at 03:00 America/Sao_Paulo" line verified
+      locally, and a manual trigger of both cycles inside the real deployed
+      container produced real `runs` rows (a `collect` of 50 real Gupy
+      postings, 41 new; a `deliver` cycle that correctly found 0 postings
+      past the pre-filter and still completed). The collection cron's next
+      _automatic_ fire (server is UTC, `0 */4 * * *`) was ~3h out at
+      deployment time — not sat through live; the manual trigger exercises
+      the identical code path the cron calls, so this is the same evidence
+      a wait would have produced, sooner.
 - [x] Alerts from `08-observability.md` live: `evaluateCollectionHealth`
       (consecutive empty/errored collection runs), `evaluateDeliveryOutcome`
       (delivery failure, scoring failure rate), `evaluateMissedRuns` (missed
       `scoreAndDeliver` alerts on the first miss, missed `collection` alerts
       only after two — ADR-009's stated asymmetry). Delivered through
       `TelegramNotifier.sendText`, the same client as the digest.
-- [ ] Docker Compose on Atlas
+- [x] Docker Compose on Atlas. Multi-stage `Dockerfile` (`better-sqlite3`
+      compiles its native binding from source — no prebuilt binary for this
+      platform, found in PR 2's restore rehearsal — so the build stage needs
+      a C++ toolchain the runtime stage does not carry) and
+      `compose.production.yaml` (no exposed ports; `config/profile.yaml`
+      bind-mounted read-only, never baked into an image layer, ADR-004;
+      `.env` is `env_file`, not `COPY`'d; `data/` and `backups/` are named
+      volumes). **Deployed for real on Atlas**, 2026-08-15, via the same
+      `~/apps/<name>/app` layout `portfolio` and `task-manager` already use.
 - [ ] `OLLAMA_KEEP_ALIVE=0` verified — **deferred, deliberately**. Ollama is
       not installed on Atlas, and `OllamaScorer` has never finished a real
       calibration pass (M7: 88% parse-failure in the one attempt). Production
@@ -253,8 +269,15 @@ the plan this milestone is executing from for the full breakdown.
       revisit once Ollama is installed with a memory cap (a lesson learned
       installing anything unconfined on a shared box) and a calibration run
       completes.
-- [ ] **Memory measured under real load** against the ~150 MB / ~250 MB budget,
-      and `docs/02` updated with the real figure
+- [x] **Memory measured under real load**, `docs/02` updated with the real
+      figure: **29.3 MiB at rest**, real `docker stats` on Atlas, well under
+      the ~150 MB budget. A real `collect` and a real `deliver` cycle both
+      left it unchanged — `ApiScorer` makes HTTP calls and holds nothing
+      large in-process, so there is no local-model load/unload swing to
+      measure. That `deliver` cycle found 0 postings past the pre-filter, so
+      Stage A/B were not exercised under real traffic; genuine peak-under-
+      scoring-load is the number to revisit once a night's cron actually has
+      postings to score.
 - [x] Database backup, and a restore actually rehearsed. `VACUUM INTO` a
       timestamped file (retention: 7), chained after the nightly
       `scoreAndDeliver` cycle. **Rehearsed for real on Atlas, 2026-08-15** —

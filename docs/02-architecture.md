@@ -327,20 +327,36 @@ cloudflared and two Docker containers.
 
 **Budget: ~150 MB at rest, ~250 MB at peak.**
 
-| Constraint                       | Requirement                                                                        |
-| -------------------------------- | ---------------------------------------------------------------------------------- |
-| Ollama peaks ~3.2 GB             | **`OLLAMA_KEEP_ALIVE=0`** so the model unloads at end of batch                     |
-| Swap is an OOM net, not headroom | Paging during inference destroys latency; a plan that relies on swap is not a plan |
-| P1 sources                       | Ephemeral Python container (`--rm`), prints JSON and exits — zero RAM at rest      |
-| n8n, if adopted (ADR-008)        | **Unmeasured footprint**, plausibly larger than the whole application budget       |
+**Measured for real on Atlas, 2026-08-15 (M8):** the deployed container idles
+at **29.3 MiB** — a real `docker stats` reading, not an estimate — well under
+budget. A real `collect` (50 postings, run inside the deployed container, not
+locally) and a real `deliver` cycle against the live corpus (`SCORER_ADAPTER=api`)
+both left memory unchanged at 29.3 MiB: `ApiScorer` makes HTTP calls to
+OpenRouter and holds nothing large in the process itself, so it does not carry
+the load-and-unload memory swing a local model would. That deliver cycle found
+0 postings past the pre-filter — a real result of the 84–97% cut, not a gap in
+the measurement — so it did not exercise Stage A/B under real model traffic;
+the number to revisit is peak memory on a night the corpus actually has
+postings to score, once the nightly cron has run for real rather than been
+triggered by hand.
 
-Docker Compose, M8.
+| Constraint                       | Requirement                                                                                                                                                                                                                   |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Ollama peaks ~3.2 GB             | **`OLLAMA_KEEP_ALIVE=0`** — **deferred** (M8): Ollama is not installed on Atlas and `OllamaScorer` has not finished a real calibration pass (M7); production runs `ApiScorer` for now, which never loads a local model at all |
+| Swap is an OOM net, not headroom | Paging during inference destroys latency; a plan that relies on swap is not a plan                                                                                                                                            |
+| P1 sources                       | Ephemeral Python container (`--rm`), prints JSON and exits — zero RAM at rest                                                                                                                                                 |
+| n8n, if adopted (ADR-008)        | **Unmeasured footprint, still** — no `N8nCollector` exists in code yet, so there is nothing to deploy or measure                                                                                                              |
 
-The n8n line is the one to watch. It sits outside the ArgosCareer budget as a
-separate container, and if it does not fit alongside `atlas-manager`, Nginx,
-cloudflared and the existing containers, ADR-008's inbound half is dropped and
-the outbound half — which can run anywhere — survives. Measured in M8, not
-assumed now.
+**Docker Compose, done (M8).** `Dockerfile` (multi-stage — `better-sqlite3`
+compiles its native binding from source, so the build stage needs a C++
+toolchain the runtime stage does not carry) and `compose.production.yaml`
+(no exposed ports — a headless batch service, nothing to reach over HTTP
+until M9). `config/profile.yaml` is bind-mounted read-only, never baked into
+an image layer (ADR-004); `.env` is `env_file`, not `COPY`'d.
+
+The n8n line is the one to watch, still unmeasured — there is nothing to
+measure until a source actually adopts it (ADR-008), tracked in
+`docs/10-milestones.md`'s post-M6 backlog, not blocking here.
 
 ## Collector etiquette
 

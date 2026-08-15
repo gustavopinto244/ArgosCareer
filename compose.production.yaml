@@ -1,0 +1,26 @@
+name: argos-career
+
+# Headless batch service — no ports. Scheduling (ADR-009) runs inside the
+# process via @nestjs/schedule; there is nothing to reach over HTTP until M9.
+#
+# Manual backup/restore (npm run backup / npm run restore) run from a plain
+# host-side checkout, not through this container — scripts/ and the tsx
+# devDependency are intentionally not part of the runtime image (Dockerfile).
+# Rehearsed this way for real on Atlas, M8 part 2/3.
+services:
+  argos-career:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: argos-career:local
+    container_name: argos-career
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - argos-data:/app/data
+      - argos-backups:/app/backups
+      - ./config/profile.yaml:/app/config/profile.yaml:ro
+
+volumes:
+  argos-data:
+  argos-backups:
