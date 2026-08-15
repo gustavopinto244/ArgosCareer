@@ -91,7 +91,11 @@ export function applyPreFilter(
   now: Date,
 ): PreFilterOutcome {
   const normalizedTitle = normalize(posting.title);
-  const tracks = classifyTrack(posting.title, criteria.tracks);
+  const tracks = classifyTrack(
+    posting.title,
+    criteria.tracks,
+    criteria.trackExclusions,
+  );
 
   if (titleContainsAny(normalizedTitle, criteria.titleBlocklist)) {
     return { passed: false, reason: "title_blocked", tracks };

@@ -34,6 +34,8 @@ const infraSecurityVariant: ResumeVariant = {
 
 function validProfile() {
   return {
+    courseName: "Sistemas de Informação",
+    institution: "Universidade Exemplo",
     courseStart: "2026-03-01",
     courseEnd: "2029-12-01",
     englishLevel: UNVERIFIED,

@@ -23,11 +23,26 @@ export const EMPTY_RECOMMENDATION: Recommendation = {
 };
 
 /**
+ * The prompt renders each evidence line as `- [Competency] text` so the model
+ * knows which competency it belongs to, and the model quotes back what it was
+ * shown — sometimes including that decoration, sometimes not. Stripping it
+ * before the lookup is what makes both forms resolve to the same profile
+ * line; measured against the first real calibration run, 15 of 22 quotes
+ * carried the tag and silently failed to resolve without this.
+ */
+const EVIDENCE_TAG_PATTERN = /^\s*-?\s*\[[^\]]+\]\s*/;
+
+export function stripEvidenceTag(evidence: string): string {
+  return evidence.replace(EVIDENCE_TAG_PATTERN, "").trim();
+}
+
+/**
  * Reverse-looks-up which competency a match's evidence quote belongs to, by
- * exact string match against `profile.competencies[].evidence`. `Match`
+ * string match against `profile.competencies[].evidence` once the prompt's
+ * own `- [Competency] ` decoration is stripped from both sides. `Match`
  * itself carries only the quote, not which competency it came from — the
  * prompt tags evidence by competency for the model's benefit
- * (`prompts/stage-b-matching.v1.md`), not the domain type's.
+ * (`prompts/stage-b-matching.v2.md`), not the domain type's.
  */
 function matchedCompetencyNames(
   matches: readonly Match[],
@@ -36,14 +51,14 @@ function matchedCompetencyNames(
   const evidenceToCompetency = new Map<string, string>();
   for (const competency of profile.competencies) {
     for (const evidence of competency.evidence) {
-      evidenceToCompetency.set(evidence, competency.name);
+      evidenceToCompetency.set(stripEvidenceTag(evidence), competency.name);
     }
   }
 
   const names = new Set<string>();
   for (const match of matches) {
     if (match.status === "not_met" || match.evidence === null) continue;
-    const name = evidenceToCompetency.get(match.evidence);
+    const name = evidenceToCompetency.get(stripEvidenceTag(match.evidence));
     if (name) names.add(name);
   }
   return names;
@@ -75,13 +90,16 @@ function recommendVariant(
 
 /** Evidence from matches that scored `met` on a `mandatory` or `blocking`
  * requirement — deduplicated, since the same evidence line can support more
- * than one requirement. */
+ * than one requirement. The prompt's `- [Competency] ` decoration is stripped
+ * here too: a highlight is read by a human in the digest, and deduplication
+ * only works if the tagged and untagged forms of one line collapse together.
+ */
 function computeHighlights(matches: readonly Match[]): string[] {
   const highlights = new Set<string>();
   for (const match of matches) {
     if (match.status !== "met") continue;
     if (match.requirement.weight === "desirable") continue;
-    if (match.evidence) highlights.add(match.evidence);
+    if (match.evidence) highlights.add(stripEvidenceTag(match.evidence));
   }
   return [...highlights];
 }

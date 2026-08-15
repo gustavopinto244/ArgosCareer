@@ -13,6 +13,8 @@ import {
 
 function profile(overrides: Partial<Profile> = {}): Profile {
   return {
+    courseName: "Sistemas de Informação",
+    institution: "Universidade Exemplo",
     courseStart: new Date("2026-03-01"),
     courseEnd: new Date("2029-12-01"),
     englishLevel: "intermediate",
@@ -43,8 +45,8 @@ describe("prompt version constants", () => {
   });
 
   it("are pinned to the current versions", () => {
-    expect(STAGE_A_PROMPT_VERSION).toBe("a-v2");
-    expect(STAGE_B_PROMPT_VERSION).toBe("b-v1");
+    expect(STAGE_A_PROMPT_VERSION).toBe("a-v3");
+    expect(STAGE_B_PROMPT_VERSION).toBe("b-v2");
   });
 });
 
@@ -125,5 +127,52 @@ describe("buildStageBPrompt", () => {
     expect(prompt).toContain(
       "[Firewall administration] Configured UFW on the Atlas homelab.",
     );
+  });
+
+  it("includes the derived academic period as quotable evidence (ADR-014)", () => {
+    const prompt = buildStageBPrompt(
+      requirement,
+      profile(),
+      undefined,
+      new Date("2026-08-15"),
+    );
+
+    // 2026-03 start, 2026-08 today: second semester, so period 2 — not 1,
+    // which naive month arithmetic would give.
+    expect(prompt).toContain(
+      "[Academic enrollment] Cursando o 2º período de Sistemas de Informação na Universidade Exemplo",
+    );
+  });
+
+  it("advances the derived period with the calendar rather than hardcoding it", () => {
+    const laterPrompt = buildStageBPrompt(
+      requirement,
+      profile(),
+      undefined,
+      new Date("2027-03-01"),
+    );
+    expect(laterPrompt).toContain("Cursando o 3º período");
+  });
+
+  it("states enrollment has not started for a date before the course begins", () => {
+    const prompt = buildStageBPrompt(
+      requirement,
+      profile(),
+      undefined,
+      new Date("2025-01-01"),
+    );
+    expect(prompt).toContain("ainda não iniciou o curso");
+  });
+
+  it("places the static evidence block before the per-call requirement text (ADR-013 cache prefix)", () => {
+    const prompt = buildStageBPrompt(requirement, profile());
+
+    const evidenceIndex = prompt.indexOf(
+      "Built atlas-manager's HTTP layer in Node.js/TypeScript.",
+    );
+    const requirementIndex = prompt.indexOf("Experiência com Node.js");
+
+    expect(evidenceIndex).toBeGreaterThan(-1);
+    expect(requirementIndex).toBeGreaterThan(evidenceIndex);
   });
 });

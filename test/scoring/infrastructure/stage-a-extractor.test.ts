@@ -62,15 +62,27 @@ describe("StageAExtractor.extract", () => {
     expect(result).toEqual({
       ok: true,
       requirements: [
-        { text: "Node.js", category: "language", weight: "mandatory" },
+        // `verifiable` defaulted to true: the mock above omits it, and
+        // omission must not be able to delete a requirement (ADR-015).
+        {
+          text: "Node.js",
+          category: "language",
+          weight: "mandatory",
+          verifiable: true,
+        },
       ],
       seniority: "internship",
       experienceYears: null,
     });
     expect(ask).toHaveBeenCalledTimes(1);
-    expect(extractionsRepo.find(posting().fingerprint, "a-v2")).toEqual({
+    expect(extractionsRepo.find(posting().fingerprint, "a-v3")).toEqual({
       requirements: [
-        { text: "Node.js", category: "language", weight: "mandatory" },
+        {
+          text: "Node.js",
+          category: "language",
+          weight: "mandatory",
+          verifiable: true,
+        },
       ],
       seniority: "internship",
       experienceYears: null,
@@ -80,7 +92,7 @@ describe("StageAExtractor.extract", () => {
   it("never calls the model on a cache hit", async () => {
     extractionsRepo.upsert(
       posting().fingerprint,
-      "a-v2",
+      "a-v3",
       {
         requirements: [
           { text: "SQL", category: "database", weight: "desirable" },
@@ -159,5 +171,63 @@ describe("StageAExtractor.extract", () => {
       reason: "extraction_failed",
       attempts: 3,
     });
+  });
+});
+
+/**
+ * Four of the sixteen hand-labelled calibration postings had no description
+ * at all (ADR-014). Asking the model to extract requirements from nothing
+ * spends a call to be told what the caller already knows, and — worse —
+ * caching that empty answer kept being served after the text was recovered.
+ */
+describe("StageAExtractor.extract — posting with no description", () => {
+  function descriptionless(description: string | null) {
+    return createPosting({
+      source: "gupy",
+      sourceId: "2",
+      company: "Empresa Y",
+      title: "Estágio - Service Desk",
+      description,
+      location: { kind: "known", city: "Rio de Janeiro" },
+      workMode: "hybrid",
+      collectedAt: NOW,
+      firstSeenAt: NOW,
+      lastSeenAt: NOW,
+      rawPayload: {},
+    });
+  }
+
+  it("returns an empty extraction without calling the model", async () => {
+    const ask = vi.fn(async () => "{}");
+    const extractor = new StageAExtractor(ask, extractionsRepo);
+
+    const result = await extractor.extract(descriptionless(null), () => NOW);
+
+    expect(ask).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      ok: true,
+      requirements: [],
+      seniority: null,
+      experienceYears: null,
+    });
+  });
+
+  it("treats a whitespace-only description the same way", async () => {
+    const ask = vi.fn(async () => "{}");
+    const extractor = new StageAExtractor(ask, extractionsRepo);
+
+    await extractor.extract(descriptionless("   \n  "), () => NOW);
+
+    expect(ask).not.toHaveBeenCalled();
+  });
+
+  it("does not cache the empty result, so recovered text re-extracts", async () => {
+    const ask = vi.fn(async () => "{}");
+    const extractor = new StageAExtractor(ask, extractionsRepo);
+    const p = descriptionless(null);
+
+    await extractor.extract(p, () => NOW);
+
+    expect(extractionsRepo.find(p.fingerprint, "a-v3")).toBeNull();
   });
 });

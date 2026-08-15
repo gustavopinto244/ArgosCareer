@@ -172,6 +172,7 @@ function deliverCriteria(): Criteria {
     blockedCompanies: [],
     minKeywordAdherence: 0,
     tracks: { dev: ["backend"], security: [], automation: [] },
+    trackExclusions: { dev: [], security: [], automation: [] },
     trackWeights: { dev: 1.0, security: 1.0, automation: 0.7, unknown: 0.4 },
     scoring: {
       weights: { mandatory: 65, desirable: 20, trackAlignment: 15 },
@@ -184,6 +185,8 @@ function deliverCriteria(): Criteria {
 
 function deliverProfile(): Profile {
   return {
+    courseName: "Sistemas de Informação",
+    institution: "Universidade Exemplo",
     courseStart: new Date("2026-03-01"),
     courseEnd: new Date("2029-12-01"),
     englishLevel: "intermediate",

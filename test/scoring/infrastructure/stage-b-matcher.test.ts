@@ -31,6 +31,8 @@ const NOW = new Date("2026-08-14T03:00:00Z");
 
 function profile(): Profile {
   return {
+    courseName: "Sistemas de Informação",
+    institution: "Universidade Exemplo",
     courseStart: new Date("2026-03-01"),
     courseEnd: new Date("2029-12-01"),
     englishLevel: "intermediate",
@@ -86,7 +88,7 @@ describe("StageBMatcher.match — cache", () => {
       ]);
     }
     expect(ask).toHaveBeenCalledTimes(1);
-    expect(matchesRepo.find("fp1", "hash1", "b-v1")).toEqual(
+    expect(matchesRepo.find("fp1", "hash1", "b-v2")).toEqual(
       result.ok ? result.matches : null,
     );
   });
@@ -95,7 +97,7 @@ describe("StageBMatcher.match — cache", () => {
     matchesRepo.upsert(
       "fp1",
       "hash1",
-      "b-v1",
+      "b-v2",
       [{ requirement: requirement(), status: "not_met", evidence: null }],
       NOW,
     );
@@ -118,7 +120,7 @@ describe("StageBMatcher.match — cache", () => {
     matchesRepo.upsert(
       "fp1",
       "hash1",
-      "b-v1",
+      "b-v2",
       [{ requirement: requirement(), status: "met", evidence: "old" }],
       NOW,
     );
@@ -232,7 +234,7 @@ describe("StageBMatcher.match — failure, never throws", () => {
       reason: "matching_failed",
       attempts: 3,
     });
-    expect(matchesRepo.find("fp1", "hash1", "b-v1")).toBeNull();
+    expect(matchesRepo.find("fp1", "hash1", "b-v2")).toBeNull();
   });
 
   it("discards results for requirements already matched when a later one fails", async () => {
@@ -251,6 +253,6 @@ describe("StageBMatcher.match — failure, never throws", () => {
     );
 
     expect(result.ok).toBe(false);
-    expect(matchesRepo.find("fp1", "hash1", "b-v1")).toBeNull();
+    expect(matchesRepo.find("fp1", "hash1", "b-v2")).toBeNull();
   });
 });

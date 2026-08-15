@@ -24,13 +24,23 @@ import { Criteria } from "./criteria";
 export function classifyTrack(
   title: string,
   tracks: Criteria["tracks"],
+  exclusions: Criteria["trackExclusions"] = {
+    dev: [],
+    security: [],
+    automation: [],
+  },
 ): Track[] {
   const normalizedTitle = normalize(title);
+  const matches = (keyword: string) =>
+    normalizedTitle.includes(normalize(keyword));
 
   const profileTracks = Object.keys(tracks) as ProfileTrack[];
-  return profileTracks.filter((track) =>
-    tracks[track].some((keyword) =>
-      normalizedTitle.includes(normalize(keyword)),
-    ),
-  );
+  return profileTracks.filter((track) => {
+    // An exclusion outranks a keyword: "ESTAGIÁRIO DE DESENVOLVIMENTO DE
+    // EMBALAGENS" contains "desenvolvimento" and is not a software posting
+    // (ADR-015). Checked first so the cheap negative wins before the
+    // positive is even considered.
+    if ((exclusions[track] ?? []).some(matches)) return false;
+    return tracks[track].some(matches);
+  });
 }
