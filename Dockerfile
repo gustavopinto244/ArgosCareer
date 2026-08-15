@@ -35,7 +35,18 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./
 COPY drizzle ./drizzle
-COPY config/criteria.yaml ./config/criteria.yaml
+# Every committed config the runtime loads. Listed as a directory copy with
+# an explicit ignore for the personal file, rather than one COPY per file:
+# M10 added config/taxonomy.yaml and nobody added the matching COPY, so the
+# container crash-looped on ENOENT the first time it was deployed. A new
+# config should not be able to break the image by omission.
+#
+# Safe as a directory copy specifically because .dockerignore excludes
+# config/profile.yaml: on Atlas that file DOES exist next to the others
+# (compose bind-mounts it from the host checkout), so without that ignore
+# this would bake the personal profile into an image layer — the exact thing
+# ADR-004 forbids. The ignore is what makes this safe; do not remove it.
+COPY config/ ./config/
 
 # config/profile.yaml (gitignored, personal — ADR-004) and .env are never
 # baked into the image; compose.production.yaml mounts/injects them at
