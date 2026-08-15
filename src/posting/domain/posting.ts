@@ -30,6 +30,18 @@ export interface Posting {
    * posting never expires, and the pre-filter's expiry rule treats it as
    * such (M5): unknown, not automatically pass or fail. */
   readonly applicationDeadline: Date | null;
+  /**
+   * When the **source** published the posting, as distinct from
+   * `firstSeenAt`, which is when *we* first observed it. The recency window
+   * (ADR-019) needs the former: a posting published last month and first
+   * collected today is old, and `firstSeenAt` cannot tell you that.
+   *
+   * Null when the source did not state one — and a null **passes** the
+   * recency window rather than being discarded, the same leniency ADR-011
+   * already applies to an unknown `location`/`workMode`: absence of a date
+   * is not evidence of an old posting.
+   */
+  readonly publishedAt: Date | null;
   /** The posting's full text, when the source provides one. Null, not
    * empty string, when absent — stage A (M7) has nothing to extract
    * requirements from, which is different from a posting whose description
@@ -55,6 +67,7 @@ export type CreatePostingInput = {
   seniority?: Seniority | null;
   experienceYears?: number | null;
   applicationDeadline?: Date | null;
+  publishedAt?: Date | null;
   description?: string | null;
   sourceUrl?: string | null;
   collectedAt: Date;
@@ -95,6 +108,7 @@ export function createPosting(input: CreatePostingInput): Posting {
     seniority: input.seniority ?? null,
     experienceYears: input.experienceYears ?? null,
     applicationDeadline: input.applicationDeadline ?? null,
+    publishedAt: input.publishedAt ?? null,
     description: input.description ?? null,
     sourceUrl: input.sourceUrl ?? null,
     collectedAt: input.collectedAt,

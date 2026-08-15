@@ -27,7 +27,12 @@ const PROFILE_HASH = "hash1";
 
 function criteria(): Criteria {
   return {
-    collection: { queries: [{}], queryIntervalMs: 0 },
+    collection: {
+      queries: [{}],
+      queryIntervalMs: 0,
+      recencyDays: 1,
+      backfillDays: 7,
+    },
     titleBlocklist: [],
     titleRequired: ["estágio"],
     location: { cities: [], allowRemote: true },

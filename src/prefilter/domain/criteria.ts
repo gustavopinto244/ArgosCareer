@@ -64,6 +64,23 @@ export const CollectionSchema = z.object({
    * forbids ("a discreet collector is a collector that keeps working").
    */
   queryIntervalMs: z.number().int().nonnegative().default(1_500),
+  /**
+   * Only keep postings the source published within this many days
+   * (ADR-019). Collection runs every few hours, so a one-day window is
+   * already generous overlap — anything older has been seen by a previous
+   * cycle, or was never going to be seen at all.
+   *
+   * A posting whose source states no publication date **passes**: absence
+   * of a date is not evidence of an old posting, the same leniency ADR-011
+   * applies to an unknown `location`/`workMode`.
+   */
+  recencyDays: z.number().positive().default(1),
+  /**
+   * The window used when there is no successful `collect` run on record —
+   * a first run on an empty database has no previous cycle to have caught
+   * the last week, so it reaches back further exactly once.
+   */
+  backfillDays: z.number().positive().default(7),
 });
 
 /**
@@ -82,6 +99,8 @@ export const CriteriaSchema = z.object({
   collection: CollectionSchema.default({
     queries: [{}],
     queryIntervalMs: 1_500,
+    recencyDays: 1,
+    backfillDays: 7,
   }),
   titleBlocklist: z.array(z.string().min(1)).default([]),
   titleRequired: z.array(z.string().min(1)).min(1),

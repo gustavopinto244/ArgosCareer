@@ -213,6 +213,105 @@ describe("executeCollect — multi-query cycles", () => {
   });
 });
 
+describe("executeCollect — recency window (ADR-019)", () => {
+  const WINDOW = { recencyDays: 1, backfillDays: 7 };
+
+  /** Gupy payload carrying an explicit publication date. */
+  function datedPayload(
+    id: number,
+    name: string,
+    publishedDate: string | null,
+  ) {
+    const base = gupyPayload(id, name);
+    return publishedDate === null ? base : { ...base, publishedDate };
+  }
+
+  function collectorWith(payloads: unknown[]): CollectorPort {
+    return {
+      collect: async () => ({
+        source: "gupy",
+        collectedAt: new Date(),
+        postings: payloads.map((payload, i) => ({
+          source: "gupy",
+          sourceId: String(i),
+          payload,
+        })),
+      }),
+    };
+  }
+
+  it("drops a posting published before the window and keeps a fresh one", async () => {
+    const now = new Date("2026-08-15T12:00:00Z");
+    // Seed a successful collect so this is NOT treated as a first run.
+    await executeCollect(db, collectorWith([]), [{}], () => now, 0, WINDOW);
+
+    const outcome = await executeCollect(
+      db,
+      collectorWith([
+        datedPayload(1, "Estágio Fresco", "2026-08-15T06:00:00Z"),
+        datedPayload(2, "Estágio Velho", "2026-07-01T06:00:00Z"),
+      ]),
+      [{}],
+      () => now,
+      0,
+      WINDOW,
+    );
+
+    expect(outcome.normalized).toBe(1);
+    expect(outcome.tooOld).toBe(1);
+  });
+
+  it("keeps a posting the source never dated — absence is not evidence of age", async () => {
+    const now = new Date("2026-08-15T12:00:00Z");
+    await executeCollect(db, collectorWith([]), [{}], () => now, 0, WINDOW);
+
+    const outcome = await executeCollect(
+      db,
+      collectorWith([datedPayload(3, "Estágio Sem Data", null)]),
+      [{}],
+      () => now,
+      0,
+      WINDOW,
+    );
+
+    expect(outcome.normalized).toBe(1);
+    expect(outcome.tooOld).toBe(0);
+  });
+
+  it("uses the wider backfill window when no successful collect exists yet", async () => {
+    const now = new Date("2026-08-15T12:00:00Z");
+    // Four days old: outside recencyDays (1), inside backfillDays (7).
+    const outcome = await executeCollect(
+      db,
+      collectorWith([
+        datedPayload(4, "Estágio de 4 dias", "2026-08-11T12:00:00Z"),
+      ]),
+      [{}],
+      () => now,
+      0,
+      WINDOW,
+    );
+
+    expect(outcome.normalized).toBe(1);
+    expect(outcome.tooOld).toBe(0);
+  });
+
+  it("applies no window at all when none is configured", async () => {
+    const outcome = await executeCollect(
+      db,
+      collectorWith([
+        datedPayload(5, "Estágio Antigo", "2020-01-01T00:00:00Z"),
+      ]),
+      [{}],
+      undefined,
+      0,
+    );
+
+    expect(outcome.normalized).toBe(1);
+    expect(outcome.tooOld).toBe(0);
+  });
+});
+
 describe("executeDedup", () => {
   it("scans the corpus and records a run without touching a collector", async () => {
     const collector = stubCollector({
@@ -253,7 +352,12 @@ describe("executeDedup", () => {
 
 function deliverCriteria(): Criteria {
   return {
-    collection: { queries: [{}], queryIntervalMs: 0 },
+    collection: {
+      queries: [{}],
+      queryIntervalMs: 0,
+      recencyDays: 1,
+      backfillDays: 7,
+    },
     titleBlocklist: [],
     titleRequired: ["estágio"],
     location: { cities: [], allowRemote: true },

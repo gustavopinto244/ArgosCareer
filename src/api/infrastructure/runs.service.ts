@@ -115,6 +115,7 @@ export class RunsService {
       queries,
       () => new Date(),
       this.criteria.collection.queryIntervalMs,
+      this.criteria.collection,
     );
   }
 

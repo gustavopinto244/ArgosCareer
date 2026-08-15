@@ -32,6 +32,17 @@ function mapApplicationDeadline(job: GupyJob): Date | null {
 }
 
 /**
+ * Gupy states `publishedDate` on every posting observed so far (300/300 in
+ * the real corpus), ISO-8601. Null on anything unparseable, same tolerance
+ * as the deadline above — the recency window treats null as "unknown, keep".
+ */
+function mapPublishedAt(job: GupyJob): Date | null {
+  if (!job.publishedDate) return null;
+  const parsed = new Date(job.publishedDate);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+/**
  * `RawPosting` → `Posting`, for Gupy specifically. `firstSeenAt` and
  * `lastSeenAt` are both set to `now` here — this is a fresh, not-yet-persisted
  * observation; deciding whether an existing row's `firstSeenAt` survives is
@@ -59,6 +70,7 @@ export function normalizeGupyJob(raw: RawPosting, now: Date): Posting | null {
       location: mapLocation(job),
       workMode: mapWorkMode(job.workplaceType),
       applicationDeadline: mapApplicationDeadline(job),
+      publishedAt: mapPublishedAt(job),
       sourceUrl: job.jobUrl ?? null,
       description: job.description ?? null,
       collectedAt: now,
