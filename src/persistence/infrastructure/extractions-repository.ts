@@ -10,6 +10,10 @@ export interface ExtractionRecord {
   readonly experienceYears: number | null;
 }
 
+export interface FingerprintedExtraction extends ExtractionRecord {
+  readonly fingerprint: string;
+}
+
 /**
  * Stage A's cache, keyed `(fingerprint, promptVersion)` (ADR-007). Upsert
  * rather than insert, matching every other stage's write rule: writing the
@@ -76,5 +80,28 @@ export class ExtractionsRepository {
       seniority: row.seniority as Seniority | null,
       experienceYears: row.experienceYears,
     };
+  }
+
+  /**
+   * Every cached extraction for the current prompt version — M10's
+   * substrate for retrospective aggregation over the corpus, without
+   * re-running Stage A (ADR-007). Scoped to one `promptVersion` rather than
+   * every row ever written: an extraction under a superseded prompt is not
+   * "more data," it is a stale answer to a question the current prompt asks
+   * differently.
+   */
+  findAllForPromptVersion(promptVersion: string): FingerprintedExtraction[] {
+    const rows = this.db
+      .select()
+      .from(extractions)
+      .where(eq(extractions.promptVersion, promptVersion))
+      .all();
+
+    return rows.map((row) => ({
+      fingerprint: row.fingerprint,
+      requirements: JSON.parse(row.requirements) as Requirement[],
+      seniority: row.seniority as Seniority | null,
+      experienceYears: row.experienceYears,
+    }));
   }
 }
