@@ -6,16 +6,19 @@ a ranked digest to Telegram every night.
 Personal project. Built to cut weekly job-triage time to under 10 minutes, and to
 be honest about what it can and cannot tell you.
 
-> **Status: M9 done (preliminary), M10 next.** Real scoring (stages A/B,
-> calibrated against a preliminary 16-posting sample) is deployed and
-> running unattended on Atlas: two independent crons, alerting, backup and
-> restore, all verified for real, not just written. Local-model scoring
+> **Status: M10 done (preliminary).** Real scoring (stages A/B, calibrated
+> against a preliminary 16-posting sample) is deployed and running
+> unattended on Atlas: two independent crons, alerting, backup and restore,
+> all verified for real, not just written. Local-model scoring
 > (`OllamaScorer`) was evaluated and retired ([ADR-016](docs/adr/016-retire-ollama-scorer.md))
 > — the hosted scorer is the permanent production adapter. An authenticated
-> HTTP API and MCP server are now live on Atlas over Tailscale
+> HTTP API and MCP server are live on Atlas over Tailscale
 > ([ADR-017](docs/adr/017-tailscale-and-bearer-key-for-the-api-boundary.md)),
-> for Hermes — on a different machine — to reach; market intelligence is up
-> next. Milestone table below.
+> for Hermes — on a different machine — to reach. A global skill taxonomy,
+> market aggregation, gap analysis and an on-request study plan (CLI, REST,
+> MCP) are built and run for real against the local corpus — honestly thin
+> today, the same 16-posting sample M7's calibration cites, since Stage A
+> still has not run at production volume. Milestone table below.
 
 ## What it answers
 
@@ -196,7 +199,7 @@ See [ADR-001](docs/adr/001-nestjs-as-application-framework.md).
 | M7  | Real scoring — stages A and B, versioned prompts, calibration    | done (preliminary, 16/50 samples)                         |
 | M8  | Deployment — Docker Compose, scheduling, backup, alerting        | done (preliminary — local-model scoring retired, ADR-016) |
 | M9  | HTTP API and MCP server                                          | done (preliminary — see below)                            |
-| M10 | Market intelligence — skill taxonomy, gap analysis, study plan   | next                                                      |
+| M10 | Market intelligence — skill taxonomy, gap analysis, study plan   | done (preliminary — see below)                            |
 
 ## Documentation
 

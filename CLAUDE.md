@@ -38,11 +38,11 @@ self-hosted infrastructure.
 Long term, the system answers three questions automatically. Every module exists
 to answer one of them.
 
-|       | Question                                      | Answered by                                              | Status                 |
-| ----- | --------------------------------------------- | -------------------------------------------------------- | ---------------------- |
-| **1** | Which are the best postings for me right now? | Radar — collect, dedup, score, digest                    | v1, M1–M9              |
-| **2** | What do I need to improve?                    | Market intelligence and gap analysis over the corpus     | M10, after calibration |
-| **3** | How should I present my profile here?         | Resume-variant recommendation, highlights, missing terms | Output of M2 + M7      |
+|       | Question                                      | Answered by                                              | Status            |
+| ----- | --------------------------------------------- | -------------------------------------------------------- | ----------------- |
+| **1** | Which are the best postings for me right now? | Radar — collect, dedup, score, digest                    | v1, M1–M9         |
+| **2** | What do I need to improve?                    | Market intelligence and gap analysis over the corpus     | M10 (preliminary) |
+| **3** | How should I present my profile here?         | Resume-variant recommendation, highlights, missing terms | Output of M2 + M7 |
 
 The chain, in dependency order — each link needs the one before it:
 
@@ -360,7 +360,7 @@ about Brazilian postings. See ADR-003.
 | M7  | Real scoring        | Stages A and B, versioned prompts in `prompts/`, 50 labelled postings, calibration table in README | done (preliminary — 16/50 labelled, see README)                      |
 | M8  | Deployment          | Docker Compose on Atlas, scheduling, backup, broken-adapter alert                                  | done (preliminary — local-model scoring retired, ADR-016)            |
 | M9  | API + Hermes        | HTTP endpoints, MCP server, integration                                                            | done (preliminary — Hermes integration itself untested, see docs/10) |
-| M10 | Market intelligence | Skill taxonomy, aggregate market analysis, gap analysis, study plan                                | next                                                                 |
+| M10 | Market intelligence | Skill taxonomy, aggregate market analysis, gap analysis, study plan                                | done (preliminary — thin real data, docs/10)                         |
 
 P1/P2 sources (Google Jobs, Indeed, LinkedIn) come after M6, one per pull
 request.
