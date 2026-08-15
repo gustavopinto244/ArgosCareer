@@ -255,7 +255,18 @@ the plan this milestone is executing from for the full breakdown.
       completes.
 - [ ] **Memory measured under real load** against the ~150 MB / ~250 MB budget,
       and `docs/02` updated with the real figure
-- [ ] Database backup, and a restore actually rehearsed
+- [x] Database backup, and a restore actually rehearsed. `VACUUM INTO` a
+      timestamped file (retention: 7), chained after the nightly
+      `scoreAndDeliver` cycle. **Rehearsed for real on Atlas, 2026-08-15** —
+      not just written: cloned the branch there, `npm ci` (found and fixed a
+      real gap doing this: `better-sqlite3` compiles from source, no
+      prebuilt binary for this platform, so `build-essential`/`python3`
+      became a genuine dependency, installed on Atlas and worth remembering
+      for PR 3's Dockerfile), collected 20 real Gupy postings, backed up,
+      deleted the live database entirely (simulating total loss), restored
+      from the backup, and confirmed all 20 postings came back — count and
+      sample data both matched. Scratch directory cleaned up afterward; the
+      real deployment (PR 3) starts clean.
 - [ ] **n8n's memory footprint measured** — **not applicable this pass**. No
       `N8nCollector` exists in code yet (still in the "after M6" backlog,
       unimplemented), so there is nothing to measure.
