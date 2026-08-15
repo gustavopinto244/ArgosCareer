@@ -66,6 +66,24 @@ export class RunsRepository {
     return this.db.select().from(runs).where(condition).all();
   }
 
+  /**
+   * The `limit` most recent runs of `kind`, newest first — M9's
+   * `GET /runs?kind=&limit=` inspection endpoint. `findRunsSince` returns
+   * every match unordered, which is right for the deliver command's
+   * "everything since last digest" window but wrong for "show me the last
+   * few runs", so this is a distinct query rather than a sort-and-slice
+   * wrapper around it.
+   */
+  findRecent(kind: string, limit: number): RunRow[] {
+    return this.db
+      .select()
+      .from(runs)
+      .where(eq(runs.kind, kind))
+      .orderBy(desc(runs.startedAt))
+      .limit(limit)
+      .all();
+  }
+
   /** Most recent finished run of `kind` with the given outcome, or null if
    * none exists yet — used to find the last successful delivery. */
   findLatestFinished(kind: string, outcome: RunOutcome): RunRow | null {
