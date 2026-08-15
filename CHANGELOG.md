@@ -13,6 +13,46 @@ version to attach it to.
 
 ## [Unreleased]
 
+### Added — M7, real scoring 🚧 (in progress)
+
+- Stages A and B (`src/scoring/infrastructure/`): `StageAExtractor` and
+  `StageBMatcher`, each caching whole results by ADR-007's keys
+  (`(fingerprint, promptVersion)` and `(fingerprint, profileHash,
+promptVersion)`), so re-scoring across configurations doesn't re-call the
+  model for postings already extracted/matched.
+- `parseModelOutputWithRetries` (`src/scoring/infrastructure/llm-output.ts`):
+  ADR-006's full policy — normalize, validate, bounded retries with the
+  validation error fed back into the prompt, typed failure on exhaustion.
+  Treats a rejected model call the same as malformed output, within the same
+  attempt budget.
+- Versioned prompts in `prompts/` — `stage-a-extraction.v2.md` (adds
+  `seniority`/`experienceYears` to v1's requirement list, a new file rather
+  than an edit since it's a structural output-shape change) and
+  `stage-b-matching.v1.md`.
+- `ApiScorer` (OpenRouter, ADR-012) and `OllamaScorer` (local, `qwen3:4b`
+  verified) — both implemented, the local one pulled forward from M8 after
+  OpenRouter's free tier proved unable to finish even one calibration pass
+  (see below).
+- `recommendedVariant`/`highlights`/`missingTerms` — question 3 of
+  `01-vision-and-scope.md`, three pure functions over stage B's matches, no
+  extra model call.
+- `Posting.seniority`/`experienceYears` now populated by extraction, not
+  only inferred from the pre-filter's title pattern.
+- `npm run calibration:generate` / `npm run calibration:run` and
+  `computeCalibrationReport` (correlation, verdict precision/recall,
+  parse-failure rate) — the calibration protocol's measurement tooling.
+
+**Calibration itself is not done.** Real Gupy volume for this search
+profile yields only 16 pre-filter-passing postings today, not 50 — labelled
+regardless, as a preliminary set. Two calibration attempts against
+OpenRouter's free tier both failed for infrastructure reasons rather than
+model quality: `openrouter/free` auto-routes to a different underlying
+model per request (nothing stays constant to calibrate against), and the
+free tier's 50-requests/account/day cap can't cover even one 16-posting
+pass. `OllamaScorer` was built as the resolution — no cost, no cap — but a
+full calibration run against it, the correlation/precision-recall
+measurement, and the README table are still outstanding.
+
 ### Added — M6, vertical slice 🎯
 
 - The real `Digest` shape (`src/delivery/domain/digest.ts`), replacing the M1

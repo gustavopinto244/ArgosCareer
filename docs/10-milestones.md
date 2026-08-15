@@ -145,24 +145,52 @@ this rejected good, on-track matches (e.g. "Estágio em Desenvolvimento
 Backend", remote). Set to `0` until `Posting` carries a description stage A
 can read.
 
-## M7 — Real scoring
+## M7 — Real scoring 🚧
 
-- [ ] Stages A and B implemented, prompts versioned in `prompts/`
-- [ ] ADR-006 policy implemented and tested: fences, prose, truncation, invented
+**In progress — the infrastructure is done, the calibration itself is not.**
+Picked back up whenever calibration resumes; nothing below is abandoned.
+
+- [x] Stages A and B implemented, prompts versioned in `prompts/`
+- [x] ADR-006 policy implemented and tested: fences, prose, truncation, invented
       enums, `met` with `evidence: null` → `not_met`
-- [ ] `ApiScorer` first, `OllamaScorer` second — in that order, because a
-      15-minute local batch per iteration means calibration never finishes
-- [ ] **50 real postings labelled by hand, before looking at model output**
+- [x] `ApiScorer` first, `OllamaScorer` second — in that order, because a
+      15-minute local batch per iteration means calibration never finishes.
+      `OllamaScorer` ended up built alongside `ApiScorer` rather than after
+      it — pulled forward from M8 to avoid real API spend once OpenRouter's
+      free-tier daily cap (50 requests/account) turned out to be too low to
+      finish even one calibration pass
+- [ ] **50 real postings labelled by hand, before looking at model output** —
+      only 16 real postings pass `config/criteria.yaml` today; real Gupy
+      volume for this search profile is thin (consistent with ADR-011's
+      84–97% pre-filter cut). The 16 are labelled; expanding to 50 means
+      more real postings existing to label, which happens over time, not on
+      demand
 - [ ] Correlation and verdict precision/recall measured; one variable at a time
+      — attempted twice against OpenRouter's free tier (see below), not yet
+      completed against a stable configuration
 - [ ] Parse-failure rate measured per candidate model (ADR-006)
 - [ ] **Calibration table published in the README, including configurations that
       lost**
-- [ ] `seniority` and `experienceYears` extracted as fields, not inferred from
+- [x] `seniority` and `experienceYears` extracted as fields, not inferred from
       the title alone (`05-domain-model.md`)
-- [ ] `recommendedVariant`, `highlights` and `missingTerms` emitted — pure
+- [x] `recommendedVariant`, `highlights` and `missingTerms` emitted — pure
       functions over stage B output, no extra model call
 - [ ] Weights and thresholds updated from the results, or explicitly kept with a
-      reason
+      reason — nothing to update until a calibration run actually finishes
+
+**Real findings from the two attempted runs, kept rather than discarded:**
+
+- OpenRouter's `openrouter/free` auto-router changes the underlying model on
+  every request. Calibrating against it measures nothing stable — the
+  "model" variable was never held constant, which the protocol requires.
+- OpenRouter's free tier caps at 50 requests/account/day, shared across every
+  `:free` model. 16 postings × (1 extraction + several match calls each)
+  exceeds that in a single run — the free tier cannot finish even one pass,
+  let alone the several needed to compare configurations.
+- `OllamaScorer` was built as the answer to both problems: a fixed local
+  model, no request cap, no cost. Verified working against a real local
+  `qwen3:4b` call (`src/scoring/infrastructure/ollama-client.ts`); a full
+  calibration run against it has not been executed yet.
 
 ## M8 — Deployment
 
