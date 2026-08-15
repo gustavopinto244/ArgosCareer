@@ -273,16 +273,24 @@ Marked `⚠ VERIFY` in the profile and tracked in `docs/01-vision-and-scope.md`:
 
 ## 10. Hermes Agent boundary
 
-Hermes Agent (Nous Research) runs as a personal assistant on Atlas.
+Hermes Agent (Nous Research) runs as a personal assistant on a **different
+machine**, not Atlas. This means the boundary M9 builds is a real network
+boundary, not a same-box integration: ArgosCareer exposes a stable,
+**authenticated** HTTP API (and later an MCP server) that Hermes reaches over
+the network, not localhost. Authentication design (API key, JWT, or reusing
+Atlas's existing Cloudflare Access pattern already proven by `atlas-manager`)
+is an M9 decision, not decided here — becomes an ADR next to the code that
+implements it, same as every other non-obvious M9 call.
 
 **Do not implement this pipeline as a Hermes skill.** It would be faster and it
 would destroy the project: the core would become third-party tool configuration,
 with no reviewable code of its own, tied to a v0.x project that ships every two
 weeks.
 
-**Correct boundary:** ArgosCareer exposes a stable HTTP API (and later an MCP
-server). Hermes is a **consumer, never the critical path.** The nightly digest
-goes out through a direct, dumb Telegram client that works with Hermes down.
+**Correct boundary:** ArgosCareer exposes the API; Hermes is a **consumer,
+never the critical path.** The nightly digest goes out through a direct, dumb
+Telegram client that works with Hermes down — and, now, with Hermes's whole
+machine unreachable.
 
 ## 11. Git workflow
 
