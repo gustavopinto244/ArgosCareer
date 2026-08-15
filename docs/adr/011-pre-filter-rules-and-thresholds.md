@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted
+Accepted — amended 2026-08-15, see
+[Amendment 1](#amendment-1--2026-08-15-title-rules-match-whole-words-not-substrings)
 
 ## Date
 
@@ -118,3 +119,65 @@ shortlist (`05-domain-model.md`).
   unknown-axis leniency decision is not: it would need re-evaluating every
   posting already in the corpus that passed because of it, not just a config
   change.
+
+---
+
+## Amendment 1 — 2026-08-15: title rules match whole words, not substrings
+
+The original implementation matched `titleBlocklist` and `titleRequired` with
+`String.includes` against the fingerprint normalizer's output. That was wrong,
+and measurably so — not a style preference.
+
+`normalize` (`posting/domain/fingerprint.ts`) strips punctuation without
+inserting anything, so a title becomes one long accent-free string with no
+reliable word boundaries. Two of the blocklist's entries are the Roman-numeral
+seniority markers `III` and `IV`, and **"iv" is a substring of ordinary
+Portuguese words that appear constantly in real internship titles**: _nível_,
+_universitário_, _afirmativa_, _administrativo_, _civil_, _executivo_,
+_diversas_.
+
+Measured against the real 380-posting corpus (`npm run measure:prefilter`):
+
+- **24 postings were wrongly blocked**, 9 of them genuine internships —
+  including `Estágio Nível Superior - TI - Segurança da Informação`, squarely
+  on-profile, killed by the "ív" in _Nível_.
+- The same flaw ran in the opposite direction on `titleRequired`, where
+  `intern` matched _interna_, _internos_ and _International_, admitting
+  non-internships into LLM budget.
+- Substring matching also silently missed the feminine _estagiária_, since
+  `estagiário` is not a substring of it — two real remote postings, one of
+  them a backend internship.
+
+**Decision:** the two title rules match on whole words (or whole phrases, for
+multi-word terms like `tech lead`), via a title-specific normalizer
+(`prefilter/domain/title-match.ts`) that turns punctuation into a **space**
+rather than deleting it. The fingerprint normalizer is untouched — it is
+frozen (ADR-007: changing it rewrites every stored fingerprint and re-notifies
+the whole corpus) and wants the opposite behaviour anyway.
+
+**Deliberately not changed:** `classifyTrack` and `minKeywordAdherence` still
+substring-match. Their term lists are full of punctuation variants — `back-end`,
+`node.js`, `ci/cd`, `full-stack` — where deleting punctuation is the feature,
+and neither list contains a short token that collides with a common Portuguese
+word. The tradeoff lands the other way for them; that is a considered
+difference, not an inconsistency left behind.
+
+**Consequences.** Re-measured on the same corpus: 24 false blocks removed,
+**zero** true blocks lost (`Analista III` still blocks — there `III` is its own
+word), 3 false accepts removed, and the pre-filter's pass count moved 16 → 18.
+
+The cost, accepted: a term now matches only as written, so inflected forms must
+be listed explicitly in `config/criteria.yaml` — `estágio` no longer matches
+`Estágios`. That is the right place for it (criteria are data, principle 3): a
+plural added there is visible in `git log`, where a stemmer buried in code
+would not be. `titleRequired` grew accordingly, including the feminine and
+plural forms the old matching missed by accident rather than by decision.
+
+The headline number barely moved because the title rules were never the binding
+constraint — **geography is**, exactly as this ADR's own Consequences section
+predicted ("most of what the pre-filter cuts is geography, and geography is
+cheaper to filter at the source than after downloading it"). The corpus is
+São Paulo-dominated because collection queries Gupy with no criteria at all;
+that is a collection problem, addressed separately, not a pre-filter one. The
+value of this amendment is correctness — postings that _are_ in Rio and _are_
+on-profile no longer disappear because of a word like "Nível".

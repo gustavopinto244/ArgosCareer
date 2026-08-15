@@ -3,6 +3,7 @@ import { Posting } from "../../posting/domain/posting";
 import { Track } from "../../scoring/domain/types";
 import { classifyTrack } from "./classify-track";
 import { Criteria } from "./criteria";
+import { titleMatchesAny } from "./title-match";
 
 export type PreFilterRejectionReason =
   | "title_blocked"
@@ -21,13 +22,6 @@ export interface PreFilterOutcome {
   readonly passed: boolean;
   readonly reason: PreFilterRejectionReason | null;
   readonly tracks: readonly Track[];
-}
-
-function titleContainsAny(
-  normalizedTitle: string,
-  terms: readonly string[],
-): boolean {
-  return terms.some((term) => normalizedTitle.includes(normalize(term)));
 }
 
 function isCompanyBlocked(posting: Posting, criteria: Criteria): boolean {
@@ -63,6 +57,15 @@ function isLocationAllowed(posting: Posting, criteria: Criteria): boolean {
   );
 }
 
+/**
+ * Deliberately still substring-matched against the *fingerprint* normalizer,
+ * unlike the title blocklist/required rules above. Profile keywords carry
+ * the same punctuation variants the track keywords do — "Node.js",
+ * "back-end", "CI/CD" — and whole-word matching would need every spelling
+ * listed. None of them is a short token that collides with an ordinary
+ * Portuguese word, which is the specific failure that forced the title
+ * rules to change, so the tradeoff lands the other way here.
+ */
 function hasMinKeywordAdherence(
   normalizedTitle: string,
   profileKeywords: readonly string[],
@@ -97,10 +100,13 @@ export function applyPreFilter(
     criteria.trackExclusions,
   );
 
-  if (titleContainsAny(normalizedTitle, criteria.titleBlocklist)) {
+  // Whole-word matching (`title-match.ts`), not substring: the blocklist's
+  // "IV" was matching inside "nível", "universitário" and "afirmativa",
+  // silently killing real internships.
+  if (titleMatchesAny(posting.title, criteria.titleBlocklist)) {
     return { passed: false, reason: "title_blocked", tracks };
   }
-  if (!titleContainsAny(normalizedTitle, criteria.titleRequired)) {
+  if (!titleMatchesAny(posting.title, criteria.titleRequired)) {
     return { passed: false, reason: "title_missing_required_term", tracks };
   }
   if (isCompanyBlocked(posting, criteria)) {
