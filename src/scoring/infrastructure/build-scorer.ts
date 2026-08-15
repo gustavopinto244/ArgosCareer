@@ -6,18 +6,13 @@ import { Criteria } from "../../prefilter/domain/criteria";
 import { Profile } from "../../profile/domain/profile";
 import { ScorerPort } from "../domain/ports/scorer.port";
 import { ApiScorer } from "./api-scorer";
-import { OllamaClient } from "./ollama-client";
 import { OpenRouterClient } from "./openrouter-client";
 import { StageAExtractor } from "./stage-a-extractor";
 import { StageBMatcher } from "./stage-b-matcher";
 import { StubScorer } from "./stub-scorer";
 
 export type BuildScorerResult =
-  | {
-      readonly ok: true;
-      readonly scorer: ScorerPort;
-      readonly ollamaClient?: OllamaClient;
-    }
+  | { readonly ok: true; readonly scorer: ScorerPort }
   | { readonly ok: false; readonly error: string };
 
 /**
@@ -71,36 +66,8 @@ export function buildScorer(
     };
   }
 
-  if (adapter === "ollama") {
-    const model = process.env.LLM_MODEL;
-    if (!model) {
-      return {
-        ok: false,
-        error: "SCORER_ADAPTER=ollama requires LLM_MODEL (e.g. qwen3:4b)",
-      };
-    }
-    const ollamaClient = new OllamaClient({
-      model,
-      ...(process.env.OLLAMA_BASE_URL
-        ? { baseUrl: process.env.OLLAMA_BASE_URL }
-        : {}),
-    });
-    const ask = ollamaClient.complete.bind(ollamaClient);
-    return {
-      ok: true,
-      ollamaClient,
-      scorer: new ApiScorer(
-        new StageAExtractor(ask, new ExtractionsRepository(db)),
-        new StageBMatcher(ask, new MatchesRepository(db)),
-        profile,
-        criteria,
-        new PostingsRepository(db),
-      ),
-    };
-  }
-
   return {
     ok: false,
-    error: `SCORER_ADAPTER=${adapter} is not implemented — "stub", "api" and "ollama" are the only adapters`,
+    error: `SCORER_ADAPTER=${adapter} is not implemented — "stub" and "api" are the only adapters (ADR-016)`,
   };
 }

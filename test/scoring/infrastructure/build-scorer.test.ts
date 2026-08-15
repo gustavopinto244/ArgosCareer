@@ -28,7 +28,6 @@ afterEach(() => {
   delete process.env.LLM_API_KEY;
   delete process.env.LLM_MODEL;
   delete process.env.LLM_BASE_URL;
-  delete process.env.OLLAMA_BASE_URL;
 });
 
 function criteria(): Criteria {
@@ -113,27 +112,6 @@ describe("buildScorer", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.scorer).toBeInstanceOf(ApiScorer);
-      expect(result.ollamaClient).toBeUndefined();
-    }
-  });
-
-  it("fails with a named reason when SCORER_ADAPTER=ollama is missing LLM_MODEL", () => {
-    process.env.SCORER_ADAPTER = "ollama";
-    const result = buildScorer(db, criteria(), profile());
-    expect(result).toEqual({
-      ok: false,
-      error: "SCORER_ADAPTER=ollama requires LLM_MODEL (e.g. qwen3:4b)",
-    });
-  });
-
-  it("builds an ApiScorer backed by Ollama, returning the OllamaClient to unload later", () => {
-    process.env.SCORER_ADAPTER = "ollama";
-    process.env.LLM_MODEL = "qwen3:4b";
-    const result = buildScorer(db, criteria(), profile());
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.scorer).toBeInstanceOf(ApiScorer);
-      expect(result.ollamaClient).toBeDefined();
     }
   });
 
@@ -143,7 +121,7 @@ describe("buildScorer", () => {
     expect(result).toEqual({
       ok: false,
       error:
-        'SCORER_ADAPTER=magic is not implemented — "stub", "api" and "ollama" are the only adapters',
+        'SCORER_ADAPTER=magic is not implemented — "stub" and "api" are the only adapters (ADR-016)',
     });
   });
 });

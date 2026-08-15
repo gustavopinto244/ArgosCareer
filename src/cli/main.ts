@@ -339,15 +339,11 @@ async function deliverCommand(): Promise<void> {
     process.exitCode = 1;
     return;
   }
-  const { scorer, ollamaClient } = built;
+  const { scorer } = built;
 
   const notifier = new TelegramNotifier(loadTelegramConfig());
 
   const outcome = await executeDeliver(db, scorer, notifier, criteria, profile);
-
-  // CLAUDE.md §5: Ollama must not sit loaded between batches — Atlas budgets
-  // ~150 MB at rest and this alone peaks around 3.2 GB.
-  if (ollamaClient) await ollamaClient.unload();
 
   if (outcome.error) {
     console.error(`deliver (run ${outcome.runId}) failed: ${outcome.error}`);

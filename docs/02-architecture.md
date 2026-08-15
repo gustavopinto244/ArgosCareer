@@ -69,9 +69,13 @@ producing an empty filter that silently passes everything.
 
 ### 4. The LLM engine is a replaceable detail
 
-Swapping a local model for an API is a configuration change, not a refactor. This
-is what makes the `StubScorer` → `ApiScorer` → `OllamaScorer` progression
-possible, and it is why stage C contains no LLM call at all.
+Swapping which model or provider scores a posting is a configuration change
+(`LLM_MODEL`), not a refactor — the reason `ScorerPort` exists at all, and why
+stage C contains no LLM call. A local-model adapter (`OllamaScorer`) proved the
+port's swappability during M7/M8, then was retired (ADR-016): it never
+finished a real calibration pass, and `ApiScorer`'s real measured cost and
+memory footprint left no case for the operational complexity of running a
+model on Atlas.
 
 ## Ports
 
@@ -80,7 +84,7 @@ Three, all defined in the domain layer, all implemented in infrastructure:
 | Port            | Contract                                                       | Adapters                                                                                                                         |
 | --------------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | `CollectorPort` | `collect(criteria): Promise<CollectionResult>` — never rejects | `GupyCollector` (M3), `JobSpyCollector` (post-M6), `LinkedInCollector` (post-M6), `N8nCollector` for long-tail sources (ADR-008) |
-| `ScorerPort`    | `score(posting, profile): Promise<ScoreResult>`                | `StubScorer` (M1), `ApiScorer` (M7), `OllamaScorer` (M7)                                                                         |
+| `ScorerPort`    | `score(posting, profile): Promise<ScoreResult>`                | `StubScorer` (M1), `ApiScorer` (M7)                                                                                              |
 | `NotifierPort`  | `notify(digest): Promise<void>`                                | `TelegramNotifier` (M6)                                                                                                          |
 
 NestJS's DI container is what makes this cheap: a port is an injection token, an
@@ -102,8 +106,7 @@ so none of it is confined to a time window.
 
 **Scoring and delivery run once nightly**, in a configured off-peak window
 (default `03:00 America/Sao_Paulo`). This is the only window in which the LLM
-runs, the only point where `OLLAMA_KEEP_ALIVE=0` matters, and the only time the
-digest is delivered — **daily**, not twice a week.
+runs and the only time the digest is delivered — **daily**, not twice a week.
 
 Reasoning:
 
@@ -340,12 +343,12 @@ the number to revisit is peak memory on a night the corpus actually has
 postings to score, once the nightly cron has run for real rather than been
 triggered by hand.
 
-| Constraint                       | Requirement                                                                                                                                                                                                                   |
-| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Ollama peaks ~3.2 GB             | **`OLLAMA_KEEP_ALIVE=0`** — **deferred** (M8): Ollama is not installed on Atlas and `OllamaScorer` has not finished a real calibration pass (M7); production runs `ApiScorer` for now, which never loads a local model at all |
-| Swap is an OOM net, not headroom | Paging during inference destroys latency; a plan that relies on swap is not a plan                                                                                                                                            |
-| P1 sources                       | Ephemeral Python container (`--rm`), prints JSON and exits — zero RAM at rest                                                                                                                                                 |
-| n8n, if adopted (ADR-008)        | **Unmeasured footprint, still** — no `N8nCollector` exists in code yet, so there is nothing to deploy or measure                                                                                                              |
+| Constraint                       | Requirement                                                                                                         |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Local model (retired)            | `OllamaScorer` and `OLLAMA_KEEP_ALIVE` are gone (ADR-016) — `ApiScorer` never loads a model into this budget at all |
+| Swap is an OOM net, not headroom | Paging during inference destroys latency; a plan that relies on swap is not a plan                                  |
+| P1 sources                       | Ephemeral Python container (`--rm`), prints JSON and exits — zero RAM at rest                                       |
+| n8n, if adopted (ADR-008)        | **Unmeasured footprint, still** — no `N8nCollector` exists in code yet, so there is nothing to deploy or measure    |
 
 **Docker Compose, done (M8).** `Dockerfile` (multi-stage — `better-sqlite3`
 compiles its native binding from source, so the build stage needs a C++

@@ -27,6 +27,7 @@ revisited on its merits instead of re-argued from memory.
 | [013](adr/013-deepseek-v4-flash-and-cache-friendly-stage-b.md) | Calibrate against DeepSeek V4 Flash, reorder Stage B for prompt caching | Accepted | 2026-08-15 |
 | [014](adr/014-calibration-input-integrity.md)                  | Fix the inputs before spending another calibration run                  | Accepted | 2026-08-15 |
 | [015](adr/015-verifiable-requirements-and-track-exclusions.md) | Score only what a candidate could evidence, and stop matching homonyms  | Accepted | 2026-08-15 |
+| [016](adr/016-retire-ollama-scorer.md)                         | Retire `OllamaScorer`; `ApiScorer` is the permanent production adapter  | Accepted | 2026-08-15 |
 
 ## When an ADR is required
 
