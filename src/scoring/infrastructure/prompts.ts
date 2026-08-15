@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { computeAcademicPeriod } from "../../profile/domain/academic-period";
-import { Profile } from "../../profile/domain/profile";
+import { Profile, UNVERIFIED } from "../../profile/domain/profile";
 import { Requirement } from "../domain/types";
 
 /**
@@ -85,13 +85,45 @@ function formatAcademicEvidence(profile: Profile, today: Date): string[] {
 }
 
 /**
+ * `englishLevel` and `maxWeeklyHours`/`minimumStipend` (CLAUDE.md §9) as
+ * quotable lines. These fields existed on `Profile` since M2 but were never
+ * rendered into stage B's evidence — the same class of gap
+ * `formatAcademicEvidence` closed for enrollment (ADR-014). "Inglês
+ * intermediário" and availability/schedule requirements are common enough
+ * that leaving them unrendered meant every posting asking for either scored
+ * `not_met` regardless of the actual answer once one was given.
+ *
+ * A field still `UNVERIFIED` (CLAUDE.md's placeholder for "not answered yet")
+ * is skipped rather than rendered — quoting "⚠ VERIFY" back as if it were an
+ * answer would be worse than the field staying absent.
+ */
+function formatDeclaredFieldsEvidence(profile: Profile): string[] {
+  const lines: string[] = [];
+  if (profile.englishLevel !== UNVERIFIED) {
+    lines.push(`- [English level] Nível de inglês: ${profile.englishLevel}.`);
+  }
+  if (profile.maxWeeklyHours !== UNVERIFIED) {
+    lines.push(
+      `- [Availability] Disponibilidade de até ${profile.maxWeeklyHours} horas semanais.`,
+    );
+  }
+  if (profile.minimumStipend !== UNVERIFIED) {
+    lines.push(
+      `- [Compensation] Bolsa-auxílio mínima aceita: ${profile.minimumStipend}.`,
+    );
+  }
+  return lines;
+}
+
+/**
  * Every competency's evidence, verbatim, tagged by competency name, plus the
- * derived academic-enrollment line — the only text stage B's "evidence"
- * field may legally quote from (ADR-005).
+ * derived academic-enrollment and declared-field lines — the only text
+ * stage B's "evidence" field may legally quote from (ADR-005).
  */
 function formatProfileEvidence(profile: Profile, today: Date): string {
   return [
     ...formatAcademicEvidence(profile, today),
+    ...formatDeclaredFieldsEvidence(profile),
     ...profile.competencies.flatMap((competency) =>
       competency.evidence.map((line) => `- [${competency.name}] ${line}`),
     ),

@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { Profile } from "../../../src/profile/domain/profile";
+import { Profile, UNVERIFIED } from "../../../src/profile/domain/profile";
 import { Requirement } from "../../../src/scoring/domain/types";
 import {
   buildStageAPrompt,
@@ -162,6 +162,28 @@ describe("buildStageBPrompt", () => {
       new Date("2025-01-01"),
     );
     expect(prompt).toContain("ainda não iniciou o curso");
+  });
+
+  it("includes englishLevel, maxWeeklyHours and minimumStipend as quotable evidence", () => {
+    const prompt = buildStageBPrompt(requirement, profile());
+
+    expect(prompt).toContain("[English level] Nível de inglês: intermediate.");
+    expect(prompt).toContain(
+      "[Availability] Disponibilidade de até 30 horas semanais.",
+    );
+    expect(prompt).toContain(
+      "[Compensation] Bolsa-auxílio mínima aceita: R$ 1500.",
+    );
+  });
+
+  it("omits a declared field still marked UNVERIFIED rather than quoting the placeholder", () => {
+    const prompt = buildStageBPrompt(
+      requirement,
+      profile({ englishLevel: UNVERIFIED }),
+    );
+
+    expect(prompt).not.toContain("English level");
+    expect(prompt).not.toContain(UNVERIFIED);
   });
 
   it("places the static evidence block before the per-call requirement text (ADR-013 cache prefix)", () => {
