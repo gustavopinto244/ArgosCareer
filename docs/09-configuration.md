@@ -35,6 +35,7 @@ DATABASE_PATH=            # default ./data/argos.db
 LOG_LEVEL=                # default info
 API_KEY=                  # required (M9) — Bearer token every HTTP route needs
 API_PORT=                 # default 3000 — Tailscale-bound at the compose level
+ATLAS_TAILSCALE_IP=       # compose-only (M9) — Atlas's `tailscale ip -4`, never read by the app
 ```
 
 `.env.example` carries every key with a fictional or empty value and a comment.

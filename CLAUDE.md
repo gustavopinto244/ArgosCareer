@@ -276,11 +276,14 @@ Marked `⚠ VERIFY` in the profile and tracked in `docs/01-vision-and-scope.md`:
 Hermes Agent (Nous Research) runs as a personal assistant on a **different
 machine**, not Atlas. This means the boundary M9 builds is a real network
 boundary, not a same-box integration: ArgosCareer exposes a stable,
-**authenticated** HTTP API (and later an MCP server) that Hermes reaches over
-the network, not localhost. Authentication design (API key, JWT, or reusing
-Atlas's existing Cloudflare Access pattern already proven by `atlas-manager`)
-is an M9 decision, not decided here — becomes an ADR next to the code that
-implements it, same as every other non-obvious M9 call.
+**authenticated** HTTP API and MCP server that Hermes reaches over Tailscale,
+not localhost — a fixed Bearer API key, checked with a timing-safe
+comparison, applied globally so every route (REST and `/mcp` alike) is
+authenticated by default. Settled in [ADR-017](docs/adr/017-tailscale-and-bearer-key-for-the-api-boundary.md),
+next to the code that implements it, same as every other non-obvious M9
+call — Cloudflare Access/JWT (`atlas-manager`'s pattern) is the documented
+upgrade path if a second consumer or public exposure ever arrives, not
+built now.
 
 **Do not implement this pipeline as a Hermes skill.** It would be faster and it
 would destroy the project: the core would become third-party tool configuration,
@@ -345,19 +348,19 @@ about Brazilian postings. See ADR-003.
 
 ## 14. Milestones
 
-| #   | Milestone           | Delivers                                                                                           | Status                                                    |
-| --- | ------------------- | -------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| M0  | Bootstrap           | `CLAUDE.md`, `docs/`, `.gitignore`, CI, ADR template, README                                       | done                                                      |
-| M1  | Domain + stage C    | Entities, fingerprint, score computation, unit tests                                               | done                                                      |
-| M2  | Master profile      | Zod schema, loader, `profile.yaml`, period derivation                                              | done                                                      |
-| M3  | Gupy collector      | Adapter + `fixture:gupy` + schema fitted to the real response                                      | done                                                      |
-| M4  | Persistence         | Drizzle + SQLite, migrations, dedup, `runs` table                                                  | done                                                      |
-| M5  | Pre-filter          | Configurable deterministic rules                                                                   | done                                                      |
-| M6  | **Vertical slice**  | Gupy → SQLite → Telegram with `StubScorer`. A real posting on the phone                            | done                                                      |
-| M7  | Real scoring        | Stages A and B, versioned prompts in `prompts/`, 50 labelled postings, calibration table in README | done (preliminary — 16/50 labelled, see README)           |
-| M8  | Deployment          | Docker Compose on Atlas, scheduling, backup, broken-adapter alert                                  | done (preliminary — local-model scoring retired, ADR-016) |
-| M9  | API + Hermes        | HTTP endpoints, MCP server, integration                                                            | next                                                      |
-| M10 | Market intelligence | Skill taxonomy, aggregate market analysis, gap analysis, study plan                                |                                                           |
+| #   | Milestone           | Delivers                                                                                           | Status                                                               |
+| --- | ------------------- | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| M0  | Bootstrap           | `CLAUDE.md`, `docs/`, `.gitignore`, CI, ADR template, README                                       | done                                                                 |
+| M1  | Domain + stage C    | Entities, fingerprint, score computation, unit tests                                               | done                                                                 |
+| M2  | Master profile      | Zod schema, loader, `profile.yaml`, period derivation                                              | done                                                                 |
+| M3  | Gupy collector      | Adapter + `fixture:gupy` + schema fitted to the real response                                      | done                                                                 |
+| M4  | Persistence         | Drizzle + SQLite, migrations, dedup, `runs` table                                                  | done                                                                 |
+| M5  | Pre-filter          | Configurable deterministic rules                                                                   | done                                                                 |
+| M6  | **Vertical slice**  | Gupy → SQLite → Telegram with `StubScorer`. A real posting on the phone                            | done                                                                 |
+| M7  | Real scoring        | Stages A and B, versioned prompts in `prompts/`, 50 labelled postings, calibration table in README | done (preliminary — 16/50 labelled, see README)                      |
+| M8  | Deployment          | Docker Compose on Atlas, scheduling, backup, broken-adapter alert                                  | done (preliminary — local-model scoring retired, ADR-016)            |
+| M9  | API + Hermes        | HTTP endpoints, MCP server, integration                                                            | done (preliminary — Hermes integration itself untested, see docs/10) |
+| M10 | Market intelligence | Skill taxonomy, aggregate market analysis, gap analysis, study plan                                | next                                                                 |
 
 P1/P2 sources (Google Jobs, Indeed, LinkedIn) come after M6, one per pull
 request.

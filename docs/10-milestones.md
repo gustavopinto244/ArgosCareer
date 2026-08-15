@@ -295,16 +295,57 @@ deliberate deferrals with a stated reason, not gaps.
       `N8nCollector` exists in code yet (still in the "after M6" backlog,
       unimplemented), so there is nothing to measure.
 
-## M9 — API and Hermes
+## M9 — API and Hermes ✅ (preliminary — see the deferral below)
 
-- [ ] HTTP endpoints for stage re-execution and run inspection
-- [ ] Health endpoint reporting last successful run per kind
-- [ ] MCP server
-- [ ] Hermes consuming it — **with the nightly digest still working while
-      Hermes is stopped**, which is the test of whether the boundary is real
-- [ ] n8n consuming the API for side effects — spreadsheet, reminders,
-      cross-post — never on the critical path (ADR-008)
-- [ ] ADR recording the API boundary
+**Done.** Four PRs, in order: HTTP bootstrap + auth guard + read-only
+inspection → stage re-execution → MCP server → Tailscale publish + ADR.
+Every criterion below is demonstrable now; the one left unchecked is a
+deliberate deferral with a stated reason, not a gap.
+
+- [x] HTTP endpoints for stage re-execution and run inspection —
+      `GET /health`, `GET /runs`, `GET /runs/:runId`, `POST /runs/collect`,
+      `POST /runs/dedup`, `POST /runs/deliver`, all thin over one
+      `RunsService` so REST has exactly one implementation of "run collect"
+- [x] Health endpoint reporting last successful run per kind — verbatim to
+      `docs/08-observability.md`'s spec, `{collect, dedup, scoreAndDeliver}`
+- [x] MCP server — `POST /mcp`, six tools mirroring the REST routes
+      (`get_health`, `list_runs`, `get_run`, `run_collect`, `run_dedup`,
+      `run_deliver`), calling the same `RunsService`. Found and fixed a real
+      SDK requirement while wiring it up: `StreamableHTTPServerTransport` in
+      stateless mode cannot be reused across requests — a fresh
+      `McpServer`/transport pair is built per request, not held for the
+      app's lifetime, discovered by reproducing a 500 on every session's
+      second message against a real running server, not a test artifact
+- [ ] **Hermes consuming it — not exercised.** This session has no second
+      Hermes instance, on a second tailnet-joined machine, to configure and
+      drive a real cross-machine call against. What is verified for real
+      instead, on Atlas itself over its own Tailscale IP
+      (`100.112.68.45:3000`): the container is bound only to that interface
+      (`docker port` confirms `3000/tcp -> 100.112.68.45:3000`, not
+      `0.0.0.0`; no listener on `127.0.0.1:3000` belongs to it — that port
+      is a pre-existing, unrelated host process), `GET /health` returns 200
+      with a valid key and 401 with a missing or wrong one, and
+      `POST /mcp`'s `initialize` call succeeds. The boundary is built and
+      reachable; a real remote Hermes call is out of reach here, recorded
+      honestly rather than assumed. "The nightly digest still working while
+      Hermes is stopped" is trivially true today — nothing consumes the API
+      yet — and stops being a meaningful test until Hermes exists to stop.
+- [x] n8n consuming the API for side effects — **N/A.** No `N8nCollector`
+      exists in code (still unimplemented, same standing note as M8), so
+      there is nothing for it to consume yet.
+- [x] ADR recording the API boundary — [ADR-017](adr/017-tailscale-and-bearer-key-for-the-api-boundary.md):
+      Tailscale over the existing Cloudflare Tunnel pattern (the only
+      intended caller is one already-tailnet-joined machine, not the public
+      internet), a fixed Bearer key over Cloudflare Access/JWT (one trusted
+      consumer, simple and auditable, with the upgrade path documented).
+      **Deployed for real on Atlas**, 2026-08-15, from the PR branch
+      (`~/apps/argos-career/app`, the same layout `portfolio` and
+      `task-manager` use): `docker compose up -d --build`, `API_KEY`
+      generated on Atlas itself with `openssl rand -hex 32`,
+      `ATLAS_TAILSCALE_IP` set to the confirmed interface IP. `POST
+/runs/deliver` is deliberately reachable through this same
+      boundary — real API spend and a real Telegram send, remotely
+      triggerable by design, not a footgun left undocumented (ADR-017).
 
 ## M10 — Market intelligence and gap analysis
 
