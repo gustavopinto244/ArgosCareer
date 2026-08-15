@@ -6,7 +6,10 @@ import {
   executeCollect,
   executeDedup,
   executeDeliver,
+  executeStudyPlan,
 } from "../../src/cli/main";
+import { Taxonomy } from "../../src/market/domain/taxonomy";
+import { TextNotifier } from "../../src/delivery/infrastructure/telegram-notifier";
 import {
   createDatabase,
   Db,
@@ -418,5 +421,75 @@ describe("executeDeliver", () => {
     expect(outcome.error).toBeUndefined();
     expect(digests[0]?.summary.collected).toBe(2);
     expect(digests[0]?.summary.failedSources).toEqual([]);
+  });
+});
+
+const studyPlanTaxonomy: Taxonomy = {
+  skills: [{ canonical: "PostgreSQL", aliases: ["Postgres"] }],
+};
+
+/** Records every text send instead of hitting the network. */
+function recordingTextNotifier(): { notifier: TextNotifier; sent: string[] } {
+  const sent: string[] = [];
+  return {
+    sent,
+    notifier: {
+      sendText: async (text: string) => {
+        sent.push(text);
+        return { ok: true };
+      },
+    },
+  };
+}
+
+describe("executeStudyPlan", () => {
+  it("sends a study plan built from the current corpus, over the active database only", async () => {
+    const collector = stubCollector({
+      source: "gupy",
+      collectedAt: new Date(),
+      postings: [
+        {
+          source: "gupy",
+          sourceId: "1",
+          payload: gupyPayload(1, "Estágio em Backend"),
+        },
+      ],
+    });
+    await executeCollect(db, collector, {});
+
+    const { notifier, sent } = recordingTextNotifier();
+    const outcome = await executeStudyPlan(
+      db,
+      deliverCriteria(),
+      deliverProfile(),
+      studyPlanTaxonomy,
+      notifier,
+    );
+
+    expect(outcome.error).toBeUndefined();
+    expect(outcome.delivered).toBe(true);
+    expect(outcome.corpusSize).toBe(1);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain("Corpus: 1 vagas");
+  });
+
+  it("reports a delivery failure without throwing", async () => {
+    const notifier: TextNotifier = {
+      sendText: async () => ({
+        ok: false,
+        error: { message: "Telegram is down" },
+      }),
+    };
+
+    const outcome = await executeStudyPlan(
+      db,
+      deliverCriteria(),
+      deliverProfile(),
+      studyPlanTaxonomy,
+      notifier,
+    );
+
+    expect(outcome.delivered).toBe(false);
+    expect(outcome.error).toBe("Telegram is down");
   });
 });

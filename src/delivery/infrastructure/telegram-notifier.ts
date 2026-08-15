@@ -6,6 +6,18 @@ import { TelegramConfig } from "./telegram-config";
 /** Telegram's hard limit on a single `sendMessage` call's `text` field. */
 export const TELEGRAM_MESSAGE_LIMIT = 4096;
 
+/**
+ * The plain-text-send capability, factored out so a caller (M10's
+ * `executeStudyPlan`) can depend on "something that can send text" and be
+ * given a fake in tests, without depending on the concrete `TelegramNotifier`
+ * class or widening `NotifierPort` itself — that port's one method is
+ * shaped around a `Digest`, and a study plan is not one, same reasoning
+ * `sendText`'s own doc comment already gives.
+ */
+export interface TextNotifier {
+  sendText(text: string): Promise<NotifyResult>;
+}
+
 const SECTION_SEPARATOR = "\n\n---\n\n";
 const ENTRY_SEPARATOR = "\n\n";
 
@@ -63,7 +75,7 @@ export function splitForTelegram(
  * a delivery failure must not crash the caller, which decides whether to
  * retry.
  */
-export class TelegramNotifier implements NotifierPort {
+export class TelegramNotifier implements NotifierPort, TextNotifier {
   constructor(
     private readonly config: TelegramConfig,
     private readonly fetchImpl: typeof fetch = fetch,

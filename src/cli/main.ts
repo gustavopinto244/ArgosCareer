@@ -7,6 +7,7 @@
  *   argos collect [--job-name <text>] [--city <text>] [--max-results <n>]
  *   argos dedup [--similarity-threshold <0-1>] [--window-days <n>]
  *   argos deliver
+ *   argos studyplan
  */
 import { parseArgs } from "node:util";
 import { CollectorPort } from "../posting/domain/ports/collector.port";
@@ -35,8 +36,16 @@ import { ScorerPort } from "../scoring/domain/ports/scorer.port";
 import { buildScorer } from "../scoring/infrastructure/build-scorer";
 import { NotifierPort } from "../delivery/domain/ports/notifier.port";
 import { composeDigest, ScoredPosting } from "../delivery/domain/digest";
-import { TelegramNotifier } from "../delivery/infrastructure/telegram-notifier";
+import {
+  TelegramNotifier,
+  TextNotifier,
+} from "../delivery/infrastructure/telegram-notifier";
 import { loadTelegramConfig } from "../delivery/infrastructure/telegram-config";
+import { Taxonomy } from "../market/domain/taxonomy";
+import { loadTaxonomy } from "../market/infrastructure/taxonomy-loader";
+import { MarketRepository } from "../market/infrastructure/market-repository";
+import { composeStudyPlan } from "../market/domain/study-plan";
+import { renderStudyPlanText } from "../market/domain/render-study-plan";
 
 export interface CollectOutcome {
   readonly runId: string;
@@ -264,6 +273,48 @@ export async function executeDeliver(
   };
 }
 
+export interface StudyPlanOutcome {
+  readonly corpusSize: number;
+  readonly extractedCount: number;
+  readonly highCompatibilityCount: number;
+  readonly gapCount: number;
+  readonly delivered: boolean;
+  readonly error?: string;
+}
+
+/**
+ * The testable core of `studyplan` (M10): assemble the corpus via
+ * `MarketRepository`, compose the ranked plan, render it in pt-BR, send it
+ * — "delivered to Telegram on request" (docs/10-milestones.md), not on the
+ * nightly cron, so this has no `RunsRepository` row of its own the way
+ * `collect`/`dedup`/`scoreAndDeliver` do: it reads the corpus, it never
+ * mutates it, and there is nothing here for a missed-run alert to watch.
+ */
+export async function executeStudyPlan(
+  db: Db,
+  criteria: Criteria,
+  profile: Profile,
+  taxonomy: Taxonomy,
+  notifier: TextNotifier,
+  now: () => Date = () => new Date(),
+): Promise<StudyPlanOutcome> {
+  const profileHash = hashProfile(profile);
+  const entries = new MarketRepository(db, criteria).loadCorpus(profileHash);
+  const plan = composeStudyPlan(entries, profile, taxonomy, now());
+  const text = renderStudyPlanText(plan);
+
+  const notifyResult = await notifier.sendText(text);
+
+  return {
+    corpusSize: plan.corpusSize,
+    extractedCount: plan.extractedCount,
+    highCompatibilityCount: plan.highCompatibilityCount,
+    gapCount: plan.gaps.length,
+    delivered: notifyResult.ok,
+    ...(notifyResult.ok ? {} : { error: notifyResult.error.message }),
+  };
+}
+
 function openDatabase(): Db {
   const databasePath = process.env.DATABASE_PATH ?? "./data/argos.db";
   const db = createDatabase(databasePath);
@@ -357,6 +408,40 @@ async function deliverCommand(): Promise<void> {
   );
 }
 
+async function studyPlanCommand(): Promise<void> {
+  const criteria = loadCriteria(
+    process.env.CRITERIA_PATH ?? "./config/criteria.yaml",
+  );
+  const profile = loadProfile(
+    process.env.PROFILE_PATH ?? "./config/profile.yaml",
+  );
+  const taxonomy = loadTaxonomy(
+    process.env.TAXONOMY_PATH ?? "./config/taxonomy.yaml",
+  );
+
+  const db = openDatabase();
+  const notifier = new TelegramNotifier(loadTelegramConfig());
+
+  const outcome = await executeStudyPlan(
+    db,
+    criteria,
+    profile,
+    taxonomy,
+    notifier,
+  );
+
+  if (outcome.error) {
+    console.error(`studyplan failed: ${outcome.error}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  console.log(
+    `studyplan: ${outcome.corpusSize} postings in corpus, ${outcome.extractedCount} extracted, ` +
+      `${outcome.highCompatibilityCount} high-compatibility, ${outcome.gapCount} gaps identified, delivered`,
+  );
+}
+
 async function main(): Promise<void> {
   const [, , command, ...rest] = process.argv;
 
@@ -370,8 +455,11 @@ async function main(): Promise<void> {
     case "deliver":
       await deliverCommand();
       break;
+    case "studyplan":
+      await studyPlanCommand();
+      break;
     default:
-      console.error("Usage: argos <collect|dedup|deliver> [options]");
+      console.error("Usage: argos <collect|dedup|deliver|studyplan> [options]");
       process.exitCode = 1;
   }
 }

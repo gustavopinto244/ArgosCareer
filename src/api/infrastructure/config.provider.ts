@@ -1,4 +1,6 @@
 import { FactoryProvider } from "@nestjs/common";
+import { Taxonomy } from "../../market/domain/taxonomy";
+import { loadTaxonomy } from "../../market/infrastructure/taxonomy-loader";
 import { Criteria } from "../../prefilter/domain/criteria";
 import { loadCriteria } from "../../prefilter/infrastructure/criteria-loader";
 import { Profile } from "../../profile/domain/profile";
@@ -14,6 +16,7 @@ import { loadProfile } from "../../profile/infrastructure/profile-loader";
  */
 export const CRITERIA = Symbol("CRITERIA");
 export const PROFILE = Symbol("PROFILE");
+export const TAXONOMY = Symbol("TAXONOMY");
 
 export const criteriaProvider: FactoryProvider<Criteria> = {
   provide: CRITERIA,
@@ -25,4 +28,10 @@ export const profileProvider: FactoryProvider<Profile> = {
   provide: PROFILE,
   useFactory: (): Profile =>
     loadProfile(process.env.PROFILE_PATH ?? "./config/profile.yaml"),
+};
+
+export const taxonomyProvider: FactoryProvider<Taxonomy> = {
+  provide: TAXONOMY,
+  useFactory: (): Taxonomy =>
+    loadTaxonomy(process.env.TAXONOMY_PATH ?? "./config/taxonomy.yaml"),
 };

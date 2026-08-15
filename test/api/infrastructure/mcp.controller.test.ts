@@ -17,6 +17,7 @@ import {
   NotifierPort,
   NotifyResult,
 } from "../../../src/delivery/domain/ports/notifier.port";
+import { TextNotifier } from "../../../src/delivery/infrastructure/telegram-notifier";
 import {
   createDatabase,
   Db,
@@ -39,10 +40,15 @@ class FakeCollector implements CollectorPort {
     return { source: "fake", postings: [], collectedAt: new Date() };
   }
 }
-class FakeNotifier implements NotifierPort {
+class FakeNotifier implements NotifierPort, TextNotifier {
   readonly sent: Digest[] = [];
+  readonly sentText: string[] = [];
   async notify(digest: Digest): Promise<NotifyResult> {
     this.sent.push(digest);
+    return { ok: true };
+  }
+  async sendText(text: string): Promise<NotifyResult> {
+    this.sentText.push(text);
     return { ok: true };
   }
 }
@@ -105,13 +111,14 @@ function textOf(result: Awaited<ReturnType<Client["callTool"]>>): unknown {
 }
 
 describe("MCP server", () => {
-  it("lists all six tools", async () => {
+  it("lists all seven tools", async () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual(
       [
         "get_health",
         "get_run",
+        "get_study_plan",
         "list_runs",
         "run_collect",
         "run_dedup",
@@ -188,5 +195,15 @@ describe("MCP server", () => {
     });
     const body = textOf(result) as { delivered: number };
     expect(body.delivered).toBe(0);
+  });
+
+  it("get_study_plan reads the corpus and sends through the fake notifier", async () => {
+    const result = await client.callTool({
+      name: "get_study_plan",
+      arguments: {},
+    });
+    const body = textOf(result) as { corpusSize: number; delivered: boolean };
+    expect(body.corpusSize).toBe(0);
+    expect(body.delivered).toBe(true);
   });
 });

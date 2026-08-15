@@ -31,6 +31,8 @@ three different words that all get casually called "job".
 | **Seniority**                 | The level a posting requires, as a field                                                     | The title keyword the pre-filter matches on                                   |
 | **Corpus**                    | Every posting ever collected, including rejected ones                                        | The digest shortlist                                                          |
 | **Skill taxonomy**            | Global canonical skill names with aliases, for market counting (M10)                         | The profile's per-competency `aliases`, which describe one profile            |
+| **Gap analysis**              | Taxonomized skills frequent in high-compatibility postings and absent from the profile (M10) | _Critical gaps_, which is per-posting and comes from a single `ScoreOutcome`  |
+| **Study plan**                | The ranked, delivered-on-request output of gap analysis + market demand (M10)                | _Digest_, which is nightly and about specific postings, not skills            |
 | **Period**                    | Academic semester index, 1–8, derived at runtime                                             | Calendar semester, e.g. `2027.1`                                              |
 
 ## Requirement weight vs. score weight
@@ -72,6 +74,10 @@ appears in code, a test name, or a log field.
 | Digest                         | digest                              |
 | Track                          | trilha                              |
 | Period                         | período                             |
+| Corpus                         | corpus                              |
+| Gap analysis                   | lacunas mais frequentes             |
+| Study plan                     | plano de estudos                    |
+| Skill (taxonomy entry)         | tecnologia                          |
 
 Translation happens **only** in the `NotifierPort` adapter. A pt-BR string
 anywhere else — a domain enum, a log message, an error — is a bug, with one
