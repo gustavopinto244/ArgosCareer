@@ -9,6 +9,8 @@ import request from "supertest";
 import { ApiModule } from "../../../src/api/infrastructure/api.module";
 import { COLLECTOR } from "../../../src/api/infrastructure/collector.provider";
 import { NOTIFIER } from "../../../src/api/infrastructure/notifier.provider";
+import { CRITERIA } from "../../../src/api/infrastructure/config.provider";
+import { loadCriteria } from "../../../src/prefilter/infrastructure/criteria-loader";
 import { Digest } from "../../../src/delivery/domain/digest";
 import {
   NotifierPort,
@@ -91,6 +93,17 @@ beforeEach(async () => {
     .useValue(fakeCollector)
     .overrideProvider(NOTIFIER)
     .useValue(fakeNotifier)
+    // Real criteria, but no politeness sleep: the configured cycle issues
+    // several queries and the suite must not spend real seconds waiting
+    // between them (docs/07-testing-strategy.md).
+    .overrideProvider(CRITERIA)
+    .useValue({
+      ...loadCriteria("./config/criteria.yaml"),
+      collection: {
+        ...loadCriteria("./config/criteria.yaml").collection,
+        queryIntervalMs: 0,
+      },
+    })
     .compile();
   app = moduleRef.createNestApplication();
   await app.init();
@@ -239,13 +252,16 @@ describe("POST /runs/collect", () => {
     await request(app.getHttpServer()).post("/runs/collect").expect(401);
   });
 
-  it("calls the injected collector, not a real one, and writes a real run", async () => {
+  it("runs the configured collection cycle when the body is empty", async () => {
+    const configured = loadCriteria("./config/criteria.yaml").collection.queries
+      .length;
     const res = await auth(
       request(app.getHttpServer()).post("/runs/collect").send({}),
     );
 
     expect(res.status).toBe(201);
-    expect(fakeCollector.calls).toHaveLength(1);
+    // One call per configured query, folded into a single run row.
+    expect(fakeCollector.calls).toHaveLength(configured);
     const repo = new RunsRepository(db);
     const run = repo.findById(res.body.runId);
     expect(run?.kind).toBe("collect");

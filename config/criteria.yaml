@@ -7,6 +7,33 @@
 # Schema: src/prefilter/domain/criteria.ts
 # Rules and thresholds reasoned through in ADR-011.
 
+# What the scheduled collection cycle asks Gupy for (principle 3: search
+# strategy is data, not code). Before this section existed the cron issued a
+# single empty query and got 380 mostly-Sao Paulo senior roles, of which the
+# pre-filter correctly discarded 95% -- ADR-011 predicted exactly that
+# ("geography is cheaper to filter at the source than after downloading it").
+#
+# Narrow on purpose: Rio de Janeiro or remote, matching CLAUDE.md 6. Both the
+# masculine and feminine job terms are listed because Gupy matches the query
+# string literally -- "estagiario" does not find "Pessoa Estagiaria".
+collection:
+  queries:
+    - jobName: estágio
+      city: Rio de Janeiro
+    - jobName: estágio
+      isRemoteWork: true
+    - jobName: estagiário
+      city: Rio de Janeiro
+    - jobName: estagiário
+      isRemoteWork: true
+    - jobName: estagiária
+      city: Rio de Janeiro
+    - jobName: estagiária
+      isRemoteWork: true
+  # Pause between queries. The collector's own ~1.5s interval only spaces out
+  # pages within one query (CLAUDE.md 6).
+  queryIntervalMs: 1500
+
 titleBlocklist:
   - sênior
   - senior

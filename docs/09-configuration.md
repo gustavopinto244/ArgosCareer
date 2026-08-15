@@ -61,7 +61,9 @@ Everything that decides _what to look for_ and _how to weigh it_. Committed,
 diffable, and the file that principle 3 is really about.
 
 ```yaml
-sources: # which collectors run, and their pacing
+collection: # what the cycle asks the source for (ADR-018)
+  queries: # jobName / city / isRemoteWork per query — narrow on purpose
+  queryIntervalMs: # pause between queries; politeness spans them (CLAUDE.md §6)
 tracks: # keyword classification per track
 trackWeights: # dev 1.0, security 1.0, automation 0.7, unknown 0.4
 prefilter:

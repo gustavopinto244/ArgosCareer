@@ -104,7 +104,18 @@ export class RunsService {
    * proven a fourth way (CLI, scheduler, REST, MCP).
    */
   collect(params: CollectParams) {
-    return executeCollect(this.db, this.collector, params);
+    // An empty body means "run the configured cycle", the same thing the
+    // cron does; a body with any field set is a deliberate one-off query
+    // and overrides the configuration rather than adding to it.
+    const isAdHoc = Object.values(params).some((v) => v !== undefined);
+    const queries = isAdHoc ? [params] : this.criteria.collection.queries;
+    return executeCollect(
+      this.db,
+      this.collector,
+      queries,
+      () => new Date(),
+      this.criteria.collection.queryIntervalMs,
+    );
   }
 
   dedup() {

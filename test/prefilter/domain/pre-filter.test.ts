@@ -7,6 +7,7 @@ const NOW = new Date("2026-08-14T03:00:00Z");
 
 function baseCriteria(overrides: Partial<Criteria> = {}): Criteria {
   return {
+    collection: { queries: [{}], queryIntervalMs: 0 },
     titleBlocklist: ["sênior", "pleno", "especialista"],
     titleRequired: ["estágio", "estagiário", "intern", "trainee"],
     location: { cities: ["Rio de Janeiro", "Niterói"], allowRemote: true },

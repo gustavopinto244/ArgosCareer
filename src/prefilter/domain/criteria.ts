@@ -27,6 +27,46 @@ export const ScoringConfigSchema = z.object({
 });
 
 /**
+ * One query issued to a collector. Mirrors the subset of
+ * `GupyCollectorCriteria` that is a *search decision* rather than a
+ * transport detail — `pageSize`, timeouts and backoff stay in the adapter.
+ */
+export const CollectionQuerySchema = z.object({
+  jobName: z.string().min(1).optional(),
+  city: z.string().min(1).optional(),
+  isRemoteWork: z.boolean().optional(),
+  maxResults: z.number().int().positive().optional(),
+});
+
+/**
+ * What the scheduled collection cycle actually asks the source for
+ * (principle 3: search strategy is data, not code).
+ *
+ * Before this existed the cron called `executeCollect(db, collector, {})` —
+ * an empty query — and Gupy answered with whatever it liked: 380 mostly-São
+ * Paulo senior roles, of which the pre-filter correctly discarded 95%. The
+ * fix is not a looser filter, it is asking a better question. ADR-011
+ * already predicted this: "most of what the pre-filter cuts is geography,
+ * and geography is cheaper to filter at the source than after downloading
+ * it."
+ *
+ * Defaulted to a single empty query so a criteria file written before this
+ * section existed stays valid and behaves exactly as it did — same
+ * discipline as `trackExclusions`, `schedule` and `alerts`.
+ */
+export const CollectionSchema = z.object({
+  queries: z.array(CollectionQuerySchema).min(1),
+  /**
+   * Pause between consecutive queries in one cycle. The collector's own
+   * ~1.5 s interval only applies *between pages of a single query*, so
+   * without this a multi-query cycle would fire back-to-back requests at
+   * each query boundary — exactly the impolite behaviour CLAUDE.md §6
+   * forbids ("a discreet collector is a collector that keeps working").
+   */
+  queryIntervalMs: z.number().int().nonnegative().default(1_500),
+});
+
+/**
  * `config/criteria.yaml`'s shape (docs/09-configuration.md). Committed, not
  * gitignored — criteria are neither secret nor personal, and committing them
  * is what makes "why did I stop seeing infra postings?" answerable with
@@ -39,6 +79,10 @@ export const ScoringConfigSchema = z.object({
  * warns against.
  */
 export const CriteriaSchema = z.object({
+  collection: CollectionSchema.default({
+    queries: [{}],
+    queryIntervalMs: 1_500,
+  }),
   titleBlocklist: z.array(z.string().min(1)).default([]),
   titleRequired: z.array(z.string().min(1)).min(1),
   location: LocationCriteriaSchema,
@@ -121,5 +165,6 @@ export const CriteriaSchema = z.object({
 });
 
 export type Criteria = z.infer<typeof CriteriaSchema>;
+export type CollectionQuery = z.infer<typeof CollectionQuerySchema>;
 export type LocationCriteria = z.infer<typeof LocationCriteriaSchema>;
 export type ScoringConfigCriteria = z.infer<typeof ScoringConfigSchema>;
