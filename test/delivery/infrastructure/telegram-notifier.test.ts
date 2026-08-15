@@ -203,3 +203,32 @@ describe("TelegramNotifier — failure, never throws", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("TelegramNotifier.sendText — M8 alerts", () => {
+  it("posts plain text to the same sendMessage endpoint", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ ok: true }));
+    const notifier = new TelegramNotifier(CONFIG, fetchImpl);
+
+    const result = await notifier.sendText("gupy: 2 consecutive runs failed.");
+
+    expect(result.ok).toBe(true);
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ];
+    expect(url).toBe("https://api.telegram.org/bot123:abc/sendMessage");
+    const body = JSON.parse(init.body as string) as { text: string };
+    expect(body.text).toBe("gupy: 2 consecutive runs failed.");
+  });
+
+  it("returns ok:false, not a throw, on a failed send", async () => {
+    const fetchImpl = vi.fn(
+      async () => new Response("Server Error", { status: 500 }),
+    );
+    const notifier = new TelegramNotifier(CONFIG, fetchImpl);
+
+    const result = await notifier.sendText("alert");
+
+    expect(result.ok).toBe(false);
+  });
+});

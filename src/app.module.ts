@@ -1,10 +1,10 @@
 import { Module } from "@nestjs/common";
+import { SchedulingModule } from "./scheduling/infrastructure/scheduling.module";
 
 /**
- * Empty for now — feature modules land as their milestones build them
- * (profile config in M2, persistence in M4, delivery in M6, scheduling in
- * M8, HTTP in M9). This establishes the module-graph pattern from
- * CLAUDE.md before anything depends on it.
+ * M8 is the first real occupant — the two ADR-009 crons. HTTP arrives in M9.
  */
-@Module({})
+@Module({
+  imports: [SchedulingModule],
+})
 export class AppModule {}

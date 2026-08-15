@@ -222,19 +222,43 @@ demand.
   and two rule gaps instead — see ADR-014 and ADR-015 for why that
   distinction mattered.
 
-## M8 — Deployment
+## M8 — Deployment 🚧
 
+**In progress.** Three PRs, in order: scheduling + alerting (code, no infra) →
+backup/restore → Docker Compose + real deployment + real measurements. See
+the plan this milestone is executing from for the full breakdown.
+
+- [x] `schedule` and `alerts` sections added to `config/criteria.yaml` and
+      `CriteriaSchema` (`docs/09-configuration.md`'s spec, now read by code)
+- [x] Scheduling live in-process: `@nestjs/schedule` wired through
+      `SchedulerService`, two independent crons per ADR-009 (collection every
+      `schedule.collection.intervalHours`, score+deliver daily at
+      `schedule.scoreAndDeliver.time`/`timezone`), registered dynamically
+      via `SchedulerRegistry` since the expressions are only known once
+      `criteria.yaml` loads. Verified booting for real (`node dist/main.js`,
+      the exact production entry point) — both jobs registered, process
+      stays alive. **Not yet verified running on Atlas itself** — that's
+      PR 3.
+- [x] Alerts from `08-observability.md` live: `evaluateCollectionHealth`
+      (consecutive empty/errored collection runs), `evaluateDeliveryOutcome`
+      (delivery failure, scoring failure rate), `evaluateMissedRuns` (missed
+      `scoreAndDeliver` alerts on the first miss, missed `collection` alerts
+      only after two — ADR-009's stated asymmetry). Delivered through
+      `TelegramNotifier.sendText`, the same client as the digest.
 - [ ] Docker Compose on Atlas
-- [ ] Scheduling live: collection every few hours, score+deliver in the nightly
-      off-peak window (ADR-009)
-- [ ] `OLLAMA_KEEP_ALIVE=0` verified — the model actually unloads after a batch
+- [ ] `OLLAMA_KEEP_ALIVE=0` verified — **deferred, deliberately**. Ollama is
+      not installed on Atlas, and `OllamaScorer` has never finished a real
+      calibration pass (M7: 88% parse-failure in the one attempt). Production
+      runs `SCORER_ADAPTER=api` (DeepSeek, ADR-012/013) for this milestone;
+      revisit once Ollama is installed with a memory cap (a lesson learned
+      installing anything unconfined on a shared box) and a calibration run
+      completes.
 - [ ] **Memory measured under real load** against the ~150 MB / ~250 MB budget,
       and `docs/02` updated with the real figure
 - [ ] Database backup, and a restore actually rehearsed
-- [ ] Alerts from `08-observability.md` live, including consecutive-empty-source
-- [ ] **n8n's memory footprint measured** if adopted. If it does not fit
-      alongside the existing Atlas containers, ADR-008's inbound half is dropped
-      and the outbound half survives
+- [ ] **n8n's memory footprint measured** — **not applicable this pass**. No
+      `N8nCollector` exists in code yet (still in the "after M6" backlog,
+      unimplemented), so there is nothing to measure.
 
 ## M9 — API and Hermes
 

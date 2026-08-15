@@ -72,6 +72,52 @@ export const CriteriaSchema = z.object({
     unknown: z.number(),
   }),
   scoring: ScoringConfigSchema,
+  /**
+   * ADR-009's two independent crons, as configuration (docs/09) — a strategy
+   * change ("run collection every 2h instead of 4") is a config edit, not a
+   * code change. Defaulted to ADR-009's own defaults so an existing criteria
+   * file without this section stays valid, same discipline as
+   * `trackExclusions`.
+   */
+  schedule: z
+    .object({
+      collection: z
+        .object({
+          intervalHours: z.number().positive().default(4),
+        })
+        .default({ intervalHours: 4 }),
+      scoreAndDeliver: z
+        .object({
+          // HH:mm, 24h. Validated as a string shape here; the scheduler
+          // infrastructure is what turns it into a cron expression.
+          time: z
+            .string()
+            .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "expected HH:mm, 24h")
+            .default("03:00"),
+          timezone: z.string().min(1).default("America/Sao_Paulo"),
+        })
+        .default({ time: "03:00", timezone: "America/Sao_Paulo" }),
+    })
+    .default({
+      collection: { intervalHours: 4 },
+      scoreAndDeliver: { time: "03:00", timezone: "America/Sao_Paulo" },
+    }),
+  /**
+   * docs/08-observability.md's alert thresholds. `consecutiveEmptyCollectionRuns`
+   * is tolerant (collection runs every few hours per `schedule.collection`,
+   * so one empty cycle is routine); a missed `scoreAndDeliver` run has no
+   * threshold here because it alerts on the first miss, unconditionally —
+   * there is no "tolerance" for a day with no digest.
+   */
+  alerts: z
+    .object({
+      consecutiveEmptyCollectionRuns: z.number().int().positive().default(2),
+      scoreFailureRateThreshold: z.number().min(0).max(1).default(0.5),
+    })
+    .default({
+      consecutiveEmptyCollectionRuns: 2,
+      scoreFailureRateThreshold: 0.5,
+    }),
 });
 
 export type Criteria = z.infer<typeof CriteriaSchema>;
