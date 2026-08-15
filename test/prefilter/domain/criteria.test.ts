@@ -90,4 +90,77 @@ describe("CriteriaSchema", () => {
     const result = CriteriaSchema.parse({ ...validCriteria(), location: {} });
     expect(result.location).toEqual({ cities: [], allowRemote: true });
   });
+
+  describe("schedule (M8, ADR-009)", () => {
+    it("defaults to ADR-009's own defaults when the section is omitted entirely", () => {
+      const result = CriteriaSchema.parse(validCriteria());
+      expect(result.schedule).toEqual({
+        collection: { intervalHours: 4 },
+        scoreAndDeliver: { time: "03:00", timezone: "America/Sao_Paulo" },
+      });
+    });
+
+    it("accepts an explicit, non-default schedule", () => {
+      const result = CriteriaSchema.parse({
+        ...validCriteria(),
+        schedule: {
+          collection: { intervalHours: 2 },
+          scoreAndDeliver: { time: "23:30", timezone: "UTC" },
+        },
+      });
+      expect(result.schedule.collection.intervalHours).toBe(2);
+      expect(result.schedule.scoreAndDeliver).toEqual({
+        time: "23:30",
+        timezone: "UTC",
+      });
+    });
+
+    it("rejects a scoreAndDeliver.time not in HH:mm 24h form", () => {
+      const criteria = {
+        ...validCriteria(),
+        schedule: { scoreAndDeliver: { time: "3am" } },
+      };
+      expect(CriteriaSchema.safeParse(criteria).success).toBe(false);
+    });
+
+    it("rejects a non-positive collection interval", () => {
+      const criteria = {
+        ...validCriteria(),
+        schedule: { collection: { intervalHours: 0 } },
+      };
+      expect(CriteriaSchema.safeParse(criteria).success).toBe(false);
+    });
+  });
+
+  describe("alerts (M8, docs/08-observability.md)", () => {
+    it("defaults consecutiveEmptyCollectionRuns and scoreFailureRateThreshold when omitted", () => {
+      const result = CriteriaSchema.parse(validCriteria());
+      expect(result.alerts).toEqual({
+        consecutiveEmptyCollectionRuns: 2,
+        scoreFailureRateThreshold: 0.5,
+      });
+    });
+
+    it("accepts explicit alert thresholds", () => {
+      const result = CriteriaSchema.parse({
+        ...validCriteria(),
+        alerts: {
+          consecutiveEmptyCollectionRuns: 3,
+          scoreFailureRateThreshold: 0.25,
+        },
+      });
+      expect(result.alerts).toEqual({
+        consecutiveEmptyCollectionRuns: 3,
+        scoreFailureRateThreshold: 0.25,
+      });
+    });
+
+    it("rejects a scoreFailureRateThreshold outside [0, 1]", () => {
+      const criteria = {
+        ...validCriteria(),
+        alerts: { scoreFailureRateThreshold: 1.5 },
+      };
+      expect(CriteriaSchema.safeParse(criteria).success).toBe(false);
+    });
+  });
 });

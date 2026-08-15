@@ -18,6 +18,14 @@ function baseCriteria(overrides: Partial<Criteria> = {}): Criteria {
       automation: ["automação"],
     },
     trackExclusions: { dev: [], security: [], automation: [] },
+    schedule: {
+      collection: { intervalHours: 4 },
+      scoreAndDeliver: { time: "03:00", timezone: "America/Sao_Paulo" },
+    },
+    alerts: {
+      consecutiveEmptyCollectionRuns: 2,
+      scoreFailureRateThreshold: 0.5,
+    },
     trackWeights: { dev: 1.0, security: 1.0, automation: 0.7, unknown: 0.4 },
     scoring: {
       weights: { mandatory: 65, desirable: 20, trackAlignment: 15 },

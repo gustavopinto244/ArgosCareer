@@ -6,9 +6,10 @@ a ranked digest to Telegram every night.
 Personal project. Built to cut weekly job-triage time to under 10 minutes, and to
 be honest about what it can and cannot tell you.
 
-> **Status: M7 done, M8 next.** Real scoring (stages A/B, calibrated against a
-> preliminary 16-posting sample) is live. Deployment to Atlas is up next.
-> Milestone table below.
+> **Status: M8 in progress.** Real scoring (stages A/B, calibrated against a
+> preliminary 16-posting sample) is live. Scheduling and alerting for
+> unattended operation on Atlas are wired; Docker Compose deployment and
+> real-load measurements are next. Milestone table below.
 
 ## What it answers
 

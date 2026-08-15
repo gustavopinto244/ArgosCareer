@@ -79,6 +79,23 @@ export class TelegramNotifier implements NotifierPort {
     return { ok: true };
   }
 
+  /**
+   * Plain-text send, for the M8 scheduler's alerts (`docs/08-observability.md`)
+   * — delivered through this same client rather than a separate channel, so
+   * there is nothing extra to configure or keep alive. Not part of
+   * `NotifierPort`: that port's one method is shaped around a `Digest`, and
+   * an alert is not one — this is a sibling capability of the concrete
+   * Telegram client, not a new abstraction.
+   */
+  async sendText(text: string): Promise<NotifyResult> {
+    const chunks = splitForTelegram(text);
+    for (const chunk of chunks) {
+      const result = await this.sendMessage(chunk);
+      if (!result.ok) return result;
+    }
+    return { ok: true };
+  }
+
   private async sendMessage(text: string): Promise<NotifyResult> {
     const url = `https://api.telegram.org/bot${this.config.botToken}/sendMessage`;
 
