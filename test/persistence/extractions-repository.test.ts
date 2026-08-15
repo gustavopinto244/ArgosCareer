@@ -73,4 +73,31 @@ describe("ExtractionsRepository", () => {
 
     expect(repository.find("fp1", "a-v1")?.requirements).toEqual([]);
   });
+
+  describe("findAllForPromptVersion", () => {
+    it("returns every extraction under the given prompt version, with fingerprint", () => {
+      repository.upsert("fp1", "a-v1", record(), new Date());
+      repository.upsert(
+        "fp2",
+        "a-v1",
+        record({ requirements: [] }),
+        new Date(),
+      );
+
+      const all = repository.findAllForPromptVersion("a-v1");
+      expect(all.map((r) => r.fingerprint).sort()).toEqual(["fp1", "fp2"]);
+    });
+
+    it("excludes extractions under a different prompt version", () => {
+      repository.upsert("fp1", "a-v1", record(), new Date());
+      repository.upsert("fp2", "a-v2", record(), new Date());
+
+      const all = repository.findAllForPromptVersion("a-v1");
+      expect(all.map((r) => r.fingerprint)).toEqual(["fp1"]);
+    });
+
+    it("returns an empty array when nothing is cached under that prompt version", () => {
+      expect(repository.findAllForPromptVersion("a-v99")).toEqual([]);
+    });
+  });
 });

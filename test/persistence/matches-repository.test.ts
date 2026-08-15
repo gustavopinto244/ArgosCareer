@@ -59,4 +59,27 @@ describe("MatchesRepository", () => {
 
     expect(repository.find("fp1", "hash1", "b-v1")).toEqual([]);
   });
+
+  describe("findAllForProfile", () => {
+    it("returns every match under the given (profileHash, promptVersion), with fingerprint", () => {
+      repository.upsert("fp1", "hash1", "b-v1", matchList(), new Date());
+      repository.upsert("fp2", "hash1", "b-v1", [], new Date());
+
+      const all = repository.findAllForProfile("hash1", "b-v1");
+      expect(all.map((r) => r.fingerprint).sort()).toEqual(["fp1", "fp2"]);
+    });
+
+    it("excludes matches under a different profile hash or prompt version", () => {
+      repository.upsert("fp1", "hash1", "b-v1", matchList(), new Date());
+      repository.upsert("fp2", "hash2", "b-v1", matchList(), new Date());
+      repository.upsert("fp3", "hash1", "b-v2", matchList(), new Date());
+
+      const all = repository.findAllForProfile("hash1", "b-v1");
+      expect(all.map((r) => r.fingerprint)).toEqual(["fp1"]);
+    });
+
+    it("returns an empty array when nothing is cached for that key", () => {
+      expect(repository.findAllForProfile("hash1", "b-v1")).toEqual([]);
+    });
+  });
 });
