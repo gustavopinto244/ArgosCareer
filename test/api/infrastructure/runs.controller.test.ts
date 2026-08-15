@@ -14,6 +14,7 @@ import {
   NotifierPort,
   NotifyResult,
 } from "../../../src/delivery/domain/ports/notifier.port";
+import { TextNotifier } from "../../../src/delivery/infrastructure/telegram-notifier";
 import {
   createDatabase,
   Db,
@@ -41,12 +42,20 @@ class FakeCollector implements CollectorPort {
 }
 
 /** No real Telegram request in this suite — `NOTIFIER` is overridden with
- * this fake for every test, same reasoning as `FakeCollector`. */
-class FakeNotifier implements NotifierPort {
+ * this fake for every test, same reasoning as `FakeCollector`. Implements
+ * `TextNotifier` too (M10): `NOTIFIER` now backs both `RunsService.deliver`
+ * and `MarketService.studyPlan`. */
+class FakeNotifier implements NotifierPort, TextNotifier {
   readonly sent: Digest[] = [];
+  readonly sentText: string[] = [];
 
   async notify(digest: Digest): Promise<NotifyResult> {
     this.sent.push(digest);
+    return { ok: true };
+  }
+
+  async sendText(text: string): Promise<NotifyResult> {
+    this.sentText.push(text);
     return { ok: true };
   }
 }

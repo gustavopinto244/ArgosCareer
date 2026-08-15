@@ -2,8 +2,14 @@ import { Module } from "@nestjs/common";
 import { APP_GUARD } from "@nestjs/core";
 import { ApiKeyGuard } from "./api-key.guard";
 import { collectorProvider } from "./collector.provider";
-import { criteriaProvider, profileProvider } from "./config.provider";
+import {
+  criteriaProvider,
+  profileProvider,
+  taxonomyProvider,
+} from "./config.provider";
 import { databaseProvider } from "./database.provider";
+import { MarketController } from "./market.controller";
+import { MarketService } from "./market.service";
 import { McpController } from "./mcp.controller";
 import { notifierProvider } from "./notifier.provider";
 import { RunsController } from "./runs.controller";
@@ -22,14 +28,16 @@ import { RunsService } from "./runs.service";
  * network call in the suite.
  */
 @Module({
-  controllers: [RunsController, McpController],
+  controllers: [RunsController, MarketController, McpController],
   providers: [
     databaseProvider,
     collectorProvider,
     notifierProvider,
     criteriaProvider,
     profileProvider,
+    taxonomyProvider,
     RunsService,
+    MarketService,
     { provide: APP_GUARD, useClass: ApiKeyGuard },
   ],
 })

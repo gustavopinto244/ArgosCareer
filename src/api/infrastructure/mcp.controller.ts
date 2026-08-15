@@ -8,6 +8,7 @@ import {
 import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
+import { MarketService } from "./market.service";
 import { RunsService } from "./runs.service";
 
 function jsonResult(value: unknown): CallToolResult {
@@ -52,7 +53,10 @@ async function safely(fn: () => unknown): Promise<CallToolResult> {
  */
 @Controller("mcp")
 export class McpController {
-  constructor(private readonly runs: RunsService) {}
+  constructor(
+    private readonly runs: RunsService,
+    private readonly market: MarketService,
+  ) {}
 
   @Post()
   async handle(@Req() req: Request, @Res() res: Response): Promise<void> {
@@ -146,6 +150,19 @@ export class McpController {
           "thing the nightly cron does, callable early.",
       },
       () => safely(() => this.runs.deliver()),
+    );
+
+    server.registerTool(
+      "get_study_plan",
+      {
+        description:
+          "Generate and send the market-intelligence study plan now (M10): " +
+          "skills frequent in high-compatibility postings and absent from " +
+          "the profile, ranked by demand, sent as a real Telegram message. " +
+          "Read-only over the corpus — never scores anything, never spends " +
+          "LLM budget.",
+      },
+      () => safely(() => this.market.studyPlan()),
     );
   }
 }
