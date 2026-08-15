@@ -262,13 +262,14 @@ deliberate deferrals with a stated reason, not gaps.
       `.env` is `env_file`, not `COPY`'d; `data/` and `backups/` are named
       volumes). **Deployed for real on Atlas**, 2026-08-15, via the same
       `~/apps/<name>/app` layout `portfolio` and `task-manager` already use.
-- [ ] `OLLAMA_KEEP_ALIVE=0` verified — **deferred, deliberately**. Ollama is
-      not installed on Atlas, and `OllamaScorer` has never finished a real
-      calibration pass (M7: 88% parse-failure in the one attempt). Production
-      runs `SCORER_ADAPTER=api` (DeepSeek, ADR-012/013) for this milestone;
-      revisit once Ollama is installed with a memory cap (a lesson learned
-      installing anything unconfined on a shared box) and a calibration run
-      completes.
+- [x] `OLLAMA_KEEP_ALIVE=0` — **N/A, `OllamaScorer` retired (ADR-016)**.
+      Deferred as of the M8 close-out above; superseded once it became clear
+      the deferral had no path back — Ollama was never installed on Atlas,
+      `OllamaScorer` never finished a real calibration pass (M7: 88%
+      parse-failure), and `ApiScorer`'s real measured cost and memory
+      footprint left no case for reopening it. Local-model scoring is no
+      longer part of this project's roadmap; ADR-016 records what would
+      have to be true to revisit it.
 - [x] **Memory measured under real load**, `docs/02` updated with the real
       figure: **29.3 MiB at rest**, real `docker stats` on Atlas, well under
       the ~150 MB budget. A real `collect` and a real `deliver` cycle both

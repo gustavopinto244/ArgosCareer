@@ -11,12 +11,11 @@ import { Profile } from "../../profile/domain/profile";
 import { buildScoringConfig } from "./scoring-config";
 
 /**
- * The calibration baseline (ADR-012, CLAUDE.md §14): stage A -> stage B ->
- * stage C, exactly the flow `docs/04-scoring-model.md` specifies, with a
- * hosted model behind `StageAExtractor`/`StageBMatcher` instead of the local
- * `OllamaScorer` this is a stepping stone toward. Track classification is
- * the same deterministic pre-filter function `StubScorer` uses — never an
- * LLM call, per principle 1 of `02-architecture.md`.
+ * The production scorer (ADR-012/013/016): stage A -> stage B -> stage C,
+ * exactly the flow `docs/04-scoring-model.md` specifies, with a hosted model
+ * behind `StageAExtractor`/`StageBMatcher`. Track classification is the same
+ * deterministic pre-filter function `StubScorer` uses — never an LLM call,
+ * per principle 1 of `02-architecture.md`.
  *
  * A failure at either stage returns as a value, never throws — matching
  * `StubScorer` and every other port in this project.

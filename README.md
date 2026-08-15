@@ -9,9 +9,10 @@ be honest about what it can and cannot tell you.
 > **Status: M8 done (preliminary), M9 next.** Real scoring (stages A/B,
 > calibrated against a preliminary 16-posting sample) is deployed and
 > running unattended on Atlas: two independent crons, alerting, backup and
-> restore, all verified for real, not just written. `OLLAMA_KEEP_ALIVE`
-> stays deferred — production runs the hosted scorer for now. HTTP API and
-> Hermes integration are up next. Milestone table below.
+> restore, all verified for real, not just written. Local-model scoring
+> (`OllamaScorer`) was evaluated and retired ([ADR-016](docs/adr/016-retire-ollama-scorer.md))
+> — the hosted scorer is the permanent production adapter. HTTP API is up
+> next. Milestone table below.
 
 ## What it answers
 
@@ -180,19 +181,19 @@ See [ADR-001](docs/adr/001-nestjs-as-application-framework.md).
 
 ## Milestones
 
-| #   | Milestone                                                        | Status                                          |
-| --- | ---------------------------------------------------------------- | ----------------------------------------------- |
-| M0  | Bootstrap — docs, CI, ADR practice, repository hygiene           | done                                            |
-| M1  | Domain entities, fingerprint, score computation (stage C)        | done                                            |
-| M2  | Master profile — Zod schema, loader, academic-period derivation  | done                                            |
-| M3  | Gupy collector with tolerant schema + fixture capture script     | done                                            |
-| M4  | Persistence — Drizzle + SQLite, migrations, dedup                | done                                            |
-| M5  | Deterministic pre-filter                                         | done                                            |
-| M6  | **Vertical slice** — Gupy → SQLite → Telegram with a stub scorer | done                                            |
-| M7  | Real scoring — stages A and B, versioned prompts, calibration    | done (preliminary, 16/50 samples)               |
-| M8  | Deployment — Docker Compose, scheduling, backup, alerting        | done (preliminary — OLLAMA_KEEP_ALIVE deferred) |
-| M9  | HTTP API and MCP server                                          | next                                            |
-| M10 | Market intelligence — skill taxonomy, gap analysis, study plan   |                                                 |
+| #   | Milestone                                                        | Status                                                    |
+| --- | ---------------------------------------------------------------- | --------------------------------------------------------- |
+| M0  | Bootstrap — docs, CI, ADR practice, repository hygiene           | done                                                      |
+| M1  | Domain entities, fingerprint, score computation (stage C)        | done                                                      |
+| M2  | Master profile — Zod schema, loader, academic-period derivation  | done                                                      |
+| M3  | Gupy collector with tolerant schema + fixture capture script     | done                                                      |
+| M4  | Persistence — Drizzle + SQLite, migrations, dedup                | done                                                      |
+| M5  | Deterministic pre-filter                                         | done                                                      |
+| M6  | **Vertical slice** — Gupy → SQLite → Telegram with a stub scorer | done                                                      |
+| M7  | Real scoring — stages A and B, versioned prompts, calibration    | done (preliminary, 16/50 samples)                         |
+| M8  | Deployment — Docker Compose, scheduling, backup, alerting        | done (preliminary — local-model scoring retired, ADR-016) |
+| M9  | HTTP API and MCP server                                          | next                                                      |
+| M10 | Market intelligence — skill taxonomy, gap analysis, study plan   |                                                           |
 
 ## Documentation
 

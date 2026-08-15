@@ -104,9 +104,11 @@ rest: 1.0 GB used, 6.1 GB available, 4 GB swap untouched. Already running
 
 Budget for ArgosCareer: **~150 MB at rest, ~250 MB at peak.**
 
-Ollama peaks around 3.2 GB. **Require `OLLAMA_KEEP_ALIVE=0`** so the model
-unloads at the end of a batch. Swap is an OOM safety net, not planning headroom —
-paging during inference destroys latency.
+**Measured for real, M8, 2026-08-15: 29.3 MiB at rest**, well under budget —
+`ApiScorer` makes HTTP calls to a hosted model and holds nothing large
+in-process. Swap is an OOM safety net, not planning headroom — paging during
+inference destroys latency, which is exactly the failure mode a local model
+would have risked (ADR-016).
 
 ## 6. Job sources
 
@@ -335,29 +337,31 @@ about Brazilian postings. See ADR-003.
 
 ## 14. Milestones
 
-| #   | Milestone           | Delivers                                                                                           | Status                                                       |
-| --- | ------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| M0  | Bootstrap           | `CLAUDE.md`, `docs/`, `.gitignore`, CI, ADR template, README                                       | done                                                         |
-| M1  | Domain + stage C    | Entities, fingerprint, score computation, unit tests                                               | done                                                         |
-| M2  | Master profile      | Zod schema, loader, `profile.yaml`, period derivation                                              | done                                                         |
-| M3  | Gupy collector      | Adapter + `fixture:gupy` + schema fitted to the real response                                      | done                                                         |
-| M4  | Persistence         | Drizzle + SQLite, migrations, dedup, `runs` table                                                  | done                                                         |
-| M5  | Pre-filter          | Configurable deterministic rules                                                                   | done                                                         |
-| M6  | **Vertical slice**  | Gupy → SQLite → Telegram with `StubScorer`. A real posting on the phone                            | done                                                         |
-| M7  | Real scoring        | Stages A and B, versioned prompts in `prompts/`, 50 labelled postings, calibration table in README | done (preliminary — 16/50 labelled, see README)              |
-| M8  | Deployment          | Docker Compose on Atlas, scheduling, backup, broken-adapter alert                                  | done (preliminary — OLLAMA_KEEP_ALIVE deferred, see docs/10) |
-| M9  | API + Hermes        | HTTP endpoints, MCP server, integration                                                            | next                                                         |
-| M10 | Market intelligence | Skill taxonomy, aggregate market analysis, gap analysis, study plan                                |                                                              |
+| #   | Milestone           | Delivers                                                                                           | Status                                                    |
+| --- | ------------------- | -------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| M0  | Bootstrap           | `CLAUDE.md`, `docs/`, `.gitignore`, CI, ADR template, README                                       | done                                                      |
+| M1  | Domain + stage C    | Entities, fingerprint, score computation, unit tests                                               | done                                                      |
+| M2  | Master profile      | Zod schema, loader, `profile.yaml`, period derivation                                              | done                                                      |
+| M3  | Gupy collector      | Adapter + `fixture:gupy` + schema fitted to the real response                                      | done                                                      |
+| M4  | Persistence         | Drizzle + SQLite, migrations, dedup, `runs` table                                                  | done                                                      |
+| M5  | Pre-filter          | Configurable deterministic rules                                                                   | done                                                      |
+| M6  | **Vertical slice**  | Gupy → SQLite → Telegram with `StubScorer`. A real posting on the phone                            | done                                                      |
+| M7  | Real scoring        | Stages A and B, versioned prompts in `prompts/`, 50 labelled postings, calibration table in README | done (preliminary — 16/50 labelled, see README)           |
+| M8  | Deployment          | Docker Compose on Atlas, scheduling, backup, broken-adapter alert                                  | done (preliminary — local-model scoring retired, ADR-016) |
+| M9  | API + Hermes        | HTTP endpoints, MCP server, integration                                                            | next                                                      |
+| M10 | Market intelligence | Skill taxonomy, aggregate market analysis, gap analysis, study plan                                |                                                           |
 
 P1/P2 sources (Google Jobs, Indeed, LinkedIn) come after M6, one per pull
 request.
 
-**Scorer adapters, in this order:** `StubScorer` (fixed score, tests) →
-`ApiScorer` (baseline, iterates fast) → `OllamaScorer` (production target).
-Start with `ApiScorer`: at 15 minutes per local batch iteration, calibration gets
-abandoned before it is finished. Local candidates: `qwen3:4b`, `phi4-mini`,
-`gemma3:4b` (Q4_K_M, ~2.5 GB). With 6.1 GB free a 7–8B (~4.5 GB) is also viable —
-treat it as one more row in the benchmark, not an a priori decision.
+**Scorer adapters:** `StubScorer` (fixed score, tests) → `ApiScorer`
+(production, ADR-012/013/016). A local-model adapter (`OllamaScorer`) was
+built and evaluated during M7/M8 and retired: it never finished a real
+calibration pass (88% parse-failure against `qwen3:4b`, ADR-014), Atlas
+never had Ollama installed, and `ApiScorer`'s real measured cost and memory
+footprint (M7/M8: cents per batch, 29.3 MiB at rest) made the local-model
+case moot. See ADR-016 for the full reasoning and what would justify
+revisiting it.
 
 ## 15. How to work on this project
 

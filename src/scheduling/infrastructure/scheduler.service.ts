@@ -149,7 +149,6 @@ export class SchedulerService implements OnModuleInit {
         this.criteria,
         this.profile,
       );
-      if (built.ollamaClient) await built.ollamaClient.unload();
 
       const run = runsRepo.findById(outcome.runId);
       if (run) {
