@@ -1,3 +1,4 @@
+import { normalize } from "../../posting/domain/fingerprint";
 const COMBINING_MARKS = /[\u0300-\u036f]/g;
 const NON_ALPHANUMERIC = /[^\p{L}\p{N}]+/gu;
 
@@ -57,4 +58,42 @@ export function titleMatchesAny(
     const needle = normalizeTitle(term);
     return needle !== "" && haystack.includes(` ${needle} `);
   });
+}
+
+/**
+ * Whole-word match for a *keyword list* term — `tracks` and
+ * `trackExclusions`, whose entries carry punctuation variants (`back-end`,
+ * `node.js`, `ci/cd`, `full-stack`) that plain whole-word matching would
+ * miss, and short tokens (`api`, `soc`, `ciber`) that plain substring
+ * matching gets catastrophically wrong.
+ *
+ * ADR-011 Amendment 1 asserted these lists held no colliding short token.
+ * Measured against the real corpus, that was simply false: `soc` (Security
+ * Operations Center) matched inside "**soc**ial", "**soc**ietário" and
+ * "redes **soc**iais", and `api` matched inside "fisioter**api**a" and
+ * "c**api**tal" — classifying a physiotherapy internship as `dev` and a
+ * social-media one as `security`, which then fed `trackAlignment` at 1.0
+ * instead of 0.4. Amendment 2 corrects it.
+ *
+ * Two passes, either of which is a match:
+ *
+ * 1. **Word/phrase**, over punctuation-as-space text — `back-end` becomes
+ *    the phrase "back end" and matches "Back-End Developer".
+ * 2. **Collapsed word**, over punctuation-deleted text (`normalize`, which
+ *    keeps spaces) — `back-end` collapses to "backend" and matches
+ *    "Backend Developer", the hyphen-insensitivity the old substring
+ *    matching existed to provide.
+ *
+ * Neither pass can match `api` inside `fisioterapia`, because in both the
+ * candidate must occupy a whole word.
+ */
+export function keywordMatchesTitle(title: string, keyword: string): boolean {
+  const spaced = ` ${normalizeTitle(title)} `;
+  const spacedKeyword = normalizeTitle(keyword);
+  if (spacedKeyword === "") return false;
+  if (spaced.includes(` ${spacedKeyword} `)) return true;
+
+  const collapsed = ` ${normalize(title)} `;
+  const collapsedKeyword = normalize(keyword);
+  return collapsedKeyword !== "" && collapsed.includes(` ${collapsedKeyword} `);
 }

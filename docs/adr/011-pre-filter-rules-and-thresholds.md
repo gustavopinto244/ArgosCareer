@@ -4,6 +4,8 @@
 
 Accepted — amended 2026-08-15, see
 [Amendment 1](#amendment-1--2026-08-15-title-rules-match-whole-words-not-substrings)
+and
+[Amendment 2](#amendment-2--2026-08-15-track-keywords-match-whole-words-too)
 
 ## Date
 
@@ -181,3 +183,59 @@ São Paulo-dominated because collection queries Gupy with no criteria at all;
 that is a collection problem, addressed separately, not a pre-filter one. The
 value of this amendment is correctness — postings that _are_ in Rio and _are_
 on-profile no longer disappear because of a word like "Nível".
+
+---
+
+## Amendment 2 — 2026-08-15: track keywords match whole words too
+
+Amendment 1 changed the title blocklist and required-term rules to whole-word
+matching, and deliberately left `classifyTrack` and `minKeywordAdherence` on
+substring matching. It justified that with this claim:
+
+> neither list contains a short token that collides with a common Portuguese
+> word
+
+**That claim was wrong, and it was asserted without measuring.** Running the
+newly added tech collection queries surfaced the counter-examples immediately:
+
+| Posting                                 | Classified | Because                         |
+| --------------------------------------- | ---------- | ------------------------------- |
+| Estágio de Social Media                 | `security` | `soc` inside "**soc**ial"       |
+| ESTAGIÁRIO JURÍDICO (SOCIETÁRIO)        | `security` | `soc` inside "**soc**ietário"   |
+| Estágio em Design (Redes Sociais)       | `security` | `soc` inside "**soc**iais"      |
+| Estagiário de Fisioterapia              | `dev`      | `api` inside "fisioter**api**a" |
+| Estagiário de Direito \| Auster Capital | `dev`      | `api` inside "c**api**tal"      |
+
+`soc` (Security Operations Center) and `api` are both legitimate track
+keywords and both are substrings of ordinary Portuguese words. The damage was
+not cosmetic: `trackAlignment` weights `dev`/`security` at 1.0 against
+`unknown`'s 0.4, so each false positive inflated its posting's score by
+`15 × 0.6 = 9` points — a physiotherapy internship scoring as if it were
+back-end work.
+
+**Decision:** `classifyTrack` matches whole words too, via
+`keywordMatchesTitle` (`prefilter/domain/title-match.ts`). Because the track
+lists genuinely depend on punctuation-insensitivity — `back-end`, `node.js`,
+`ci/cd`, `full-stack` — a single whole-word pass is not enough, so it makes
+two, either of which matches:
+
+1. **word/phrase** over punctuation-as-space text, so `back-end` matches
+   "Back-End Developer";
+2. **collapsed word** over punctuation-deleted text (`normalize`, which keeps
+   spaces), so `back-end` also matches "Backend Developer".
+
+Neither pass can match `api` inside `fisioterapia`: in both, the candidate has
+to occupy a whole word.
+
+**Consequences.** Measured over the real corpus, on-track postings fell from
+**14 to 8** — and that is the point. Six of the fourteen were false positives;
+the eight that remain are all genuinely relevant (backend, web, DevOps,
+middleware/infrastructure). The headline number got worse and the data got
+true.
+
+`minKeywordAdherence` still substring-matches, and this time the claim is
+narrow enough to hold: its terms come from `profile.yaml` competency names and
+aliases, which are multi-word or distinctive (`TypeScript`, `PostgreSQL`,
+`Linux server administration`), and the rule is disabled at floor 0 anyway.
+If it is ever enabled, re-check it against this same failure mode rather than
+assuming — which is exactly the mistake Amendment 1 made.
