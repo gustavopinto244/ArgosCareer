@@ -33,6 +33,7 @@ function rowToPosting(row: PostingRow): Posting {
     seniority: row.seniority as Posting["seniority"],
     experienceYears: row.experienceYears,
     applicationDeadline: row.applicationDeadline,
+    publishedAt: row.publishedAt,
     sourceUrl: row.sourceUrl,
     description: row.description,
     // The stored row has no separate "collectedAt" column — lastSeenAt *is*
@@ -84,6 +85,7 @@ export class PostingsRepository {
             seniority: posting.seniority,
             experienceYears: posting.experienceYears,
             applicationDeadline: posting.applicationDeadline,
+            publishedAt: posting.publishedAt,
             sourceUrl: posting.sourceUrl,
             description: posting.description,
             lastSeenAt: posting.lastSeenAt,
@@ -106,6 +108,7 @@ export class PostingsRepository {
             seniority: posting.seniority,
             experienceYears: posting.experienceYears,
             applicationDeadline: posting.applicationDeadline,
+            publishedAt: posting.publishedAt,
             sourceUrl: posting.sourceUrl,
             description: posting.description,
             firstSeenAt: posting.firstSeenAt,

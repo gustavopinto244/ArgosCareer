@@ -51,6 +51,10 @@ export interface CollectOutcome {
   readonly runId: string;
   readonly collected: number;
   readonly normalized: number;
+  /** Dropped by the recency window (ADR-019) — visible so a window that is
+   * quietly discarding everything shows up instead of looking like a dead
+   * source. */
+  readonly tooOld: number;
   readonly isNew: number;
   readonly alreadySeen: number;
   readonly error?: string;
@@ -81,15 +85,37 @@ function sleep(ms: number): Promise<void> {
  * marked `failed` only when **every** query failed. One dead query out of
  * four must not look identical to a dead source.
  */
+export interface RecencyWindow {
+  readonly recencyDays: number;
+  readonly backfillDays: number;
+}
+
 export async function executeCollect(
   db: Db,
   collector: CollectorPort,
   queries: readonly unknown[],
   now: () => Date = () => new Date(),
   queryIntervalMs: number = DEFAULT_QUERY_INTERVAL_MS,
+  recency?: RecencyWindow,
 ): Promise<CollectOutcome> {
   const postingsRepo = new PostingsRepository(db);
   const runsRepo = new RunsRepository(db);
+
+  // "First run" is derived, not stored: no successful collect on record means
+  // no previous cycle can have caught the last week, so the window reaches
+  // back further exactly once (ADR-019). Read BEFORE this run is started, or
+  // it would find itself.
+  const isFirstRun = runsRepo.findLatestFinished("collect", "success") === null;
+  const windowDays = recency
+    ? isFirstRun
+      ? recency.backfillDays
+      : recency.recencyDays
+    : null;
+  const cutoff =
+    windowDays === null
+      ? null
+      : new Date(now().getTime() - windowDays * 24 * 60 * 60 * 1000);
+
   const runId = runsRepo.start("collect", now());
 
   let collected = 0;
@@ -97,6 +123,7 @@ export async function executeCollect(
   let isNew = 0;
   let alreadySeen = 0;
   let failures = 0;
+  let tooOld = 0;
   let firstError: string | undefined;
 
   for (const [index, query] of queries.entries()) {
@@ -117,6 +144,17 @@ export async function executeCollect(
     for (const raw of result.postings) {
       const posting = normalizeGupyJob(raw, collectedAt);
       if (!posting) continue;
+      // A posting the source never dated passes: absence of a date is not
+      // evidence of an old posting, the same leniency ADR-011 applies to an
+      // unknown location/workMode.
+      if (
+        cutoff !== null &&
+        posting.publishedAt !== null &&
+        posting.publishedAt.getTime() < cutoff.getTime()
+      ) {
+        tooOld += 1;
+        continue;
+      }
       normalized += 1;
       const { wasNew } = postingsRepo.upsert(posting);
       if (wasNew) isNew += 1;
@@ -136,6 +174,7 @@ export async function executeCollect(
     runId,
     collected,
     normalized,
+    tooOld,
     isNew,
     alreadySeen,
     ...(firstError === undefined ? {} : { error: firstError }),
@@ -381,6 +420,7 @@ async function collectCommand(args: string[]): Promise<void> {
     queries,
     () => new Date(),
     criteria.collection.queryIntervalMs,
+    criteria.collection,
   );
 
   if (outcome.error) {
@@ -391,7 +431,8 @@ async function collectCommand(args: string[]): Promise<void> {
 
   console.log(
     `collect (run ${outcome.runId}): ${outcome.collected} collected, ` +
-      `${outcome.normalized} normalized, ${outcome.isNew} new, ${outcome.alreadySeen} already seen`,
+      `${outcome.normalized} normalized, ${outcome.tooOld} outside the recency window, ` +
+      `${outcome.isNew} new, ${outcome.alreadySeen} already seen`,
   );
 }
 

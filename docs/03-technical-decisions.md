@@ -30,6 +30,7 @@ revisited on its merits instead of re-argued from memory.
 | [016](adr/016-retire-ollama-scorer.md)                          | Retire `OllamaScorer`; `ApiScorer` is the permanent production adapter  | Accepted | 2026-08-15 |
 | [017](adr/017-tailscale-and-bearer-key-for-the-api-boundary.md) | Tailscale networking and a fixed Bearer key for the HTTP/MCP boundary   | Accepted | 2026-08-15 |
 | [018](adr/018-collection-queries-as-configuration.md)           | Ask the source a narrow question, and treat a cycle as one run          | Accepted | 2026-08-15 |
+| [019](adr/019-collect-by-publication-recency.md)                | Collect by publication recency, with a wider first run                  | Accepted | 2026-08-15 |
 
 ## When an ADR is required
 

@@ -30,9 +30,28 @@ collection:
       city: Rio de Janeiro
     - jobName: estagiária
       isRemoteWork: true
+    # Niteroi and Sao Goncalo are already accepted by the location rule, but
+    # nothing was asking the source for them -- being allowed through the
+    # filter is useless if the query never brings them back.
+    - jobName: estágio
+      city: Niterói
+    - jobName: estagiário
+      city: Niterói
+    - jobName: estágio
+      city: São Gonçalo
+    - jobName: estagiário
+      city: São Gonçalo
   # Pause between queries. The collector's own ~1.5s interval only spaces out
   # pages within one query (CLAUDE.md 6).
   queryIntervalMs: 1500
+  # Only keep postings the source published in the last day (ADR-019).
+  # Collection runs every few hours, so one day is already generous overlap.
+  # A posting with no stated publication date passes -- absence of a date is
+  # not evidence of an old posting.
+  recencyDays: 1
+  # Used only when there is no successful collect run on record: a first run
+  # has no earlier cycle to have caught the past week.
+  backfillDays: 7
 
 titleBlocklist:
   - sênior

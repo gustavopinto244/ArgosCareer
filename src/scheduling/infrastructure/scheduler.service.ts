@@ -127,6 +127,7 @@ export class SchedulerService implements OnModuleInit {
         this.criteria.collection.queries,
         () => new Date(),
         this.criteria.collection.queryIntervalMs,
+        this.criteria.collection,
       );
       executeDedup(this.db);
     } catch (cause) {

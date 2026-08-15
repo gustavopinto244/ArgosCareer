@@ -42,6 +42,11 @@ export const postings = sqliteTable(
     applicationDeadline: integer("application_deadline", {
       mode: "timestamp_ms",
     }),
+    // When the SOURCE published the posting, as opposed to firstSeenAt,
+    // which is when we first observed it. The recency window (ADR-019)
+    // needs the former: a posting published last month and first collected
+    // today is old, and firstSeenAt cannot say so.
+    publishedAt: integer("published_at", { mode: "timestamp_ms" }),
     // Null when the source provided no link. The digest (M6) treats the
     // original posting link as mandatory on every entry it can fill in.
     sourceUrl: text("source_url"),
