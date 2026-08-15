@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger, OnModuleInit } from "@nestjs/common";
 import { SchedulerRegistry } from "@nestjs/schedule";
 import { CronJob } from "cron";
 import { executeCollect, executeDedup, executeDeliver } from "../../cli/main";
+import { backupDatabase } from "../../persistence/infrastructure/backup";
 import {
   createDatabase,
   Db,
@@ -164,6 +165,33 @@ export class SchedulerService implements OnModuleInit {
       await this.sendAlerts([
         { text: "scoreAndDeliver cycle threw an unexpected error." },
       ]);
+    }
+
+    this.runBackup();
+  }
+
+  /**
+   * Chained directly after the nightly cycle finishes, rather than a fourth
+   * cron expression offset by some guessed number of minutes from
+   * `scoreAndDeliver.time` — that would race the actual run length instead
+   * of following it. `executeDeliver` has already called `runsRepo.finish`
+   * by the time control returns here (both on success and on failure), so
+   * there is never an unfinished run for the backup to catch mid-write.
+   *
+   * Synchronous and best-effort: a failed backup is logged and alerted, not
+   * thrown — a backup failure must not be mistaken for a pipeline failure
+   * principle 1 already has its own alerting for.
+   */
+  private runBackup(): void {
+    try {
+      const result = backupDatabase(
+        process.env.DATABASE_PATH ?? "./data/argos.db",
+        process.env.BACKUPS_DIR ?? "./backups",
+      );
+      this.logger.log(`Backed up database to ${result.path}`);
+    } catch (cause) {
+      this.logger.error("Nightly backup failed", cause);
+      void this.sendAlerts([{ text: "Nightly database backup failed." }]);
     }
   }
 

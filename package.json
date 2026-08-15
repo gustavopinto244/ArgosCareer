@@ -19,6 +19,8 @@
     "fixture:gupy": "tsx scripts/fixture-gupy.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",
+    "backup": "tsx scripts/backup.ts",
+    "restore": "tsx scripts/restore.ts",
     "measure:prefilter": "tsx scripts/measure-prefilter-cut.ts",
     "calibration:generate": "tsx scripts/generate-calibration-set.ts",
     "calibration:run": "tsx --env-file-if-exists=.env scripts/run-calibration.ts",

@@ -1,4 +1,10 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import "reflect-metadata";
@@ -113,6 +119,35 @@ resumeVariants:
 
     jobs.get("collection")?.stop();
     jobs.get("scoreAndDeliver")?.stop();
+    await moduleRef.close();
+  });
+
+  it("backs up the real database after a scoreAndDeliver cycle finishes", async () => {
+    process.env.BACKUPS_DIR = join(dir, "backups");
+
+    const moduleRef = await Test.createTestingModule({
+      imports: [SchedulingModule],
+    }).compile();
+    await moduleRef.init();
+
+    const service = moduleRef.get(SchedulerService);
+    // Exercises the same private method the scoreAndDeliver cron chains
+    // into, without driving a full deliver cycle (which needs a real
+    // scorer and a real Telegram send) — `runBackup` itself has no such
+    // dependency, so this is testing the actual production code path, not
+    // a reimplementation of it.
+    (service as unknown as { runBackup: () => void }).runBackup();
+
+    expect(existsSync(process.env.BACKUPS_DIR)).toBe(true);
+    const backups = readdirSync(process.env.BACKUPS_DIR);
+    expect(
+      backups.some((f) => f.startsWith("argos-") && f.endsWith(".db")),
+    ).toBe(true);
+
+    const registry = moduleRef.get(
+      (await import("@nestjs/schedule")).SchedulerRegistry,
+    );
+    for (const job of registry.getCronJobs().values()) job.stop();
     await moduleRef.close();
   });
 });
