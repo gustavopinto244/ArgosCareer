@@ -32,6 +32,7 @@ afterEach(() => {
 
 function criteria(): Criteria {
   return {
+    collection: { queries: [{}], queryIntervalMs: 0 },
     titleBlocklist: [],
     titleRequired: ["estágio"],
     location: { cities: [], allowRemote: true },

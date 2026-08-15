@@ -121,7 +121,13 @@ export class SchedulerService implements OnModuleInit {
    * runs every few hours regardless of what it finds (docs/08). */
   private async runCollectionCycle(): Promise<void> {
     try {
-      await executeCollect(this.db, new GupyCollector(), {});
+      await executeCollect(
+        this.db,
+        new GupyCollector(),
+        this.criteria.collection.queries,
+        () => new Date(),
+        this.criteria.collection.queryIntervalMs,
+      );
       executeDedup(this.db);
     } catch (cause) {
       this.logger.error("Collection cycle threw unexpectedly", cause);

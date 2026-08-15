@@ -65,7 +65,7 @@ describe("executeCollect", () => {
       ],
     });
 
-    const outcome = await executeCollect(db, collector, {});
+    const outcome = await executeCollect(db, collector, [{}], undefined, 0);
 
     expect(outcome.error).toBeUndefined();
     expect(outcome.collected).toBe(2);
@@ -88,8 +88,8 @@ describe("executeCollect", () => {
       ],
     });
 
-    await executeCollect(db, collector, {});
-    const second = await executeCollect(db, collector, {});
+    await executeCollect(db, collector, [{}], undefined, 0);
+    const second = await executeCollect(db, collector, [{}], undefined, 0);
 
     expect(second.isNew).toBe(0);
     expect(second.alreadySeen).toBe(1);
@@ -105,7 +105,7 @@ describe("executeCollect", () => {
       ],
     });
 
-    const outcome = await executeCollect(db, collector, {});
+    const outcome = await executeCollect(db, collector, [{}], undefined, 0);
 
     expect(outcome.error).toBeUndefined();
     expect(outcome.collected).toBe(2);
@@ -120,12 +120,96 @@ describe("executeCollect", () => {
       error: { message: "Gupy responded 500" },
     });
 
-    const outcome = await executeCollect(db, collector, {});
+    const outcome = await executeCollect(db, collector, [{}], undefined, 0);
 
     expect(outcome.error).toBe("Gupy responded 500");
 
     const runsRepo = new RunsRepository(db);
     expect(runsRepo.findById(outcome.runId)?.outcome).toBe("failed");
+  });
+});
+
+describe("executeCollect — multi-query cycles", () => {
+  /** Records each query it is asked for, answering with one posting each. */
+  function recordingCollector(errorOn: number[] = []): {
+    collector: CollectorPort;
+    queries: unknown[];
+  } {
+    const queries: unknown[] = [];
+    return {
+      queries,
+      collector: {
+        collect: async (criteria: unknown): Promise<CollectionResult> => {
+          const index = queries.length;
+          queries.push(criteria);
+          if (errorOn.includes(index)) {
+            return {
+              source: "gupy",
+              collectedAt: new Date(),
+              postings: [],
+              error: new Error(`query ${index} failed`),
+            };
+          }
+          return {
+            source: "gupy",
+            collectedAt: new Date(),
+            postings: [
+              {
+                source: "gupy",
+                sourceId: String(index),
+                payload: gupyPayload(index, `Estágio ${index}`),
+              },
+            ],
+          };
+        },
+      },
+    };
+  }
+
+  it("issues every configured query and folds them into ONE run row", async () => {
+    const { collector, queries } = recordingCollector();
+    const outcome = await executeCollect(
+      db,
+      collector,
+      [{ jobName: "estágio", city: "Rio de Janeiro" }, { isRemoteWork: true }],
+      undefined,
+      0,
+    );
+
+    expect(queries).toEqual([
+      { jobName: "estágio", city: "Rio de Janeiro" },
+      { isRemoteWork: true },
+    ]);
+    expect(outcome.collected).toBe(2);
+    expect(outcome.isNew).toBe(2);
+
+    // One cycle is one run — anything that counts runs (the digest summary,
+    // the consecutive-empty-collection alert) depends on this.
+    const runs = new RunsRepository(db).findRecent("collect", 10);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.collectedCount).toBe(2);
+  });
+
+  it("keeps what succeeded when one query fails, and stays a success", async () => {
+    const { collector } = recordingCollector([0]);
+    const outcome = await executeCollect(db, collector, [{}, {}], undefined, 0);
+
+    expect(outcome.error).toBe("query 0 failed");
+    expect(outcome.isNew).toBe(1); // the surviving query still persisted
+    const run = new RunsRepository(db).findById(outcome.runId);
+    // Degraded, not down (principle 1): one dead query out of two must not
+    // look identical to a dead source, or the collection-health alert fires
+    // on a healthy cycle.
+    expect(run?.outcome).toBe("success");
+  });
+
+  it("marks the run failed only when every query fails", async () => {
+    const { collector } = recordingCollector([0, 1]);
+    const outcome = await executeCollect(db, collector, [{}, {}], undefined, 0);
+
+    expect(outcome.error).toBe("query 0 failed");
+    const run = new RunsRepository(db).findById(outcome.runId);
+    expect(run?.outcome).toBe("failed");
   });
 });
 
@@ -147,7 +231,7 @@ describe("executeDedup", () => {
         },
       ],
     });
-    await executeCollect(db, collector, {});
+    await executeCollect(db, collector, [{}], undefined, 0);
 
     const outcome = executeDedup(db);
 
@@ -169,6 +253,7 @@ describe("executeDedup", () => {
 
 function deliverCriteria(): Criteria {
   return {
+    collection: { queries: [{}], queryIntervalMs: 0 },
     titleBlocklist: [],
     titleRequired: ["estágio"],
     location: { cities: [], allowRemote: true },
@@ -247,7 +332,7 @@ describe("executeDeliver", () => {
         },
       ],
     });
-    await executeCollect(db, collector, {});
+    await executeCollect(db, collector, [{}], undefined, 0);
 
     const criteria = deliverCriteria();
     const scorer = new StubScorer(criteria);
@@ -290,7 +375,7 @@ describe("executeDeliver", () => {
         },
       ],
     });
-    await executeCollect(db, collector, {});
+    await executeCollect(db, collector, [{}], undefined, 0);
 
     const criteria = deliverCriteria();
     const scorer = new StubScorer(criteria);
@@ -328,7 +413,7 @@ describe("executeDeliver", () => {
         },
       ],
     });
-    await executeCollect(db, collector, {});
+    await executeCollect(db, collector, [{}], undefined, 0);
 
     const criteria = deliverCriteria();
     const scorer = new StubScorer(criteria);
@@ -366,7 +451,7 @@ describe("executeDeliver", () => {
         },
       ],
     });
-    await executeCollect(db, collector, {});
+    await executeCollect(db, collector, [{}], undefined, 0);
 
     const criteria = deliverCriteria();
     const scorer = new StubScorer(criteria);
@@ -403,7 +488,7 @@ describe("executeDeliver", () => {
         },
       ],
     });
-    await executeCollect(db, collector, {});
+    await executeCollect(db, collector, [{}], undefined, 0);
     executeDedup(db);
 
     const criteria = deliverCriteria();
@@ -455,7 +540,7 @@ describe("executeStudyPlan", () => {
         },
       ],
     });
-    await executeCollect(db, collector, {});
+    await executeCollect(db, collector, [{}], undefined, 0);
 
     const { notifier, sent } = recordingTextNotifier();
     const outcome = await executeStudyPlan(

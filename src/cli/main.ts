@@ -56,53 +56,77 @@ export interface CollectOutcome {
   readonly error?: string;
 }
 
+const DEFAULT_QUERY_INTERVAL_MS = 1_500;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * The testable core of `collect`, independent of argv parsing. The collector
  * is injected — tests exercise this with a stub, no network call, matching
  * docs/07-testing-strategy.md.
+ *
+ * Takes a **list** of queries and folds them into **one** run row: a
+ * collection cycle is one run regardless of how many questions it had to ask
+ * the source (`config/criteria.yaml`'s `collection.queries`). Recording one
+ * row per query instead would quietly break two things that count runs — the
+ * digest's "collected since last delivery" summary, and
+ * `evaluateCollectionHealth`, which alerts on consecutive *empty* collection
+ * runs and would start firing whenever one of several queries legitimately
+ * returned nothing.
+ *
+ * Partial failure is degraded, not down (principle 1): whatever succeeded is
+ * persisted, the first error is reported on the outcome, and the run is
+ * marked `failed` only when **every** query failed. One dead query out of
+ * four must not look identical to a dead source.
  */
 export async function executeCollect(
   db: Db,
   collector: CollectorPort,
-  criteria: unknown,
+  queries: readonly unknown[],
   now: () => Date = () => new Date(),
+  queryIntervalMs: number = DEFAULT_QUERY_INTERVAL_MS,
 ): Promise<CollectOutcome> {
   const postingsRepo = new PostingsRepository(db);
   const runsRepo = new RunsRepository(db);
   const runId = runsRepo.start("collect", now());
 
-  const result = await collector.collect(criteria);
-
-  if (result.error) {
-    runsRepo.finish(runId, now(), "failed", {
-      collectedCount: result.postings.length,
-    });
-    return {
-      runId,
-      collected: result.postings.length,
-      normalized: 0,
-      isNew: 0,
-      alreadySeen: 0,
-      error: result.error.message,
-    };
-  }
-
-  const collectedAt = now();
+  let collected = 0;
   let normalized = 0;
   let isNew = 0;
   let alreadySeen = 0;
+  let failures = 0;
+  let firstError: string | undefined;
 
-  for (const raw of result.postings) {
-    const posting = normalizeGupyJob(raw, collectedAt);
-    if (!posting) continue;
-    normalized += 1;
-    const { wasNew } = postingsRepo.upsert(posting);
-    if (wasNew) isNew += 1;
-    else alreadySeen += 1;
+  for (const [index, query] of queries.entries()) {
+    // The collector's own interval only spaces out pages *within* one query,
+    // so the gap between queries is this loop's responsibility (CLAUDE.md §6).
+    if (index > 0 && queryIntervalMs > 0) await sleep(queryIntervalMs);
+
+    const result = await collector.collect(query);
+    collected += result.postings.length;
+
+    if (result.error) {
+      failures += 1;
+      firstError ??= result.error.message;
+      continue;
+    }
+
+    const collectedAt = now();
+    for (const raw of result.postings) {
+      const posting = normalizeGupyJob(raw, collectedAt);
+      if (!posting) continue;
+      normalized += 1;
+      const { wasNew } = postingsRepo.upsert(posting);
+      if (wasNew) isNew += 1;
+      else alreadySeen += 1;
+    }
   }
 
-  runsRepo.finish(runId, now(), "success", {
-    collectedCount: result.postings.length,
+  const allFailed = failures === queries.length;
+  runsRepo.finish(runId, now(), allFailed ? "failed" : "success", {
+    collectedCount: collected,
     normalizedCount: normalized,
     newCount: isNew,
     alreadySeenCount: alreadySeen,
@@ -110,10 +134,11 @@ export async function executeCollect(
 
   return {
     runId,
-    collected: result.postings.length,
+    collected,
     normalized,
     isNew,
     alreadySeen,
+    ...(firstError === undefined ? {} : { error: firstError }),
   };
 }
 
@@ -332,13 +357,31 @@ async function collectCommand(args: string[]): Promise<void> {
     },
   });
 
-  const outcome = await executeCollect(openDatabase(), new GupyCollector(), {
+  const adHoc = {
     jobName: values["job-name"],
     city: values.city,
     maxResults: values["max-results"]
       ? Number(values["max-results"])
       : undefined,
-  });
+  };
+
+  // No flags means "run the configured cycle" — the same queries the cron
+  // issues (`config/criteria.yaml`, `collection.queries`), so a manual run
+  // and a scheduled one exercise the identical path. Any flag makes it a
+  // deliberate one-off that overrides the configuration.
+  const criteria = loadCriteria(
+    process.env.CRITERIA_PATH ?? "./config/criteria.yaml",
+  );
+  const isAdHoc = Object.values(adHoc).some((value) => value !== undefined);
+  const queries = isAdHoc ? [adHoc] : criteria.collection.queries;
+
+  const outcome = await executeCollect(
+    openDatabase(),
+    new GupyCollector(),
+    queries,
+    () => new Date(),
+    criteria.collection.queryIntervalMs,
+  );
 
   if (outcome.error) {
     console.error(`collect (run ${outcome.runId}) failed: ${outcome.error}`);
