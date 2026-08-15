@@ -1,15 +1,26 @@
 import {
   BadRequestException,
+  Body,
   Controller,
   Get,
   Inject,
   NotFoundException,
   Param,
+  Post,
   Query,
 } from "@nestjs/common";
+import { executeCollect, executeDedup, executeDeliver } from "../../cli/main";
+import { NotifierPort } from "../../delivery/domain/ports/notifier.port";
+import { Criteria } from "../../prefilter/domain/criteria";
+import { CollectorPort } from "../../posting/domain/ports/collector.port";
 import { Db } from "../../persistence/infrastructure/db";
 import { RunsRepository } from "../../persistence/infrastructure/runs-repository";
+import { Profile } from "../../profile/domain/profile";
+import { buildScorer } from "../../scoring/infrastructure/build-scorer";
+import { COLLECTOR } from "./collector.provider";
+import { CRITERIA, PROFILE } from "./config.provider";
 import { DATABASE } from "./database.provider";
+import { NOTIFIER } from "./notifier.provider";
 
 /** The three run kinds ADR-009's two crons (plus dedup, folded into the
  * collection cycle) actually produce — `docs/08-observability.md`'s health
@@ -31,9 +42,21 @@ const MAX_LIST_LIMIT = 200;
  * already draws around log lines, drawn here for the first surface a
  * network consumer reads.
  */
+interface CollectBody {
+  readonly jobName?: string;
+  readonly city?: string;
+  readonly maxResults?: number;
+}
+
 @Controller()
 export class RunsController {
-  constructor(@Inject(DATABASE) private readonly db: Db) {}
+  constructor(
+    @Inject(DATABASE) private readonly db: Db,
+    @Inject(COLLECTOR) private readonly collector: CollectorPort,
+    @Inject(NOTIFIER) private readonly notifier: NotifierPort,
+    @Inject(CRITERIA) private readonly criteria: Criteria,
+    @Inject(PROFILE) private readonly profile: Profile,
+  ) {}
 
   /**
    * `docs/08-observability.md`: "an HTTP health endpoint reporting last
@@ -70,6 +93,45 @@ export class RunsController {
       throw new NotFoundException(`No run with id ${runId}`);
     }
     return run;
+  }
+
+  /**
+   * Stage re-execution (M9) — the same `executeCollect`/`executeDedup`/
+   * `executeDeliver` the CLI's `collect`/`dedup`/`deliver` commands and
+   * `SchedulerService`'s cron handlers already call. One code path for
+   * "run this stage" regardless of what triggered it (principle 2), now
+   * proven a third way.
+   */
+  @Post("runs/collect")
+  collect(@Body() body: CollectBody = {}) {
+    return executeCollect(this.db, this.collector, body);
+  }
+
+  @Post("runs/dedup")
+  dedup() {
+    return executeDedup(this.db);
+  }
+
+  /**
+   * Real, on demand: a genuine scoring pass (real API spend unless
+   * `SCORER_ADAPTER=stub`) and a genuine Telegram send — exactly what the
+   * nightly cron does, callable early. This is the intended capability
+   * ("Hermes can ask for a check now"), not a footgun — documented in the
+   * M9 ADR, not hidden here.
+   */
+  @Post("runs/deliver")
+  async deliver() {
+    const built = buildScorer(this.db, this.criteria, this.profile);
+    if (!built.ok) {
+      throw new BadRequestException(`Misconfigured scorer: ${built.error}`);
+    }
+    return executeDeliver(
+      this.db,
+      built.scorer,
+      this.notifier,
+      this.criteria,
+      this.profile,
+    );
   }
 }
 

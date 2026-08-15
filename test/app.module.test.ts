@@ -7,11 +7,17 @@ let env: NodeJS.ProcessEnv;
 
 beforeEach(() => {
   env = { ...process.env };
-  // ApiKeyGuard (M9) reads this eagerly in its constructor — fails at
-  // startup rather than lazily (docs/09-configuration.md rule 1) — so
-  // compiling the graph at all needs it set, same as any other required
-  // config this module tree depends on.
+  // ApiKeyGuard and the M9 config/notifier providers all read their
+  // requirements eagerly at construction (docs/09-configuration.md rule 1:
+  // fail at startup, never lazily) — compiling the graph at all needs every
+  // one of them set. PROFILE_PATH points at the committed, fictional
+  // example file (`config/profile.yaml` itself is gitignored and may not
+  // exist in this environment) — CRITERIA_PATH is left at its default since
+  // `config/criteria.yaml` is committed and real.
   process.env.API_KEY = "test-key-for-module-graph-compile";
+  process.env.TELEGRAM_BOT_TOKEN = "000:test";
+  process.env.TELEGRAM_CHAT_ID = "123";
+  process.env.PROFILE_PATH = "./config/profile.example.yaml";
 });
 
 afterEach(() => {
