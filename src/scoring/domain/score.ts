@@ -55,7 +55,11 @@ function findBlockingFailure(matches: readonly Match[]): Requirement | null {
   return failure ? failure.requirement : null;
 }
 
-function computeVerdict(
+/** Exported for the M7 calibration protocol (docs/04-scoring-model.md),
+ * which derives a "hand verdict" from a labeled score using the exact same
+ * thresholds the real scorer uses — comparing them any other way would not
+ * be measuring what production actually does. */
+export function computeVerdict(
   score: number,
   thresholds: ScoringConfig["thresholds"],
 ): Verdict {

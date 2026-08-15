@@ -95,9 +95,15 @@ provisional until the M7 calibration.
 
 ### Calibration
 
-Planned for M7 and not yet run: 50 real postings labelled by hand, then measured
-correlation and verdict precision/recall, varying one thing at a time — model,
-prompt, weights, cutoffs. **The results table will be published here, including
+M7's infrastructure (stages A/B, `ApiScorer`, `OllamaScorer`, the measurement
+tooling) is built; the calibration run itself is not done yet. 16 real
+postings are labelled by hand so far (real Gupy volume for this search profile
+is thinner than 50), and two attempts against OpenRouter's free tier both
+failed for infrastructure reasons — an auto-router that changes model per
+request, then a 50-requests/day cap too low to finish one pass — not model
+quality. `OllamaScorer` exists to run this locally instead. Once a full run
+completes: correlation and verdict precision/recall, varying one thing at a
+time — model, prompt, weights, cutoffs. **The results table will be published here, including
 the configurations that lost.**
 
 A scoring system that has never been measured against ground truth is a number
@@ -117,19 +123,19 @@ See [ADR-001](docs/adr/001-nestjs-as-application-framework.md).
 
 ## Milestones
 
-| #   | Milestone                                                        | Status |
-| --- | ---------------------------------------------------------------- | ------ |
-| M0  | Bootstrap — docs, CI, ADR practice, repository hygiene           | done   |
-| M1  | Domain entities, fingerprint, score computation (stage C)        | done   |
-| M2  | Master profile — Zod schema, loader, academic-period derivation  | done   |
-| M3  | Gupy collector with tolerant schema + fixture capture script     | done   |
-| M4  | Persistence — Drizzle + SQLite, migrations, dedup                | done   |
-| M5  | Deterministic pre-filter                                         | done   |
-| M6  | **Vertical slice** — Gupy → SQLite → Telegram with a stub scorer | done   |
-| M7  | Real scoring — stages A and B, versioned prompts, calibration    |        |
-| M8  | Deployment — Docker Compose, scheduling, backup, alerting        |        |
-| M9  | HTTP API and MCP server                                          |        |
-| M10 | Market intelligence — skill taxonomy, gap analysis, study plan   |        |
+| #   | Milestone                                                        | Status      |
+| --- | ---------------------------------------------------------------- | ----------- |
+| M0  | Bootstrap — docs, CI, ADR practice, repository hygiene           | done        |
+| M1  | Domain entities, fingerprint, score computation (stage C)        | done        |
+| M2  | Master profile — Zod schema, loader, academic-period derivation  | done        |
+| M3  | Gupy collector with tolerant schema + fixture capture script     | done        |
+| M4  | Persistence — Drizzle + SQLite, migrations, dedup                | done        |
+| M5  | Deterministic pre-filter                                         | done        |
+| M6  | **Vertical slice** — Gupy → SQLite → Telegram with a stub scorer | done        |
+| M7  | Real scoring — stages A and B, versioned prompts, calibration    | in progress |
+| M8  | Deployment — Docker Compose, scheduling, backup, alerting        |             |
+| M9  | HTTP API and MCP server                                          |             |
+| M10 | Market intelligence — skill taxonomy, gap analysis, study plan   |             |
 
 ## Documentation
 

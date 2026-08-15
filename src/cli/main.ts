@@ -37,6 +37,7 @@ import { ApiScorer } from "../scoring/infrastructure/api-scorer";
 import { StageAExtractor } from "../scoring/infrastructure/stage-a-extractor";
 import { StageBMatcher } from "../scoring/infrastructure/stage-b-matcher";
 import { OpenRouterClient } from "../scoring/infrastructure/openrouter-client";
+import { OllamaClient } from "../scoring/infrastructure/ollama-client";
 import { ExtractionsRepository } from "../persistence/infrastructure/extractions-repository";
 import { MatchesRepository } from "../persistence/infrastructure/matches-repository";
 import { NotifierPort } from "../delivery/domain/ports/notifier.port";
@@ -341,6 +342,7 @@ async function deliverCommand(): Promise<void> {
   const db = openDatabase();
   const adapter = process.env.SCORER_ADAPTER ?? "stub";
   let scorer: ScorerPort;
+  let ollamaClient: OllamaClient | undefined;
 
   if (adapter === "stub") {
     scorer = new StubScorer(criteria);
@@ -369,9 +371,32 @@ async function deliverCommand(): Promise<void> {
       criteria,
       new PostingsRepository(db),
     );
+  } else if (adapter === "ollama") {
+    const model = process.env.LLM_MODEL;
+    if (!model) {
+      console.error(
+        "deliver: SCORER_ADAPTER=ollama requires LLM_MODEL (e.g. qwen3:4b)",
+      );
+      process.exitCode = 1;
+      return;
+    }
+    ollamaClient = new OllamaClient({
+      model,
+      ...(process.env.OLLAMA_BASE_URL
+        ? { baseUrl: process.env.OLLAMA_BASE_URL }
+        : {}),
+    });
+    const ask = ollamaClient.complete.bind(ollamaClient);
+    scorer = new ApiScorer(
+      new StageAExtractor(ask, new ExtractionsRepository(db)),
+      new StageBMatcher(ask, new MatchesRepository(db)),
+      profile,
+      criteria,
+      new PostingsRepository(db),
+    );
   } else {
     console.error(
-      `deliver: SCORER_ADAPTER=${adapter} is not implemented — "stub" and "api" exist before M8's OllamaScorer`,
+      `deliver: SCORER_ADAPTER=${adapter} is not implemented — "stub", "api" and "ollama" are the only adapters`,
     );
     process.exitCode = 1;
     return;
@@ -380,6 +405,10 @@ async function deliverCommand(): Promise<void> {
   const notifier = new TelegramNotifier(loadTelegramConfig());
 
   const outcome = await executeDeliver(db, scorer, notifier, criteria, profile);
+
+  // CLAUDE.md §5: Ollama must not sit loaded between batches — Atlas budgets
+  // ~150 MB at rest and this alone peaks around 3.2 GB.
+  if (ollamaClient) await ollamaClient.unload();
 
   if (outcome.error) {
     console.error(`deliver (run ${outcome.runId}) failed: ${outcome.error}`);
