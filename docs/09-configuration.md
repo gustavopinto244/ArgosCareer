@@ -28,8 +28,8 @@ TELEGRAM_CHAT_ID=         # required
 SCORER_ADAPTER=           # stub | api | ollama
 LLM_API_KEY=              # required when SCORER_ADAPTER=api (OpenRouter, ADR-012)
 LLM_BASE_URL=             # default https://openrouter.ai/api/v1
-LLM_MODEL=                # model slug, e.g. openrouter/auto — the calibration variable
-OLLAMA_BASE_URL=          # required when SCORER_ADAPTER=ollama
+LLM_MODEL=                # model slug (api, e.g. openrouter/auto) or tag (ollama, e.g. qwen3:4b)
+OLLAMA_BASE_URL=          # required when SCORER_ADAPTER=ollama, default http://127.0.0.1:11434
 N8N_WEBHOOK_URL=          # required when an n8n-backed source is enabled
 N8N_WEBHOOK_TOKEN=        # shared secret for that webhook
 DATABASE_PATH=            # default ./data/argos.db

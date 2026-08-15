@@ -24,6 +24,7 @@ import { loadCriteria } from "../src/prefilter/infrastructure/criteria-loader";
 import { loadProfile } from "../src/profile/infrastructure/profile-loader";
 import { hashProfile } from "../src/profile/domain/profile-hash";
 import { OpenRouterClient } from "../src/scoring/infrastructure/openrouter-client";
+import { OllamaClient } from "../src/scoring/infrastructure/ollama-client";
 import { StageAExtractor } from "../src/scoring/infrastructure/stage-a-extractor";
 import { StageBMatcher } from "../src/scoring/infrastructure/stage-b-matcher";
 import { ApiScorer } from "../src/scoring/infrastructure/api-scorer";
@@ -76,20 +77,50 @@ async function main(): Promise<void> {
   );
   const profileHash = hashProfile(profile);
 
-  const apiKey = process.env.LLM_API_KEY;
   const model = process.env.LLM_MODEL;
-  if (!apiKey || !model) {
-    console.error("LLM_API_KEY and LLM_MODEL are required (ADR-012).");
+  if (!model) {
+    console.error("LLM_MODEL is required.");
     process.exitCode = 1;
     return;
   }
 
-  const client = new OpenRouterClient({
-    apiKey,
-    model,
-    ...(process.env.LLM_BASE_URL ? { baseUrl: process.env.LLM_BASE_URL } : {}),
-  });
-  const ask = client.complete.bind(client);
+  const adapter = process.env.SCORER_ADAPTER ?? "api";
+  let ask: (prompt: string) => Promise<string>;
+  let ollamaClient: OllamaClient | undefined;
+
+  if (adapter === "ollama") {
+    ollamaClient = new OllamaClient({
+      model,
+      ...(process.env.OLLAMA_BASE_URL
+        ? { baseUrl: process.env.OLLAMA_BASE_URL }
+        : {}),
+    });
+    ask = ollamaClient.complete.bind(ollamaClient);
+  } else if (adapter === "api") {
+    const apiKey = process.env.LLM_API_KEY;
+    if (!apiKey) {
+      console.error(
+        "LLM_API_KEY is required for SCORER_ADAPTER=api (ADR-012).",
+      );
+      process.exitCode = 1;
+      return;
+    }
+    const client = new OpenRouterClient({
+      apiKey,
+      model,
+      ...(process.env.LLM_BASE_URL
+        ? { baseUrl: process.env.LLM_BASE_URL }
+        : {}),
+    });
+    ask = client.complete.bind(client);
+  } else {
+    console.error(
+      `SCORER_ADAPTER=${adapter} is not a calibratable adapter (use "api" or "ollama").`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+
   const scorer = new ApiScorer(
     new StageAExtractor(ask, new ExtractionsRepository(db)),
     new StageBMatcher(ask, new MatchesRepository(db)),
@@ -126,6 +157,8 @@ async function main(): Promise<void> {
       );
     }
   }
+
+  if (ollamaClient) await ollamaClient.unload();
 
   const report = computeCalibrationReport(entries, criteria.scoring.thresholds);
 
