@@ -5,6 +5,8 @@
  * for near-duplicates without touching a collector or the network at all.
  *
  *   argos collect [--job-name <text>] [--city <text>] [--max-results <n>]
+ *                 [--since-days <n>]  # one-off wider window, e.g. after
+ *                                     # adding a query term (ADR-019)
  *   argos dedup [--similarity-threshold <0-1>] [--window-days <n>]
  *   argos deliver
  *   argos studyplan
@@ -393,6 +395,7 @@ async function collectCommand(args: string[]): Promise<void> {
       "job-name": { type: "string" },
       city: { type: "string" },
       "max-results": { type: "string" },
+      "since-days": { type: "string" },
     },
   });
 
@@ -414,13 +417,38 @@ async function collectCommand(args: string[]): Promise<void> {
   const isAdHoc = Object.values(adHoc).some((value) => value !== undefined);
   const queries = isAdHoc ? [adHoc] : criteria.collection.queries;
 
+  /**
+   * `--since-days` widens the recency window for one manual run. It exists
+   * for a specific, real situation: adding a query term to
+   * `collection.queries` does **not** backfill, because everything the new
+   * term finds was published before the one-day window (ADR-019). Without
+   * this the only way to pick those up is to wait for them to be reposted.
+   * Deliberately manual — the scheduled cycle always uses the configured
+   * window.
+   */
+  const sinceDays = values["since-days"]
+    ? Number(values["since-days"])
+    : undefined;
+  if (
+    sinceDays !== undefined &&
+    (!Number.isFinite(sinceDays) || sinceDays <= 0)
+  ) {
+    console.error("collect: --since-days must be a positive number");
+    process.exitCode = 1;
+    return;
+  }
+  const recency =
+    sinceDays === undefined
+      ? criteria.collection
+      : { recencyDays: sinceDays, backfillDays: sinceDays };
+
   const outcome = await executeCollect(
     openDatabase(),
     new GupyCollector(),
     queries,
     () => new Date(),
     criteria.collection.queryIntervalMs,
-    criteria.collection,
+    recency,
   );
 
   if (outcome.error) {

@@ -1,4 +1,4 @@
-import { normalize } from "../../posting/domain/fingerprint";
+import { keywordMatchesTitle } from "./title-match";
 import { ProfileTrack } from "../../profile/domain/profile";
 import { Track } from "../../scoring/domain/types";
 import { Criteria } from "./criteria";
@@ -15,11 +15,14 @@ import { Criteria } from "./criteria";
  * milestone's development — see ADR-011. Revisit if `unknown` classification
  * turns out to be common once there is real run data to look at.
  *
- * Substring match on the normalized title, not tokenized — `normalize`
- * strips punctuation without inserting a space (fingerprint.ts), so a
- * hyphenated config keyword like "back-end" normalizes to the same substring
- * as an unhyphenated title. `config/criteria.yaml` hedges the gap this
- * leaves by listing multiple spacing variants per keyword.
+ * Whole-word matching via `keywordMatchesTitle`, **not** substring
+ * (ADR-011 Amendment 2). Substring matching was the original design and was
+ * measurably wrong here for the same reason it was wrong in the title
+ * blocklist: `soc` matched inside "social"/"societário"/"sociais" and `api`
+ * inside "fisioterapia"/"capital", classifying a physiotherapy internship
+ * as `dev`. `keywordMatchesTitle` still matches `back-end` against
+ * "Backend Developer" — hyphen-insensitivity was the real reason substring
+ * matching was chosen, and it is preserved by its collapsed-word pass.
  */
 export function classifyTrack(
   title: string,
@@ -30,9 +33,7 @@ export function classifyTrack(
     automation: [],
   },
 ): Track[] {
-  const normalizedTitle = normalize(title);
-  const matches = (keyword: string) =>
-    normalizedTitle.includes(normalize(keyword));
+  const matches = (keyword: string) => keywordMatchesTitle(title, keyword);
 
   const profileTracks = Object.keys(tracks) as ProfileTrack[];
   return profileTracks.filter((track) => {

@@ -41,6 +41,31 @@ collection:
       city: São Gonçalo
     - jobName: estagiário
       city: São Gonçalo
+    # Tech terms, measured with `npm run probe:terms` before being added --
+    # the number that decided each one is how many postings survive the
+    # pre-filter AND classify onto a real track, not the raw count:
+    #
+    #   estagio desenvolvimento     28 returned,  5 pass,  5 on-track
+    #   estagio backend              2 returned,  2 pass,  2 on-track
+    #   estagio software            16 returned,  2 pass,  2 on-track
+    #   estagiario desenvolvimento  13 returned,  3 pass,  2 on-track
+    #
+    # Deliberately NOT added, all measured at zero on-track: "estagio TI",
+    # "estagio tecnologia", "estagio dados", "estagio programacao" (50
+    # returned, 0 on-track), "estagio sistemas", "estagio suporte", "estagio
+    # infraestrutura", "estagio redes", "estagio seguranca da informacao".
+    # "estagio devops" and "estagio ciberseguranca" return nothing at all.
+    # A term that returns volume and no on-track posting spends Stage A
+    # budget to be discarded -- the exact failure ADR-018 fixed.
+    #
+    # No city/isRemoteWork on these: the term itself is already narrow (2-28
+    # results nationwide, against 380 for a bare "estagio"), so constraining
+    # geography here would mostly return nothing. The pre-filter handles the
+    # location axis for them.
+    - jobName: estágio desenvolvimento
+    - jobName: estagiário desenvolvimento
+    - jobName: estágio backend
+    - jobName: estágio software
   # Pause between queries. The collector's own ~1.5s interval only spaces out
   # pages within one query (CLAUDE.md 6).
   queryIntervalMs: 1500
