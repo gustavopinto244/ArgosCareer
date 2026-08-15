@@ -1,4 +1,5 @@
 import {
+  isVerifiable,
   Match,
   MatchStatus,
   Requirement,
@@ -17,11 +18,23 @@ const STATUS_WEIGHT: Readonly<Record<MatchStatus, number>> = {
   not_met: 0.0,
 };
 
+/**
+ * Requirements a candidate could actually evidence (ADR-015). Everything
+ * downstream — coverage, blocking failure, critical gaps, the low-confidence
+ * count — reads this rather than the raw match list, so an unfalsifiable
+ * trait is excluded from scoring in exactly one place.
+ */
+function verifiableMatches(matches: readonly Match[]): readonly Match[] {
+  return matches.filter((m) => isVerifiable(m.requirement));
+}
+
 function coverage(
   matches: readonly Match[],
   weight: RequirementWeight,
 ): number {
-  const inCategory = matches.filter((m) => m.requirement.weight === weight);
+  const inCategory = verifiableMatches(matches).filter(
+    (m) => m.requirement.weight === weight,
+  );
   if (inCategory.length === 0) return 1;
   const sum = inCategory.reduce(
     (total, m) => total + STATUS_WEIGHT[m.status],
@@ -49,7 +62,11 @@ export function computeTrackAlignment(
  * first failing blocking requirement, in match order.
  */
 function findBlockingFailure(matches: readonly Match[]): Requirement | null {
-  const failure = matches.find(
+  // Verifiable only (ADR-015): a trait extracted as `blocking` — "ter
+  // compromisso e responsabilidade com as entregas" — would otherwise fail
+  // for every candidate forever, capping every such posting at 35 on a
+  // requirement no one can evidence.
+  const failure = verifiableMatches(matches).find(
     (m) => m.requirement.weight === "blocking" && m.status !== "met",
   );
   return failure ? failure.requirement : null;
@@ -74,7 +91,9 @@ export function computeVerdict(
  * output described in docs/04-scoring-model.md.
  */
 function computeCriticalGaps(matches: readonly Match[]): Requirement[] {
-  return matches
+  // Verifiable only (ADR-015): this list feeds the study backlog, and
+  // "be more proactive" is not something to go and learn.
+  return verifiableMatches(matches)
     .filter(
       (m) =>
         (m.requirement.weight === "mandatory" ||
@@ -115,7 +134,14 @@ export function computeScore(
     ? Math.min(rawScore, config.blockingCapScore)
     : rawScore;
 
-  const lowConfidence = matches.length < config.minExtractedRequirements;
+  // Counts verifiable requirements, not all of them (ADR-015). Excluding
+  // traits from coverage opens a hole this closes: a posting asking only for
+  // "proatividade, dinamismo e boa comunicação" has every category empty,
+  // takes coverage 1 from the empty-category rule, and would score near the
+  // top while looking well-specified. Judged on what is actually checkable,
+  // it is exactly the vague posting `docs/04`'s low-confidence rule is for.
+  const lowConfidence =
+    verifiableMatches(matches).length < config.minExtractedRequirements;
 
   let verdict = computeVerdict(score, config.thresholds);
   // lowConfidence caps the verdict at "review" — it never upgrades a "discard".

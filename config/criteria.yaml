@@ -99,6 +99,48 @@ tracks:
     - kubernetes
     - docker
 
+# Phrases that veto a track even when one of its keywords matched (ADR-015).
+# Every entry below was observed as a real false positive in the collected
+# corpus, not imagined: "desenvolvimento" is the single most overloaded word
+# in Brazilian job titles, and "segurança do trabalho" is a different
+# profession from information security.
+#
+# Deliberately NOT excluded, because they are genuinely dev: "desenvolvimento
+# backend", "desenvolvimento web", "desenvolvimento de sistemas",
+# "desenvolvimento full stack", "análise e desenvolvimento de sistemas".
+trackExclusions:
+  dev:
+    - desenvolvimento de embalagens
+    - desenvolvimento humano
+    - desenvolvimento organizacional
+    - treinamento e desenvolvimento
+    - desenvolvimento de produto
+    - desenvolvimento de produtos
+    - desenvolvimento comercial
+    - desenvolvimento de negócios
+    - desenvolvimento de mercado
+    - desenvolvimento técnico de mercado
+    - desenvolvimento de fornecedores
+    - desenvolvimento imobiliário
+    - desenvolvimento infantil
+    - desenvolvimento educacional
+    - desenvolvimento de motoristas
+    - desenvolvimento de rede
+    - desenvolvimento farmacotécnico
+    - desenvolvimento analítico
+    - desenvolvimento do cooperativismo
+    - desenvolvimento de arte
+    - desenvolvimento de projetos de engenharia
+    - pesquisa e desenvolvimento
+    - desenvolvimento de canais
+    - desenvolvimento de embalagem
+  security:
+    - segurança do trabalho
+    - segurança patrimonial
+    - segurança predial
+    - técnico de segurança
+    - segurança alimentar
+
 # Provisional until M7 calibration (docs/04-scoring-model.md). dev and
 # security share 1.0 — equal first priorities (docs/01-vision-and-scope.md).
 trackWeights:

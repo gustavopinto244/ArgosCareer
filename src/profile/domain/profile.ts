@@ -48,6 +48,16 @@ export type ResumeVariant = z.infer<typeof ResumeVariantSchema>;
 export const UNVERIFIED = "⚠ VERIFY";
 
 const ProfileBaseSchema = z.object({
+  /**
+   * The degree and institution, as a posting would name them. Required, not
+   * optional: "cursando <course>" is the most common blocking requirement in
+   * Brazilian internship postings, and stage B can only answer it from text
+   * it is allowed to quote (ADR-005). Before these fields existed the answer
+   * was always `not_met`, capping otherwise-viable postings at the blocking
+   * score — see ADR-014.
+   */
+  courseName: z.string().min(1),
+  institution: z.string().min(1),
   courseStart: z.coerce.date(),
   courseEnd: z.coerce.date(),
   englishLevel: z.string().min(1),

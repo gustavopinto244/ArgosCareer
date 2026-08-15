@@ -4,6 +4,8 @@ import { hashProfile } from "../../../src/profile/domain/profile-hash";
 
 function profile(overrides: Partial<Profile> = {}): Profile {
   return {
+    courseName: "Sistemas de Informação",
+    institution: "Universidade Exemplo",
     courseStart: new Date("2026-03-01"),
     courseEnd: new Date("2029-12-01"),
     englishLevel: "intermediate",

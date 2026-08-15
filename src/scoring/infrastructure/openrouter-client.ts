@@ -26,8 +26,34 @@ const ChatCompletionResponseSchema = z
           .passthrough(),
       )
       .min(1),
+    /**
+     * Optional on purpose, like every other field read off a third-party
+     * response here: usage accounting is reported by OpenRouter but is not
+     * something a call should fail over if a provider omits it.
+     */
+    usage: z
+      .object({
+        prompt_tokens: z.number().optional(),
+        completion_tokens: z.number().optional(),
+        cost: z.number().optional(),
+        prompt_tokens_details: z
+          .object({ cached_tokens: z.number().optional() })
+          .passthrough()
+          .optional(),
+      })
+      .passthrough()
+      .optional(),
   })
   .passthrough();
+
+/** Running totals across every call this client has made. */
+export interface UsageTotals {
+  readonly calls: number;
+  readonly promptTokens: number;
+  readonly completionTokens: number;
+  readonly cachedPromptTokens: number;
+  readonly costUsd: number;
+}
 
 type FetchLike = typeof fetch;
 
@@ -60,12 +86,37 @@ export class OpenRouterClient {
   private readonly fetchImpl: FetchLike;
   private readonly timeoutMs: number;
 
+  private calls = 0;
+  private promptTokens = 0;
+  private completionTokens = 0;
+  private cachedPromptTokens = 0;
+  private costUsd = 0;
+
   constructor(options: OpenRouterClientOptions) {
     this.apiKey = options.apiKey;
     this.model = options.model;
     this.baseUrl = options.baseUrl ?? DEFAULT_BASE_URL;
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  }
+
+  /**
+   * What this client has spent so far. Exposed as a getter rather than
+   * threaded through `AskModel`'s return type: usage is an operational
+   * concern of the transport, and making every caller carry it would push a
+   * billing detail into the scoring stages, which have no business knowing
+   * about it. Read by the M7 calibration script so one run's cost — and
+   * whether the prompt cache is actually being hit — is visible rather than
+   * inferred (ADR-014).
+   */
+  getUsage(): UsageTotals {
+    return {
+      calls: this.calls,
+      promptTokens: this.promptTokens,
+      completionTokens: this.completionTokens,
+      cachedPromptTokens: this.cachedPromptTokens,
+      costUsd: this.costUsd,
+    };
   }
 
   async complete(prompt: string): Promise<string> {
@@ -111,6 +162,13 @@ export class OpenRouterClient {
     if (!firstChoice) {
       throw new Error("Unexpected OpenRouter response shape");
     }
+
+    const usage = parsed.success ? parsed.data.usage : undefined;
+    this.calls += 1;
+    this.promptTokens += usage?.prompt_tokens ?? 0;
+    this.completionTokens += usage?.completion_tokens ?? 0;
+    this.cachedPromptTokens += usage?.prompt_tokens_details?.cached_tokens ?? 0;
+    this.costUsd += usage?.cost ?? 0;
 
     return firstChoice.message.content;
   }

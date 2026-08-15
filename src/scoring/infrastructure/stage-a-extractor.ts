@@ -9,6 +9,13 @@ const RequirementSchema = z.object({
   text: z.string().min(1),
   category: z.string().min(1),
   weight: z.enum(["blocking", "mandatory", "desirable"]),
+  /**
+   * ADR-015. Defaulted rather than required: a model that omits the field is
+   * not producing invalid output, and the default is the conservative
+   * reading — marking a requirement unverifiable removes it from scoring, so
+   * silence must not be able to delete requirements.
+   */
+  verifiable: z.boolean().default(true),
 });
 
 const SENIORITY_VALUES = [
@@ -67,6 +74,23 @@ export class StageAExtractor {
         requirements: cached.requirements,
         seniority: cached.seniority,
         experienceYears: cached.experienceYears,
+      };
+    }
+
+    // No description is not something the model can extract requirements
+    // from — asking it anyway costs a call to be told what we already know.
+    // Deliberately NOT cached: the cache key is (fingerprint, promptVersion)
+    // and carries no notion of "which description this was extracted from",
+    // so persisting this empty result would keep being served after the
+    // description arrives. That is exactly the trap that produced four
+    // silently contentless postings in the first calibration run (ADR-014);
+    // the posting stays uncached and re-extracts for free once it has text.
+    if (!posting.description?.trim()) {
+      return {
+        ok: true,
+        requirements: [],
+        seniority: null,
+        experienceYears: null,
       };
     }
 

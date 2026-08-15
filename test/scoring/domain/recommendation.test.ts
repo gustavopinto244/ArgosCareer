@@ -21,6 +21,8 @@ function requirement(overrides: Partial<Requirement> = {}): Requirement {
 
 function profile(overrides: Partial<Profile> = {}): Profile {
   return {
+    courseName: "Sistemas de Informação",
+    institution: "Universidade Exemplo",
     courseStart: new Date("2026-03-01"),
     courseEnd: new Date("2029-12-01"),
     englishLevel: "intermediate",
@@ -243,5 +245,67 @@ describe("computeRecommendation — missingTerms", () => {
 describe("EMPTY_RECOMMENDATION", () => {
   it("matches what computeRecommendation returns for an empty match list", () => {
     expect(computeRecommendation([], profile())).toEqual(EMPTY_RECOMMENDATION);
+  });
+});
+
+/**
+ * The model is shown `- [Competency] text` and quotes back what it saw, tag
+ * included more often than not — 15 of 22 quotes in the first real
+ * calibration run. Before this was handled, every tagged quote failed the
+ * exact lookup and the posting silently lost its resume-variant
+ * recommendation (ADR-014).
+ */
+describe("computeRecommendation — evidence quoted with the prompt's tag", () => {
+  it("resolves a competency from a quote carrying the [Competency] tag", () => {
+    const matches: Match[] = [
+      createMatch(
+        requirement(),
+        "met",
+        "[Node.js] Built atlas-manager's HTTP layer in Node.js.",
+      ),
+    ];
+    expect(computeRecommendation(matches, profile()).recommendedVariant).toBe(
+      computeRecommendation(
+        [
+          createMatch(
+            requirement(),
+            "met",
+            "Built atlas-manager's HTTP layer in Node.js.",
+          ),
+        ],
+        profile(),
+      ).recommendedVariant,
+    );
+  });
+
+  it("resolves a quote carrying the leading list dash as well", () => {
+    const matches: Match[] = [
+      createMatch(
+        requirement(),
+        "met",
+        "- [Node.js] Built atlas-manager's HTTP layer in Node.js.",
+      ),
+    ];
+    expect(
+      computeRecommendation(matches, profile()).recommendedVariant,
+    ).not.toBeNull();
+  });
+
+  it("strips the tag out of highlights, so tagged and untagged forms dedupe", () => {
+    const matches: Match[] = [
+      createMatch(
+        requirement(),
+        "met",
+        "[Node.js] Built atlas-manager's HTTP layer in Node.js.",
+      ),
+      createMatch(
+        requirement({ text: "Another requirement" }),
+        "met",
+        "Built atlas-manager's HTTP layer in Node.js.",
+      ),
+    ];
+    expect(computeRecommendation(matches, profile()).highlights).toEqual([
+      "Built atlas-manager's HTTP layer in Node.js.",
+    ]);
   });
 });

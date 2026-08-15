@@ -87,6 +87,7 @@ async function main(): Promise<void> {
   const adapter = process.env.SCORER_ADAPTER ?? "api";
   let ask: (prompt: string) => Promise<string>;
   let ollamaClient: OllamaClient | undefined;
+  let openRouterClient: OpenRouterClient | undefined;
 
   if (adapter === "ollama") {
     ollamaClient = new OllamaClient({
@@ -105,14 +106,14 @@ async function main(): Promise<void> {
       process.exitCode = 1;
       return;
     }
-    const client = new OpenRouterClient({
+    openRouterClient = new OpenRouterClient({
       apiKey,
       model,
       ...(process.env.LLM_BASE_URL
         ? { baseUrl: process.env.LLM_BASE_URL }
         : {}),
     });
-    ask = client.complete.bind(client);
+    ask = openRouterClient.complete.bind(openRouterClient);
   } else {
     console.error(
       `SCORER_ADAPTER=${adapter} is not a calibratable adapter (use "api" or "ollama").`,
@@ -181,6 +182,23 @@ async function main(): Promise<void> {
     console.log(
       `| ${verdict} | ${m.support} | ${formatPercent(m.precision)} | ${formatPercent(m.recall)} |`,
     );
+  }
+
+  // What this configuration actually cost. A calibration run is repeated once
+  // per configuration by design, so an unnoticed inefficiency is paid for
+  // every time — printing it is what keeps that visible (ADR-014). A high
+  // `cached` share is the prompt-cache reorder in `b-v2` doing its job; a
+  // near-zero one means the shared prefix is not being reused.
+  if (openRouterClient) {
+    const usage = openRouterClient.getUsage();
+    const cachedShare =
+      usage.promptTokens > 0
+        ? `${((usage.cachedPromptTokens / usage.promptTokens) * 100).toFixed(0)}%`
+        : "n/a";
+    console.log(
+      `\nModel calls: ${usage.calls} | prompt tokens: ${usage.promptTokens} (cached ${usage.cachedPromptTokens}, ${cachedShare}) | completion tokens: ${usage.completionTokens}`,
+    );
+    console.log(`Run cost: $${usage.costUsd.toFixed(4)}`);
   }
 }
 

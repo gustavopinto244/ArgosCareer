@@ -7,6 +7,24 @@ export interface Requirement {
   readonly text: string;
   readonly category: string;
   readonly weight: RequirementWeight;
+  /**
+   * Whether a candidate could demonstrate this with anything beyond their own
+   * assertion (ADR-015). A personal trait — "proatividade", "dinamismo",
+   * "trabalho em equipe" — is `false`: no portfolio can evidence it, stage B
+   * can only answer `not_met`, and counting that as a failure measures
+   * whether a CV contains the word rather than whether the candidate fits.
+   *
+   * Optional so requirements cached under `a-v2`, which predates the field,
+   * still parse. Absent means verifiable: the conservative reading, since
+   * excluding a requirement removes it from scoring entirely.
+   */
+  readonly verifiable?: boolean;
+}
+
+/** ADR-015: absent means verifiable, so legacy cached requirements keep
+ * counting exactly as they did before the field existed. */
+export function isVerifiable(requirement: Requirement): boolean {
+  return requirement.verifiable !== false;
 }
 
 export interface Match {

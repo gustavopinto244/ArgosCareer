@@ -17,6 +17,7 @@ function baseCriteria(overrides: Partial<Criteria> = {}): Criteria {
       security: ["segurança"],
       automation: ["automação"],
     },
+    trackExclusions: { dev: [], security: [], automation: [] },
     trackWeights: { dev: 1.0, security: 1.0, automation: 0.7, unknown: 0.4 },
     scoring: {
       weights: { mandatory: 65, desirable: 20, trackAlignment: 15 },

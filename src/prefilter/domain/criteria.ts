@@ -47,6 +47,24 @@ export const CriteriaSchema = z.object({
    * before it is worth LLM budget. */
   minKeywordAdherence: z.number().int().nonnegative().default(0),
   tracks: z.record(ProfileTrackSchema, z.array(z.string().min(1))),
+  /**
+   * Phrases that veto a track even when one of its keywords matched
+   * (ADR-015). Portuguese job titles overload exactly the two words this
+   * project cares most about: "desenvolvimento" is packaging, product,
+   * people or business development far more often than software, and
+   * "segurança do trabalho" is occupational safety, a different profession
+   * from information security. Both scored 1.0 track alignment on postings
+   * hand-labelled 0.
+   *
+   * Optional and defaulted so an existing criteria file stays valid.
+   */
+  trackExclusions: z
+    .object({
+      dev: z.array(z.string().min(1)).default([]),
+      security: z.array(z.string().min(1)).default([]),
+      automation: z.array(z.string().min(1)).default([]),
+    })
+    .default({ dev: [], security: [], automation: [] }),
   trackWeights: z.object({
     dev: z.number(),
     security: z.number(),

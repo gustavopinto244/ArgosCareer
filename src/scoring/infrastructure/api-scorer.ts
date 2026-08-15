@@ -31,7 +31,11 @@ export class ApiScorer implements ScorerPort {
   ) {}
 
   async score(posting: Posting, profileHash: string): Promise<ScoreResult> {
-    const tracks = classifyTrack(posting.title, this.criteria.tracks);
+    const tracks = classifyTrack(
+      posting.title,
+      this.criteria.tracks,
+      this.criteria.trackExclusions,
+    );
 
     const extraction = await this.extractor.extract(posting);
     if (!extraction.ok) {

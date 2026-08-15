@@ -177,8 +177,11 @@ declares**.
 **Do not ask the LLM for the score.** Three stages instead:
 
 - **A — Extraction** _(LLM)_: reads the posting, returns structured requirements
-  `{text, category, weight}` where `weight ∈ {blocking, mandatory, desirable}`.
-  Cacheable per posting.
+  `{text, category, weight, verifiable}` where
+  `weight ∈ {blocking, mandatory, desirable}`. Cacheable per posting.
+  `verifiable: false` marks a requirement no portfolio can evidence
+  ("proatividade", "dinamismo") — stage C excludes those from scoring entirely
+  rather than counting them as failures (ADR-015).
 - **B — Matching** _(LLM)_: per requirement, `met | partial | not_met`, **with a
   mandatory evidence quote** from the profile. `evidence: null` forces `not_met`.
   Cacheable per (posting, profile hash).

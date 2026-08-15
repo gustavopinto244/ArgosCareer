@@ -25,7 +25,11 @@ export class StubScorer implements ScorerPort {
   constructor(private readonly criteria: Criteria) {}
 
   async score(posting: Posting, _profileHash: string): Promise<ScoreResult> {
-    const tracks = classifyTrack(posting.title, this.criteria.tracks);
+    const tracks = classifyTrack(
+      posting.title,
+      this.criteria.tracks,
+      this.criteria.trackExclusions,
+    );
     const outcome = computeScore([], tracks, buildScoringConfig(this.criteria));
 
     return Promise.resolve({ ok: true, ...outcome, ...EMPTY_RECOMMENDATION });

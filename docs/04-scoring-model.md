@@ -161,6 +161,29 @@ The cap is a cap, not an assignment: a posting scoring 20 that also fails a
 blocking requirement stays at 20. The cap only prevents a blocked posting from
 outranking a viable one.
 
+### Only verifiable requirements are scored
+
+Added in M7 after the first calibration run measured the cost of not having it
+(ADR-015). A requirement is **verifiable** when a candidate could demonstrate
+it with something beyond their own assertion — a degree, a period, a language
+level, a tool, a project, a certificate, a location, an availability. It is
+**not verifiable** when it is a personal quality that exists only as a claim
+about oneself: "proatividade", "dinamismo", "boa comunicação", "trabalho em
+equipe".
+
+28% of the mandatory and blocking requirements in the first labelled corpus
+were the second kind. Stage B can only answer `not_met` on them — ADR-005
+forbids inventing a quote — so each counted as a zero against the 65 points
+`mandatoryCoverage` carries. The penalty fell hardest on the best postings: a
+DevOps internship hand-scored 100 computed 40.1, with 5 of its 10 mandatory
+requirements being traits.
+
+Stage A marks the flag; stage C excludes non-verifiable requirements from both
+coverages, from blocking-failure detection, and from `criticalGaps`. They are
+excluded, **not counted as met** — "nobody can evidence this" is not "the
+candidate satisfies this", and awarding the points would inflate every posting
+equally while hiding the requirement.
+
 ### Low confidence
 
 Not in the original design; added because the formula has an edge case that would
@@ -174,11 +197,18 @@ genuinely matches. The empty-category rule is right in general and wrong here.
 The fix keeps the rule and adds a confidence signal:
 
 ```
-if (extractedRequirements.length < minExtractedRequirements) {
+if (verifiableRequirements.length < minExtractedRequirements) {
   lowConfidence = true;
   verdict = min(verdict, "review");   // never "apply"
 }
 ```
+
+It counts **verifiable** requirements, not all of them (ADR-015). Excluding
+traits from coverage would otherwise open a second hole in the same wall: a
+posting asking only for "proatividade, dinamismo e boa comunicação" leaves
+every category empty, takes coverage 1 from the empty-category rule, and would
+top the ranking while looking well-specified. Judged on what is checkable, it
+is precisely the vague posting this rule exists to catch.
 
 A vague posting therefore surfaces for manual review with the reason attached,
 instead of either topping the ranking or being silently discarded. The threshold

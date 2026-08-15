@@ -65,3 +65,59 @@ describe("classifyTrack", () => {
     expect(computeTrackAlignment(matched, trackWeights)).toBe(1.0);
   });
 });
+
+/**
+ * ADR-015. "Desenvolvimento" and "segurança" are the two most overloaded
+ * words in Brazilian job titles, and both produced 1.0 track alignment on
+ * postings hand-labelled 0 in the first calibration run.
+ */
+describe("classifyTrack — exclusions veto a keyword match", () => {
+  const tracks = {
+    dev: ["desenvolvimento", "backend"],
+    security: ["segurança"],
+    automation: ["devops"],
+  };
+  const exclusions = {
+    dev: ["desenvolvimento de embalagens"],
+    security: ["segurança do trabalho"],
+    automation: [],
+  };
+
+  it("rejects packaging development despite the 'desenvolvimento' keyword", () => {
+    expect(
+      classifyTrack(
+        "ESTAGIÁRIO DE DESENVOLVIMENTO DE EMBALAGENS",
+        tracks,
+        exclusions,
+      ),
+    ).toEqual([]);
+  });
+
+  it("rejects occupational safety despite the 'segurança' keyword", () => {
+    expect(
+      classifyTrack(
+        "ESTÁGIO - SEGURANÇA DO TRABALHO - JPGA",
+        tracks,
+        exclusions,
+      ),
+    ).toEqual([]);
+  });
+
+  it("still classifies genuine software development", () => {
+    expect(
+      classifyTrack("Estágio em Desenvolvimento Backend", tracks, exclusions),
+    ).toEqual(["dev"]);
+  });
+
+  it("matches exclusions regardless of accents and casing", () => {
+    expect(
+      classifyTrack("estagio de seguranca do trabalho", tracks, exclusions),
+    ).toEqual([]);
+  });
+
+  it("treats omitted exclusions as no exclusions at all", () => {
+    expect(classifyTrack("Estágio em Desenvolvimento Backend", tracks)).toEqual(
+      ["dev"],
+    );
+  });
+});

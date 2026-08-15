@@ -260,3 +260,102 @@ describe("computeScore — criticalGaps", () => {
     expect(outcome.criticalGaps).toEqual([]);
   });
 });
+
+/**
+ * ADR-015. Measured on the first 16 hand-labelled postings, 28% of all
+ * mandatory and blocking requirements were unfalsifiable self-description
+ * ("dinamismo", "proatividade"), and the effect was worst on the postings
+ * judged best by hand — the DevOps internship scored 40.1 against a hand
+ * score of 100 with 5 of its 10 mandatory requirements being traits.
+ */
+describe("computeScore — non-verifiable requirements (ADR-015)", () => {
+  function trait(weight: Requirement["weight"], text = "dinamismo") {
+    return { text, category: "soft_skill", weight, verifiable: false };
+  }
+
+  it("excludes a failed trait from mandatory coverage instead of scoring it zero", () => {
+    const withTrait = computeScore(
+      [
+        createMatch(requirement("mandatory"), "met", "evidence"),
+        createMatch(trait("mandatory"), "not_met", null),
+      ],
+      ["dev"],
+      baseConfig,
+    );
+    const withoutTrait = computeScore(
+      [createMatch(requirement("mandatory"), "met", "evidence")],
+      ["dev"],
+      baseConfig,
+    );
+
+    expect(withTrait.breakdown.mandatoryCoverage).toBe(1);
+    expect(withTrait.score).toBe(withoutTrait.score);
+  });
+
+  it("does not let a trait marked blocking cap the score forever", () => {
+    const outcome = computeScore(
+      [
+        createMatch(requirement("mandatory"), "met", "evidence"),
+        createMatch(trait("blocking", "ter compromisso"), "not_met", null),
+      ],
+      ["dev"],
+      baseConfig,
+    );
+
+    expect(outcome.blockingFailure).toBeNull();
+    expect(outcome.score).toBeGreaterThan(baseConfig.blockingCapScore);
+  });
+
+  it("still caps on a verifiable blocking failure", () => {
+    const outcome = computeScore(
+      [
+        createMatch(requirement("blocking"), "not_met", null),
+        createMatch(trait("mandatory"), "not_met", null),
+      ],
+      ["dev"],
+      baseConfig,
+    );
+
+    expect(outcome.blockingFailure).not.toBeNull();
+    expect(outcome.score).toBeLessThanOrEqual(baseConfig.blockingCapScore);
+  });
+
+  it("keeps traits out of the study backlog", () => {
+    const outcome = computeScore(
+      [
+        createMatch(requirement("mandatory", "Docker"), "not_met", null),
+        createMatch(trait("mandatory"), "not_met", null),
+      ],
+      ["dev"],
+      baseConfig,
+    );
+
+    expect(outcome.criticalGaps.map((r) => r.text)).toEqual(["Docker"]);
+  });
+
+  it("flags a posting made only of traits as lowConfidence rather than scoring it top", () => {
+    const outcome = computeScore(
+      [
+        createMatch(trait("mandatory", "proatividade"), "not_met", null),
+        createMatch(trait("mandatory", "dinamismo"), "not_met", null),
+        createMatch(trait("mandatory", "boa comunicação"), "not_met", null),
+        createMatch(trait("mandatory", "trabalho em equipe"), "not_met", null),
+      ],
+      ["dev"],
+      baseConfig,
+    );
+
+    expect(outcome.lowConfidence).toBe(true);
+    expect(outcome.verdict).not.toBe("apply");
+  });
+
+  it("treats a requirement with no verifiable field as verifiable (legacy cache)", () => {
+    const outcome = computeScore(
+      [createMatch(requirement("mandatory"), "not_met", null)],
+      ["dev"],
+      baseConfig,
+    );
+
+    expect(outcome.breakdown.mandatoryCoverage).toBe(0);
+  });
+});
