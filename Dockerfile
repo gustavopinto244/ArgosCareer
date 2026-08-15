@@ -1,7 +1,8 @@
 # Multi-stage: build with devDependencies and a compiler toolchain, ship
-# only the production node_modules and compiled dist/. No exposed ports —
-# this is a headless batch service (CLAUDE.md §4), not an HTTP server;
-# M9 is what adds one.
+# only the production node_modules and compiled dist/. M9 adds an HTTP API
+# (Hermes, on a different machine, reaches it over Tailscale) — the actual
+# host binding lives in compose.production.yaml, not here; EXPOSE below is
+# documentation only.
 
 FROM node:22-alpine AS build
 
@@ -39,5 +40,7 @@ COPY config/criteria.yaml ./config/criteria.yaml
 # config/profile.yaml (gitignored, personal — ADR-004) and .env are never
 # baked into the image; compose.production.yaml mounts/injects them at
 # runtime. data/ (the SQLite database) is a named volume, not a layer.
+
+EXPOSE 3000
 
 CMD ["node", "dist/main.js"]

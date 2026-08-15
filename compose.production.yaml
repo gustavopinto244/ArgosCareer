@@ -1,7 +1,15 @@
 name: argos-career
 
-# Headless batch service — no ports. Scheduling (ADR-009) runs inside the
-# process via @nestjs/schedule; there is nothing to reach over HTTP until M9.
+# Scheduling (ADR-009) runs inside the process via @nestjs/schedule — the
+# HTTP API (M9, ADR-017) is a second, independent reason to run: Hermes,
+# on a different machine, reaching in over Tailscale.
+#
+# The port is published bound to Atlas's Tailscale interface IP
+# (${ATLAS_TAILSCALE_IP}, from .env — a re-keyed Tailscale identity changes
+# it, so it is never hardcoded), never to 0.0.0.0. A second, independent
+# control on top of ApiKeyGuard and UFW: even if either is ever
+# misconfigured, the port itself is not bound to a publicly reachable
+# interface.
 #
 # Manual backup/restore (npm run backup / npm run restore) run from a plain
 # host-side checkout, not through this container — scripts/ and the tsx
@@ -16,6 +24,8 @@ services:
     container_name: argos-career
     restart: unless-stopped
     env_file: .env
+    ports:
+      - "${ATLAS_TAILSCALE_IP}:${API_PORT:-3000}:${API_PORT:-3000}"
     volumes:
       - argos-data:/app/data
       - argos-backups:/app/backups
