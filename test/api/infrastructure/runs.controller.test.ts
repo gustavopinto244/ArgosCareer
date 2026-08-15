@@ -7,29 +7,82 @@ import { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import request from "supertest";
 import { ApiModule } from "../../../src/api/infrastructure/api.module";
+import { COLLECTOR } from "../../../src/api/infrastructure/collector.provider";
+import { NOTIFIER } from "../../../src/api/infrastructure/notifier.provider";
+import { Digest } from "../../../src/delivery/domain/digest";
+import {
+  NotifierPort,
+  NotifyResult,
+} from "../../../src/delivery/domain/ports/notifier.port";
 import {
   createDatabase,
   Db,
   runMigrations,
 } from "../../../src/persistence/infrastructure/db";
 import { RunsRepository } from "../../../src/persistence/infrastructure/runs-repository";
+import {
+  CollectionResult,
+  CollectorPort,
+} from "../../../src/posting/domain/ports/collector.port";
 
 const API_KEY = "test-api-key-for-suite";
+
+/**
+ * No real Gupy request in this suite — `COLLECTOR` is overridden with this
+ * fake for every test (`docs/07-testing-strategy.md`: no real network call).
+ */
+class FakeCollector implements CollectorPort {
+  readonly calls: unknown[] = [];
+
+  async collect(criteria: unknown): Promise<CollectionResult> {
+    this.calls.push(criteria);
+    return { source: "fake", postings: [], collectedAt: new Date() };
+  }
+}
+
+/** No real Telegram request in this suite — `NOTIFIER` is overridden with
+ * this fake for every test, same reasoning as `FakeCollector`. */
+class FakeNotifier implements NotifierPort {
+  readonly sent: Digest[] = [];
+
+  async notify(digest: Digest): Promise<NotifyResult> {
+    this.sent.push(digest);
+    return { ok: true };
+  }
+}
 
 let dir: string;
 let app: INestApplication;
 let db: Db;
 let env: NodeJS.ProcessEnv;
+let fakeCollector: FakeCollector;
+let fakeNotifier: FakeNotifier;
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "argos-api-"));
   env = { ...process.env };
   process.env.DATABASE_PATH = join(dir, "argos.db");
   process.env.API_KEY = API_KEY;
+  // /runs/deliver's buildScorer reads this — stub needs no LLM_API_KEY/model
+  // and makes no network call, matching the fakes above for the same reason.
+  process.env.SCORER_ADAPTER = "stub";
+  // config/profile.yaml is gitignored and may not exist in this environment
+  // at all; the committed, fictional example is schema-valid and enough for
+  // this suite (CRITERIA_PATH stays at its default — config/criteria.yaml
+  // is committed and real).
+  process.env.PROFILE_PATH = "./config/profile.example.yaml";
+
+  fakeCollector = new FakeCollector();
+  fakeNotifier = new FakeNotifier();
 
   const moduleRef = await Test.createTestingModule({
     imports: [ApiModule],
-  }).compile();
+  })
+    .overrideProvider(COLLECTOR)
+    .useValue(fakeCollector)
+    .overrideProvider(NOTIFIER)
+    .useValue(fakeNotifier)
+    .compile();
   app = moduleRef.createNestApplication();
   await app.init();
 
@@ -169,5 +222,90 @@ describe("GET /runs/:runId", () => {
     await auth(request(app.getHttpServer()).get("/runs/does-not-exist")).expect(
       404,
     );
+  });
+});
+
+describe("POST /runs/collect", () => {
+  it("requires auth, same as every other route", async () => {
+    await request(app.getHttpServer()).post("/runs/collect").expect(401);
+  });
+
+  it("calls the injected collector, not a real one, and writes a real run", async () => {
+    const res = await auth(
+      request(app.getHttpServer()).post("/runs/collect").send({}),
+    );
+
+    expect(res.status).toBe(201);
+    expect(fakeCollector.calls).toHaveLength(1);
+    const repo = new RunsRepository(db);
+    const run = repo.findById(res.body.runId);
+    expect(run?.kind).toBe("collect");
+    expect(run?.outcome).toBe("success");
+  });
+
+  it("passes the request body through to the collector as collect params", async () => {
+    await auth(
+      request(app.getHttpServer())
+        .post("/runs/collect")
+        .send({ jobName: "estagio", city: "Rio de Janeiro", maxResults: 10 }),
+    );
+
+    expect(fakeCollector.calls[0]).toEqual({
+      jobName: "estagio",
+      city: "Rio de Janeiro",
+      maxResults: 10,
+    });
+  });
+});
+
+describe("POST /runs/dedup", () => {
+  it("requires auth", async () => {
+    await request(app.getHttpServer()).post("/runs/dedup").expect(401);
+  });
+
+  it("runs dedup and writes a real run", async () => {
+    const res = await auth(request(app.getHttpServer()).post("/runs/dedup"));
+
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({
+      runId: expect.any(String),
+      scanned: 0,
+      markedDuplicate: 0,
+    });
+    const repo = new RunsRepository(db);
+    expect(repo.findById(res.body.runId)?.kind).toBe("dedup");
+  });
+});
+
+describe("POST /runs/deliver", () => {
+  it("requires auth", async () => {
+    await request(app.getHttpServer()).post("/runs/deliver").expect(401);
+  });
+
+  it("scores with the stub scorer, sends through the injected notifier, writes a real run", async () => {
+    const res = await auth(request(app.getHttpServer()).post("/runs/deliver"));
+
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({
+      runId: expect.any(String),
+      filtered: 0,
+      scored: 0,
+      delivered: 0,
+    });
+    // Even a digest with nothing to report is still sent — the run summary
+    // itself is the everyday signal (docs/08-observability.md).
+    expect(fakeNotifier.sent).toHaveLength(1);
+    const repo = new RunsRepository(db);
+    const run = repo.findById(res.body.runId);
+    expect(run?.kind).toBe("scoreAndDeliver");
+    expect(run?.outcome).toBe("success");
+  });
+
+  it("fails with a named reason when the scorer is misconfigured", async () => {
+    process.env.SCORER_ADAPTER = "api"; // no LLM_API_KEY set
+    const res = await auth(request(app.getHttpServer()).post("/runs/deliver"));
+
+    expect(res.status).toBe(400);
+    expect(fakeNotifier.sent).toHaveLength(0);
   });
 });
