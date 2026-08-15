@@ -18,11 +18,28 @@ titleBlocklist:
   - III
   - IV
 
+# Matched as whole words, not substrings (src/prefilter/domain/title-match.ts,
+# ADR-011 Amendment 1) — so every inflected form that should match has to be
+# listed here rather than inferred. Plurals are real: "Banco de Talentos - TI
+# - Estágios e Efetivos" is a genuine posting that "estágio" alone misses.
+#
+# "intern" is deliberately NOT here as a bare term: as a whole word it is
+# correct, but it was the substring that used to match "interna", "internos"
+# and "International" and let non-internships through. "internship" is the
+# unambiguous English form.
 titleRequired:
   - estágio
+  - estágios
   - estagiário
+  - estagiários
+  - estagiária
+  - estagiárias
   - intern
+  - interns
+  - internship
+  - internships
   - trainee
+  - trainees
 
 location:
   # Rio de Janeiro and metropolitan region (CLAUDE.md §6).
