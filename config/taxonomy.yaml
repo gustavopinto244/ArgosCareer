@@ -1,0 +1,131 @@
+# config/taxonomy.yaml
+#
+# Committed, not gitignored — global market data, no personal information
+# (ADR-004). Canonical skill names with aliases so a Stage A extraction's
+# free-text requirement ("Postgres", "PostgreSQL", "postgre") counts as one
+# skill when M10 aggregates the corpus, rather than three.
+#
+# Deliberately NOT derived from config/profile.yaml's competency aliases:
+# the profile only names what is already known, so aliases sourced from it
+# would only ever measure the candidate's own vocabulary back at them
+# (docs/01-vision-and-scope.md). This list is scoped to the project's
+# search profile (backend dev, information security, infra/automation —
+# CLAUDE.md §1) and grows as gap analysis surfaces real postings mentioning
+# a term not yet here — it is expected to be incomplete on day one.
+#
+# Schema: src/market/domain/taxonomy.ts
+
+skills:
+  # --- Languages -------------------------------------------------------------
+  - canonical: TypeScript
+    aliases: [TS]
+  - canonical: JavaScript
+    aliases: [JS]
+  - canonical: Python
+    aliases: []
+  - canonical: Java
+    aliases: []
+  - canonical: Go
+    aliases: [Golang]
+  - canonical: .NET
+    aliases: ["C Sharp", "DotNet"]
+  - canonical: PHP
+    aliases: []
+  - canonical: SQL
+    aliases: []
+
+  # --- Backend runtimes and frameworks ----------------------------------------
+  - canonical: Node.js
+    aliases: [NodeJS, Node]
+  - canonical: Express
+    aliases: ["Express.js"]
+  - canonical: NestJS
+    aliases: [Nest]
+  - canonical: Spring
+    aliases: ["Spring Boot"]
+  - canonical: Django
+    aliases: []
+  - canonical: Flask
+    aliases: []
+  - canonical: FastAPI
+    aliases: []
+  - canonical: Laravel
+    aliases: []
+
+  # --- Databases and storage ---------------------------------------------------
+  - canonical: PostgreSQL
+    aliases: [Postgres, Postgre]
+  - canonical: MySQL
+    aliases: []
+  - canonical: MongoDB
+    aliases: [Mongo]
+  - canonical: Redis
+    aliases: []
+  - canonical: SQLite
+    aliases: []
+
+  # --- APIs and integration ----------------------------------------------------
+  - canonical: REST
+    aliases: ["REST API", "RESTful"]
+  - canonical: GraphQL
+    aliases: []
+  - canonical: gRPC
+    aliases: []
+
+  # --- Testing -----------------------------------------------------------------
+  - canonical: Automated testing
+    aliases:
+      ["unit testing", "unit tests", "testes unitários", "testes automatizados"]
+  - canonical: Vitest
+    aliases: []
+  - canonical: Jest
+    aliases: []
+
+  # --- Containers, cloud and infrastructure ------------------------------------
+  - canonical: Docker
+    aliases: [containers, container, Dockerfile]
+  - canonical: Kubernetes
+    aliases: [K8s]
+  - canonical: AWS
+    aliases: ["Amazon Web Services"]
+  - canonical: GCP
+    aliases: ["Google Cloud", "Google Cloud Platform"]
+  - canonical: Azure
+    aliases: []
+  - canonical: CI/CD
+    aliases:
+      ["continuous integration", "continuous deployment", "GitHub Actions"]
+  - canonical: Terraform
+    aliases: []
+  - canonical: Linux
+    aliases: ["Linux server administration", "Ubuntu Server", Ubuntu]
+  - canonical: Nginx
+    aliases: []
+
+  # --- Security ------------------------------------------------------------------
+  - canonical: Firewall
+    aliases: [UFW, "intrusion prevention"]
+  - canonical: Fail2ban
+    aliases: []
+  - canonical: Penetration testing
+    aliases: ["pentest", "pentesting", "teste de invasão"]
+  - canonical: OWASP
+    aliases: ["OWASP Top 10"]
+  - canonical: SIEM
+    aliases: []
+  - canonical: Vulnerability assessment
+    aliases: ["análise de vulnerabilidades", "vulnerability scanning"]
+  - canonical: Cryptography
+    aliases: ["criptografia"]
+
+  # --- Version control and methodology --------------------------------------------
+  - canonical: Git
+    aliases: [GitHub, GitLab]
+  - canonical: Agile
+    aliases: [Scrum, Kanban]
+
+  # --- Architecture ------------------------------------------------------------
+  - canonical: Clean Architecture
+    aliases: ["arquitetura limpa"]
+  - canonical: Microservices
+    aliases: ["microsserviços", "microservices architecture"]
