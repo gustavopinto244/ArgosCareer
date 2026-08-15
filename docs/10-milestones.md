@@ -347,27 +347,60 @@ deliberate deferral with a stated reason, not a gap.
       boundary — real API spend and a real Telegram send, remotely
       triggerable by design, not a footgun left undocumented (ADR-017).
 
-## M10 — Market intelligence and gap analysis
+## M10 — Market intelligence and gap analysis ✅ (preliminary — thin real data, see below)
 
-Answers question 2: _what do I need to improve?_ Deliberately **after M7**, so
-that "relevant postings" means something calibrated — aggregating over an
-uncalibrated score produces a study plan built on noise.
+**Done.** Three PRs, in order: skill taxonomy → aggregate queries and gap
+analysis → study plan delivery (CLI, REST, MCP). Every criterion below is
+demonstrable now; real output is honestly thin for the same reason M7's
+calibration sample was — recorded below, not hidden behind a big corpus
+number that would overstate what the model has actually seen.
 
-- [ ] **Skill taxonomy**: canonical skill names with aliases, so `Postgres`,
-      `PostgreSQL` and `postgre` count as one. Global, not derived from the
-      profile — profile aliases would only count what is already known
-- [ ] Taxonomy applied retrospectively over stored stage A extractions, without
-      re-running extraction (ADR-007 makes this possible)
-- [ ] Aggregate queries over the corpus: most requested technologies, recurring
-      competencies, typical experience level, regions, companies hiring most,
+- [x] **Skill taxonomy**: `config/taxonomy.yaml`, canonical skill names with
+      aliases, so `Postgres`, `PostgreSQL` and `postgre` count as one.
+      Global, not derived from the profile — profile aliases would only
+      count what is already known (`docs/01-vision-and-scope.md`)
+- [x] Taxonomy applied retrospectively over stored stage A extractions,
+      without re-running extraction (ADR-007) — `findSkills` runs over
+      `extractions.requirements` as already cached, no LLM call
+- [x] Aggregate queries over the corpus: most requested technologies,
+      recurring competencies (one ranked list — the taxonomy already spans
+      both), typical experience level, regions, companies hiring most,
       work-mode distribution
-- [ ] **Gap analysis**: skills frequent in high-compatibility postings and weak
-      or absent in the profile, ranked by frequency — "PostgreSQL appears in 58%
-      of relevant postings"
-- [ ] Time series over `firstSeenAt`, answering how the market moved
-- [ ] Study plan ordered by measured demand, delivered to Telegram on request
-- [ ] Aggregates computed over the **whole corpus including rejected postings**
-      (`05-domain-model.md`)
+- [x] **Gap analysis**: skills frequent in high-compatibility postings
+      (verdict `review`/`apply`) and absent from the profile, ranked by
+      frequency
+- [x] Time series over `firstSeenAt` (weekly buckets), answering how the
+      market moved
+- [x] Study plan ordered by measured demand, delivered to Telegram on
+      request — `argos studyplan`, `POST /market/study-plan`,
+      `get_study_plan` MCP tool, three surfaces over one `executeStudyPlan`
+- [x] Aggregates computed over the **whole corpus including rejected
+      postings** (`05-domain-model.md`) — `findActive()` only excludes
+      similarity-duplicates (ADR-010), never pre-filter rejects or
+      `discard`-verdict postings
+
+**Real run, 2026-08-15, against the local corpus** (`npm run cli --
+studyplan`, real Telegram send): **380 active postings** (523 collected,
+143 marked similarity-duplicates), **16 with a current-prompt-version
+Stage A extraction**, **1 high-compatibility posting** (verdict `review` or
+`apply`), **1 gap identified**. The 16-extraction figure is the same M7
+calibration sample this project has cited since M7 — Stage A still has not
+run at volume in production (M9's close-out: the one real nightly `deliver`
+cycle found 0 postings past the pre-filter), so market/gap-analysis output
+today reflects a 16-posting sample, not the 380-posting corpus. This is not
+a code gap: `aggregateCorpus`/`gapAnalysis` are correct over whatever data
+exists, and correctly report `extractedCount`/`highCompatibilityCount`
+alongside every percentage so a reader can see exactly how thin the sample
+is rather than being shown a misleadingly precise-looking number. Growing
+past this is a data problem — either the pre-filter/criteria let more
+postings reach Stage A, or a deliberate broader extraction pass is run —
+not a code problem this milestone leaves unsolved.
+
+No ADR: neither of the two candidate decisions flagged in planning (reusing
+the `review`/`apply` verdict cutoff for "high-compatibility," and the
+taxonomy's whole-word/substring matching strategy) turned out to be costly
+to reverse — both are pure-function implementation choices with nothing
+persisted that would need migrating if either changed.
 
 ## After M6 — additional sources
 
