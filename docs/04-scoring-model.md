@@ -98,9 +98,9 @@ statusWeight = { met: 1.0, partial: 0.5, not_met: 0.0 }
 
 coverage(category) = Σ statusWeight(match.status) / count(requirements in category)
 
-score = 65 × mandatoryCoverage
+score = 35 × mandatoryCoverage
       + 20 × desirableCoverage
-      + 15 × trackAlignment
+      + 45 × trackAlignment
 ```
 
 **Empty category → coverage 1.** A posting that lists no "nice to haves" must not
@@ -115,8 +115,8 @@ requirements happen to be SQL and Python is a good match and a bad target.
 
 **The posting's track is classified deterministically in the pre-filter**, by
 keyword against a configured table, before any LLM call. Stage C then reads a
-weight for that track. This keeps stage C a pure function and keeps a 15-point
-term out of a small model's judgment.
+weight for that track. This keeps stage C a pure function and keeps a
+45-point term (ADR-026; 15 originally) out of a small model's judgment.
 
 ```
 trackAlignment = trackWeights[posting.track]
@@ -136,9 +136,10 @@ priorities (`01-vision-and-scope.md`). Equal priority is expressed here, in
 configuration, rather than as a branch in the formula.
 
 `unknown: 0.4` is deliberately non-zero. A posting the classifier cannot place
-is a classifier gap, not a bad posting, and zeroing 15 points on a classification
-failure would hide the gap by pushing the posting out of the digest. A run
-producing many `unknown` postings is a signal to extend the keyword table.
+is a classifier gap, not a bad posting, and zeroing this term's contribution
+(45 points, ADR-026) on a classification failure would hide the gap by
+pushing the posting out of the digest. A run producing many `unknown`
+postings is a signal to extend the keyword table.
 
 **When a posting matches more than one track, the highest weight wins.** A
 "DevSecOps intern" posting hitting both `security` and `automation` scores 1.0.
@@ -149,13 +150,19 @@ page. Changing search strategy — adding a track, reweighting one — must not
 require touching the application (principle 3).
 
 **`unknownTrackCapScore` bounds what an unknown track can still score, even
-at 100% coverage (ADR-025).** `trackAlignment` is only 15% of the formula, so
-even at its floor (`unknown: 0.4`) an unknown-track posting can still reach
-91 if both coverages hit 1.0 — which a generic, easy-to-satisfy posting
-(customer service, HR, sales) does routinely, not because it is a strong
-match but because it demands little of substance. Measured on a real digest:
-an HR "Benefícios" internship scored 91, `apply`, ahead of genuine dev
-postings at 63, `review`.
+at 100% coverage (ADR-025).** Even at `trackAlignment`'s floor
+(`unknown: 0.4`), an unknown-track posting can still reach 73 today
+(`35 + 20 + 45×0.4`) if both coverages hit 1.0 — which a generic,
+easy-to-satisfy posting (customer service, HR, sales) does routinely, not
+because it is a strong match but because it demands little of substance.
+
+The incident that motivated the cap was measured at **91**, under the
+weights in effect that day (`65 / 20 / 15`, before ADR-026 moved to
+`35 / 20 / 45`): an HR "Benefícios" internship scored 91, `apply`, ahead of
+genuine dev postings at 63, `review`. The cap has held at **50** through
+both changes — it clamps the final score regardless of how the weighted
+terms produced it, so ADR-026's reweighting changed the ceiling this cap
+has to catch (91 → 73) without requiring the cap itself to move.
 
 ```
 if (tracks.length === 0) score = min(score, unknownTrackCapScore)
@@ -214,9 +221,11 @@ Not in the original design; added because the formula has an edge case that woul
 otherwise put the worst postings at the top of the digest.
 
 A posting that lists no mandatory requirements gets `mandatoryCoverage = 1` from
-the empty-category rule, and therefore scores 65 + 20 + trackAlignment ≈ 85 →
-`apply`. So a vague, contentless posting outranks a detailed one that the profile
-genuinely matches. The empty-category rule is right in general and wrong here.
+the empty-category rule, and therefore scores 35 + 20 + trackAlignment — up to
+100 on a matched track (ADR-026 raised this ceiling further; it was ≈85 under
+the original 65/20/15 weights) → `apply`. So a vague, contentless posting
+outranks a detailed one that the profile genuinely matches. The empty-category
+rule is right in general and wrong here.
 
 The fix keeps the rule and adds a confidence signal:
 

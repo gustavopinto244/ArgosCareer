@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted
+Accepted — amended 2026-08-16, see
+[Amendment 1](#amendment-1--2026-08-16-the-illustrative-weights-are-stale)
 
 ## Date
 
@@ -101,3 +102,16 @@ Full formula, thresholds and calibration protocol: `docs/04-scoring-model.md`.
   which is the second reason `lowConfidence` exists.
 - Reversing this is cheap in code and expensive in credibility: the calibration
   table published in the README would no longer mean anything.
+
+## Amendment 1 — 2026-08-16: the illustrative weights are stale
+
+The Decision section above states `score = 65 × mandatoryCoverage +
+20 × desirableCoverage + 15 × trackAlignment` as a worked example. Those
+specific numbers changed to `35 / 20 / 45` in
+[ADR-026](026-recalibrate-toward-track-fit.md) — the architectural decision
+this ADR records (score computed in code, not the LLM; three stages; the
+mandatory evidence quote) is untouched, only the illustrative numbers are
+no longer current. `docs/04-scoring-model.md` and `config/criteria.yaml`
+are the authoritative current values, as this ADR's Decision section already
+said before this amendment ("Full formula, thresholds and calibration
+protocol: `docs/04-scoring-model.md`").

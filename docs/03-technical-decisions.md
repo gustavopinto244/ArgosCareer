@@ -37,6 +37,7 @@ revisited on its merits instead of re-argued from memory.
 | [023](adr/023-manual-discard-independent-of-scoring.md)         | A manual, permanent discard, independent of scoring and profile          | Accepted | 2026-08-16 |
 | [024](adr/024-scheduler-overlap-guard.md)                       | An in-process guard against two runs of the same kind overlapping        | Accepted | 2026-08-16 |
 | [025](adr/025-unknown-track-score-cap.md)                       | Cap the score of a posting that matches no configured track              | Accepted | 2026-08-16 |
+| [026](adr/026-recalibrate-toward-track-fit.md)                  | Recalibrate the score weights toward track fit                           | Accepted | 2026-08-16 |
 
 ## When an ADR is required
 
