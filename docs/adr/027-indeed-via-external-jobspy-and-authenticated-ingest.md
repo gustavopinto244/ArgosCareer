@@ -2,11 +2,12 @@
 
 ## Status
 
-Accepted. Receiving side (schema, normalizer, ingest endpoint) implemented
-and tested. The host-side collector (`collectors/indeed/`) exists as of
-ADR-028 — see that ADR for the polite-collector exception it required —
-but had not yet been deployed and scheduled on Atlas as of this line being
-written; see `collectors/indeed/README.md` for that step.
+Accepted and live. Receiving side (schema, normalizer, ingest endpoint)
+implemented and tested. The host-side collector (`collectors/indeed/`,
+ADR-028 for the polite-collector exception it required) is built, deployed
+and scheduled on Atlas — first real run 2026-08-16: 50 postings scraped,
+47 normalized, 44 new, landed in the corpus indistinguishable from a
+Gupy/CIEE `collect` run in `GET /runs`. Twice-daily timer active.
 
 ## Date
 
@@ -146,13 +147,13 @@ inventing new ones. `argos-career`'s container privilege posture is
 unchanged — still no Docker socket, still nothing beyond outbound HTTP and
 the Telegram/OpenRouter calls it already makes.
 
-**Not done at the time this ADR was written, since resolved:** the host
-script itself (`collectors/indeed/`) and its `robots.txt`/User-Agent
-question (ADR-028). Still genuinely open: actually **deploying and
-scheduling** it on Atlas — building the image, installing the systemd
-units, confirming a real run lands postings in production — is a deploy
-step, not a code change, and is tracked as such rather than claimed here
-before it happens.
+**Fully live as of 2026-08-16.** The `robots.txt`/User-Agent question
+(ADR-028), the host script, and its deployment and scheduling on Atlas are
+all done — see the Status line above for the first real run's numbers. One
+follow-up bug the first real run found and fixed:
+`docs/11-known-issues.md`-worthy in shape, resolved directly instead —
+Express's default 100kb JSON body limit rejected a real 50-posting batch
+outright (`src/http-config.ts`'s `JSON_BODY_LIMIT`, now 10mb).
 
 **A real, accepted gap:** the host script itself, wherever it runs, still
 needs a way to authenticate — the same `API_KEY` every other caller of this

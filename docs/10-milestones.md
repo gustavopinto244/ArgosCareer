@@ -410,12 +410,11 @@ persisted that would need migrating if either changed.
 
 One per pull request, each meeting the M3 criteria:
 
-- [ ] Google Jobs / Indeed via ephemeral `--rm` Python container — **receiving
-      side and host script done** (ADR-027: schema, normalizer,
-      authenticated ingest endpoint; ADR-028: the `jobspy` polite-collector
-      exception; `collectors/indeed/`: the script, Dockerfile, systemd
-      units); **not yet deployed and scheduled on Atlas** — see
-      `collectors/indeed/README.md`
+- [x] Google Jobs / Indeed via ephemeral `--rm` Python container — **Indeed
+      only, live on Atlas since 2026-08-16** (ADR-027, ADR-028;
+      `collectors/indeed/`, systemd-scheduled twice daily). Google Jobs
+      itself was probed and returned zero results — not pursued, not
+      implemented
 - [ ] LinkedIn, public visitor endpoints only — **never authenticated with a
       personal session or cookies** (`CLAUDE.md` §3)
 - [ ] `N8nCollector` behind `CollectorPort`, with one long-tail source proving
