@@ -2,23 +2,43 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 import { createPosting } from "../../src/posting/domain/posting";
 import {
   createDatabase,
+  Db,
   runMigrations,
 } from "../../src/persistence/infrastructure/db";
+import { postings } from "../../src/persistence/infrastructure/schema";
 import { PostingsRepository } from "../../src/persistence/infrastructure/postings-repository";
 
 // Real temporary SQLite files, not a mock (docs/07-testing-strategy.md).
 let dir: string;
+let db: Db;
 let repository: PostingsRepository;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "argos-postings-"));
-  const db = createDatabase(join(dir, "argos.db"));
+  db = createDatabase(join(dir, "argos.db"));
   runMigrations(db);
   repository = new PostingsRepository(db);
 });
+
+/** `discardedAt`/`discardReason` are deliberately absent from the `Posting`
+ * domain type (persistence-only concept) — reads the raw row directly so a
+ * test can assert on them without the repository exposing a getter nobody
+ * else needs. */
+function rawDiscardFields(fingerprint: string) {
+  const row = db
+    .select({
+      discardedAt: postings.discardedAt,
+      discardReason: postings.discardReason,
+    })
+    .from(postings)
+    .where(eq(postings.fingerprint, fingerprint))
+    .get();
+  return row ?? null;
+}
 
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
@@ -198,5 +218,82 @@ describe("PostingsRepository.findUnnotified / markNotified", () => {
     const unnotified = repository.findUnnotified();
     expect(unnotified).toHaveLength(1);
     expect(unnotified[0]?.fingerprint).toBe(a.posting.fingerprint);
+  });
+});
+
+describe("PostingsRepository.discard", () => {
+  it("returns true and records the timestamp and reason", () => {
+    const { posting: stored } = repository.upsert(posting());
+    const discardedAt = new Date("2026-08-16T12:00:00Z");
+
+    const found = repository.discard(
+      stored.fingerprint,
+      discardedAt,
+      "Not interested in fintech",
+    );
+
+    expect(found).toBe(true);
+    expect(rawDiscardFields(stored.fingerprint)).toEqual({
+      discardedAt,
+      discardReason: "Not interested in fintech",
+    });
+  });
+
+  it("returns false for a fingerprint that does not exist", () => {
+    const found = repository.discard("no-such-fingerprint", new Date(), null);
+    expect(found).toBe(false);
+  });
+
+  it("excludes a discarded posting from findUnnotified", () => {
+    const { posting: stored } = repository.upsert(posting());
+    repository.discard(stored.fingerprint, new Date(), null);
+
+    expect(repository.findUnnotified()).toHaveLength(0);
+  });
+
+  it("is write-once: a second call does not overwrite the original timestamp or reason", () => {
+    const { posting: stored } = repository.upsert(posting());
+    const first = new Date("2026-08-16T12:00:00Z");
+    const second = new Date("2026-08-20T00:00:00Z");
+
+    repository.discard(stored.fingerprint, first, "original reason");
+    const secondCall = repository.discard(
+      stored.fingerprint,
+      second,
+      "different reason",
+    );
+
+    // The second call still reports "posting exists" (true), distinct from
+    // a genuinely missing fingerprint, but must not have moved the
+    // timestamp or replaced the reason — there is no "re-discard".
+    expect(secondCall).toBe(true);
+    expect(rawDiscardFields(stored.fingerprint)).toEqual({
+      discardedAt: first,
+      discardReason: "original reason",
+    });
+  });
+
+  it("re-upserting a discarded posting does not un-discard it", () => {
+    // Same "write once survives re-collection" discipline notifiedAt and
+    // firstSeenAt already follow — a source re-listing the same posting
+    // must not silently resurrect a human's decision.
+    const { posting: stored } = repository.upsert(posting());
+    repository.discard(stored.fingerprint, new Date(), null);
+
+    repository.upsert(posting({ workMode: "remote" }));
+
+    expect(repository.findUnnotified()).toHaveLength(0);
+  });
+
+  it("does not affect an unrelated posting", () => {
+    const a = repository.upsert(posting({ sourceId: "1" }));
+    const b = repository.upsert(
+      posting({ sourceId: "2", title: "Estágio Frontend" }),
+    );
+    repository.discard(a.posting.fingerprint, new Date(), null);
+
+    const unnotified = repository.findUnnotified();
+    expect(unnotified).toHaveLength(1);
+    expect(unnotified[0]?.fingerprint).toBe(b.posting.fingerprint);
   });
 });

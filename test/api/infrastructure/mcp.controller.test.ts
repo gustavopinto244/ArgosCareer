@@ -23,11 +23,13 @@ import {
   Db,
   runMigrations,
 } from "../../../src/persistence/infrastructure/db";
+import { PostingsRepository } from "../../../src/persistence/infrastructure/postings-repository";
 import { RunsRepository } from "../../../src/persistence/infrastructure/runs-repository";
 import {
   CollectionResult,
   CollectorPort,
 } from "../../../src/posting/domain/ports/collector.port";
+import { createPosting } from "../../../src/posting/domain/posting";
 
 const API_KEY = "test-api-key-for-mcp-suite";
 
@@ -111,11 +113,12 @@ function textOf(result: Awaited<ReturnType<Client["callTool"]>>): unknown {
 }
 
 describe("MCP server", () => {
-  it("lists all seven tools", async () => {
+  it("lists all eight tools", async () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual(
       [
+        "discard_posting",
         "get_health",
         "get_run",
         "get_study_plan",
@@ -205,5 +208,43 @@ describe("MCP server", () => {
     const body = textOf(result) as { corpusSize: number; delivered: boolean };
     expect(body.corpusSize).toBe(0);
     expect(body.delivered).toBe(true);
+  });
+
+  it("discard_posting removes a posting from the digest pool — the Hermes-facing path", async () => {
+    const repo = new PostingsRepository(db);
+    const { posting } = repo.upsert(
+      createPosting({
+        source: "gupy",
+        sourceId: "1",
+        company: "Empresa X",
+        title: "Estágio Backend",
+        location: { kind: "known", city: "Rio de Janeiro" },
+        workMode: "hybrid",
+        collectedAt: new Date(),
+        firstSeenAt: new Date(),
+        lastSeenAt: new Date(),
+        rawPayload: {},
+      }),
+    );
+    expect(repo.findUnnotified()).toHaveLength(1);
+
+    const result = await client.callTool({
+      name: "discard_posting",
+      arguments: { fingerprint: posting.fingerprint, reason: "not a fit" },
+    });
+
+    expect(textOf(result)).toEqual({
+      fingerprint: posting.fingerprint,
+      discarded: true,
+    });
+    expect(repo.findUnnotified()).toHaveLength(0);
+  });
+
+  it("discard_posting returns an isError result for an unknown fingerprint", async () => {
+    const result = await client.callTool({
+      name: "discard_posting",
+      arguments: { fingerprint: "does-not-exist" },
+    });
+    expect(result.isError).toBe(true);
   });
 });

@@ -34,6 +34,7 @@ revisited on its merits instead of re-argued from memory.
 | [020](adr/020-lift-the-memory-budget-allow-a-browser.md)        | Lift the memory budget, allow a headless browser                         | Accepted | 2026-08-16 |
 | [021](adr/021-enable-ciee-and-tighten-location-leniency.md)     | Enable CIEE, and tighten the location leniency rule                      | Accepted | 2026-08-16 |
 | [022](adr/022-bounded-concurrency-in-stage-b.md)                | Run Stage B's requirement calls concurrently, bounded, warming the cache | Accepted | 2026-08-16 |
+| [023](adr/023-manual-discard-independent-of-scoring.md)         | A manual, permanent discard, independent of scoring and profile          | Accepted | 2026-08-16 |
 
 ## When an ADR is required
 
