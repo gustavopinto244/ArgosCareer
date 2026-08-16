@@ -51,3 +51,52 @@ describe("findSkills", () => {
     expect(findSkills("   ", TAXONOMY)).toEqual([]);
   });
 });
+
+describe("findSkills — casamento por palavra inteira (auditoria A-1)", () => {
+  const TAX: Taxonomy = {
+    skills: [
+      { canonical: "REST", aliases: ["REST API"] },
+      { canonical: "Node.js", aliases: ["NodeJS"] },
+      { canonical: "CI/CD", aliases: ["continuous integration"] },
+      { canonical: "Go", aliases: ["Golang"] },
+    ],
+  };
+
+  it("does not match REST inside an unrelated word", () => {
+    // The bug this replaced: "REST API" normalizes to "rest api", which is a
+    // substring of "fo|rest api|ario", so a beekeeping internship counted as
+    // REST experience.
+    expect(findSkills("Estágio em manejo de forest apiario", TAX)).toEqual([]);
+  });
+
+  it("still matches a term that genuinely stands as its own word — the accepted limit", () => {
+    // Not a false positive to fix: "rest" really is a whole word here. A
+    // whole-word matcher cannot tell this apart from the architectural style,
+    // and pretending otherwise would need an NLP pipeline this project has no
+    // reason to carry.
+    expect(findSkills("Vaga na floresta: rest apiario", TAX)).toEqual(["REST"]);
+  });
+
+  it("still matches the alias standing on its own", () => {
+    expect(findSkills("Estágio Backend com REST API", TAX)).toEqual(["REST"]);
+  });
+
+  it("gains punctuation-insensitivity the old matcher lacked", () => {
+    // Neither spelling was listed twice in the taxonomy; the matcher handles it.
+    expect(findSkills("Experiência com Node.js", TAX)).toEqual(["Node.js"]);
+    expect(findSkills("Experiência com NodeJS", TAX)).toEqual(["Node.js"]);
+    expect(findSkills("Pipeline CI/CD", TAX)).toEqual(["CI/CD"]);
+  });
+
+  it("matches a multi-word alias as a phrase, not a substring", () => {
+    expect(findSkills("Conhecimento em continuous integration", TAX)).toEqual([
+      "CI/CD",
+    ]);
+    expect(findSkills("discontinuous integration testing", TAX)).toEqual([]);
+  });
+
+  it("keeps a short alias from matching inside a longer word", () => {
+    expect(findSkills("São Gonçalo, Rio de Janeiro", TAX)).toEqual([]);
+    expect(findSkills("Experiência com Go", TAX)).toEqual(["Go"]);
+  });
+});
