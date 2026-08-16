@@ -10,6 +10,7 @@
  *   argos dedup [--similarity-threshold <0-1>] [--window-days <n>] [--reset]
  *   argos deliver
  *   argos studyplan
+ *   argos discard <fingerprint> [--reason <text>]
  */
 import { parseArgs } from "node:util";
 import { CollectorPort } from "../posting/domain/ports/collector.port";
@@ -654,6 +655,42 @@ async function studyPlanCommand(): Promise<void> {
   );
 }
 
+/**
+ * Records a human decision — never surfaced again, regardless of a later
+ * profile edit or re-scoring — the same core `PostingsRepository.discard`
+ * `PostingsService` (M9's REST/MCP surface) calls, so the CLI and Hermes
+ * can never implement "discard this posting" two different ways.
+ */
+function discardCommand(args: string[]): void {
+  const { positionals, values } = parseArgs({
+    args,
+    options: { reason: { type: "string" } },
+    allowPositionals: true,
+  });
+
+  const fingerprint = positionals[0];
+  if (!fingerprint) {
+    console.error("Usage: argos discard <fingerprint> [--reason <text>]");
+    process.exitCode = 1;
+    return;
+  }
+
+  const db = openDatabase();
+  const found = new PostingsRepository(db).discard(
+    fingerprint,
+    new Date(),
+    values.reason ?? null,
+  );
+
+  if (!found) {
+    console.error(`discard: no posting with fingerprint ${fingerprint}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  console.log(`discard: ${fingerprint} will never be surfaced again`);
+}
+
 async function main(): Promise<void> {
   const [, , command, ...rest] = process.argv;
 
@@ -670,8 +707,13 @@ async function main(): Promise<void> {
     case "studyplan":
       await studyPlanCommand();
       break;
+    case "discard":
+      discardCommand(rest);
+      break;
     default:
-      console.error("Usage: argos <collect|dedup|deliver|studyplan> [options]");
+      console.error(
+        "Usage: argos <collect|dedup|deliver|studyplan|discard> [options]",
+      );
       process.exitCode = 1;
   }
 }

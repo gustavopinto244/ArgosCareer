@@ -216,6 +216,11 @@ export class PostingsRepository {
         and(
           isNull(postings.duplicateOfFingerprint),
           isNull(postings.notifiedAt),
+          // A human's "no" is permanent (see `discard` below) — the digest
+          // candidate pool excludes it the same way it excludes a posting
+          // already sent, not because scoring said no but because a person
+          // already did.
+          isNull(postings.discardedAt),
         ),
       )
       .all();
@@ -228,6 +233,53 @@ export class PostingsRepository {
       .set({ notifiedAt })
       .where(eq(postings.fingerprint, fingerprint))
       .run();
+  }
+
+  /**
+   * Records a human decision that this posting is never worth surfacing
+   * again — the manual counterpart to the scored `discard` verdict, and
+   * independent of it: this survives a profile edit or a re-run under a new
+   * prompt version, neither of which touches it, because it was never a
+   * function of either.
+   *
+   * Write-once, same discipline as `notifiedAt`: a fingerprint already
+   * discarded is left untouched (both timestamp and reason) rather than
+   * overwritten by a second call. There is deliberately no "undiscard" —
+   * reversing a bad call means clearing the column directly against the
+   * database, a rare enough operation that a dedicated code path for it
+   * would be unused machinery, not a feature.
+   *
+   * Returns `false` when the fingerprint does not exist, so a caller (the
+   * CLI, the API) can report "no such posting" instead of silently
+   * succeeding on a typo.
+   */
+  discard(
+    fingerprint: string,
+    discardedAt: Date,
+    reason: string | null,
+  ): boolean {
+    const result = this.db
+      .update(postings)
+      .set({ discardedAt, discardReason: reason })
+      .where(
+        and(
+          eq(postings.fingerprint, fingerprint),
+          isNull(postings.discardedAt),
+        ),
+      )
+      .run();
+    if (result.changes > 0) return true;
+    // `changes === 0` is ambiguous between "no such fingerprint" and
+    // "already discarded" — the write-once guard above produces the same
+    // count either way. Distinguish them with a second, cheap read so the
+    // caller's 404 is accurate: reported as "not found" only when the row
+    // genuinely does not exist, not when it silently no-ops on a repeat call.
+    const exists = this.db
+      .select({ fingerprint: postings.fingerprint })
+      .from(postings)
+      .where(eq(postings.fingerprint, fingerprint))
+      .get();
+    return exists !== undefined;
   }
 
   /**

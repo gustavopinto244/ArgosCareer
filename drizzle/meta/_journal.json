@@ -64,6 +64,13 @@
       "when": 1786827021274,
       "tag": "0008_previous_garia",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1786882806620,
+      "tag": "0009_real_magus",
+      "breakpoints": true
     }
   ]
 }

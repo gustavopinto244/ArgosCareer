@@ -12,6 +12,8 @@ import { MarketController } from "./market.controller";
 import { MarketService } from "./market.service";
 import { McpController } from "./mcp.controller";
 import { notifierProvider } from "./notifier.provider";
+import { PostingsController } from "./postings.controller";
+import { PostingsService } from "./postings.service";
 import { RunsController } from "./runs.controller";
 import { RunsService } from "./runs.service";
 
@@ -28,7 +30,12 @@ import { RunsService } from "./runs.service";
  * network call in the suite.
  */
 @Module({
-  controllers: [RunsController, MarketController, McpController],
+  controllers: [
+    RunsController,
+    MarketController,
+    PostingsController,
+    McpController,
+  ],
   providers: [
     databaseProvider,
     collectorProvider,
@@ -38,6 +45,7 @@ import { RunsService } from "./runs.service";
     taxonomyProvider,
     RunsService,
     MarketService,
+    PostingsService,
     { provide: APP_GUARD, useClass: ApiKeyGuard },
   ],
 })

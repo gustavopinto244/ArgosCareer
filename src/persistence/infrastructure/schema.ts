@@ -64,6 +64,16 @@ export const postings = sqliteTable(
     // notified is never notified again (ADR-007, M6), the same "write once"
     // discipline firstSeenAt already follows.
     notifiedAt: integer("notified_at", { mode: "timestamp_ms" }),
+    // A human decision, not a scoring outcome (M9 feedback, pulled forward
+    // early) — a posting rejected here stays rejected across a profile
+    // change, unlike `discard` the *verdict*, which is derived from
+    // scoring and re-evaluates every time the profile does. Null means "no
+    // decision"; once set, never cleared by anything but another explicit
+    // discard call — there is no "undiscard" (see `postings-repository.ts`).
+    discardedAt: integer("discarded_at", { mode: "timestamp_ms" }),
+    // Free text, optional. Not read by any scoring or matching path — a
+    // note for the human who made the call, not an input to the pipeline.
+    discardReason: text("discard_reason"),
   },
   (table) => [
     uniqueIndex("postings_fingerprint_unique").on(table.fingerprint),

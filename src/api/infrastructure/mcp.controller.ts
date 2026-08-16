@@ -9,6 +9,7 @@ import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { MarketService } from "./market.service";
+import { PostingsService } from "./postings.service";
 import { RunsService } from "./runs.service";
 
 function jsonResult(value: unknown): CallToolResult {
@@ -56,6 +57,7 @@ export class McpController {
   constructor(
     private readonly runs: RunsService,
     private readonly market: MarketService,
+    private readonly postings: PostingsService,
   ) {}
 
   @Post()
@@ -163,6 +165,23 @@ export class McpController {
           "LLM budget.",
       },
       () => safely(() => this.market.studyPlan()),
+    );
+
+    server.registerTool(
+      "discard_posting",
+      {
+        description:
+          "Permanently reject a posting by fingerprint — a human decision, " +
+          "never surfaced again regardless of future profile changes or " +
+          "re-scoring. There is no undo tool; reversing it means a direct " +
+          "database edit.",
+        inputSchema: {
+          fingerprint: z.string().describe("The posting's fingerprint."),
+          reason: z.string().optional().describe("Optional free-text note."),
+        },
+      },
+      ({ fingerprint, reason }) =>
+        safely(() => this.postings.discard(fingerprint, reason)),
     );
   }
 }
