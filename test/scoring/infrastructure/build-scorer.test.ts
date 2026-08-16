@@ -43,6 +43,7 @@ function criteria(): Criteria {
     location: { cities: [], allowRemote: true },
     blockedCompanies: [],
     minKeywordAdherence: 0,
+    maxAgeDays: null,
     tracks: { dev: ["backend"], security: [], automation: [] },
     trackExclusions: { dev: [], security: [], automation: [] },
     schedule: {

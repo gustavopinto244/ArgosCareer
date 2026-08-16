@@ -10,6 +10,7 @@ export type PreFilterRejectionReason =
   | "title_missing_required_term"
   | "company_blocked"
   | "expired"
+  | "too_old"
   | "location_not_allowed"
   | "insufficient_keyword_adherence";
 
@@ -36,6 +37,41 @@ function isCompanyBlocked(posting: Posting, criteria: Criteria): boolean {
 function isExpired(posting: Posting, now: Date): boolean {
   if (posting.applicationDeadline === null) return false;
   return posting.applicationDeadline.getTime() < now.getTime();
+}
+
+/**
+ * Age, measured from `publishedAt` when the source states one and
+ * `firstSeenAt` when it does not.
+ *
+ * The fallback is the whole point, and it is a deliberate departure from
+ * ADR-011's leniency rule ("an unknown axis passes") — see Amendment 4.
+ * Under that rule this
+ * check would be inert exactly where it is most needed: 100% of CIEE's 2,079
+ * active postings and 78% of Gupy's 558 carry no `publishedAt` at all
+ * (measured 2026-08-16), so an age rule reading only that field would go on
+ * paying to score an unbounded, permanently undated corpus.
+ *
+ * `firstSeenAt` is a weaker claim than `publishedAt` — it is when *this
+ * system* first saw the posting, not when the company published it — and it
+ * systematically *under*-estimates age, since a posting collected today may
+ * have been open for months. That asymmetry is why the fallback is safe to
+ * use here: it errs toward scoring a posting that should have been skipped,
+ * never toward skipping a fresh one.
+ *
+ * The consequence worth knowing: a bulk import gives thousands of postings
+ * the same `firstSeenAt`, so this rule does nothing for them until the window
+ * passes and then drops them all at once. It is a bound on growth, not a
+ * retroactive cleanup.
+ */
+function isTooOld(
+  posting: Posting,
+  maxAgeDays: number | null,
+  now: Date,
+): boolean {
+  if (maxAgeDays === null) return false;
+  const reference = posting.publishedAt ?? posting.firstSeenAt;
+  const ageMs = now.getTime() - reference.getTime();
+  return ageMs > maxAgeDays * 24 * 60 * 60 * 1000;
 }
 
 /**
@@ -89,10 +125,10 @@ function hasMinKeywordAdherence(
  * Deterministic rules, run before any LLM call (docs/02-architecture.md).
  * Short-circuits at the first failing rule — every rejection records exactly
  * one reason. Rule order runs cheapest and most decisive first: two string
- * checks, then two single-field checks, then location (which reads two
- * fields), then keyword adherence (which scans the whole profile keyword
- * list) last, since it is the most expensive check and the least likely to
- * matter once everything before it has already run.
+ * checks, then three single-field checks (company, deadline, age), then
+ * location (which reads two fields), then keyword adherence (which scans the
+ * whole profile keyword list) last, since it is the most expensive check and
+ * the least likely to matter once everything before it has already run.
  */
 export function applyPreFilter(
   posting: Posting,
@@ -121,6 +157,11 @@ export function applyPreFilter(
   }
   if (isExpired(posting, now)) {
     return { passed: false, reason: "expired", tracks };
+  }
+  // After `expired`, before `location`: both are single-field date checks and
+  // a closed posting is the more decisive rejection of the two.
+  if (isTooOld(posting, criteria.maxAgeDays, now)) {
+    return { passed: false, reason: "too_old", tracks };
   }
   if (!isLocationAllowed(posting, criteria)) {
     return { passed: false, reason: "location_not_allowed", tracks };

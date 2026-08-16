@@ -7,6 +7,8 @@ Accepted — amended 2026-08-15, see
 and
 [Amendment 2](#amendment-2--2026-08-15-track-keywords-match-whole-words-too)
 and [Amendment 3](#amendment-3--2026-08-16-location-leniency-becomes-asymmetric)
+and
+[Amendment 4](#amendment-4--2026-08-16-an-age-limit-deliberately-exempted-from-the-unknown-axis-rule)
 
 ## Date
 
@@ -265,3 +267,30 @@ happens does not outweigh positive evidence about _where_ it happens.
 **Measured before changing it:** of the 1,700 postings passing only because
 of the old rule, **1,700 were CIEE and 0 were Gupy**. Tightening cost nothing
 that was working. Pass count went 1,987 → 291. Full reasoning in ADR-021.
+
+## Amendment 4 — 2026-08-16: an age limit, deliberately exempted from the unknown-axis rule
+
+`criteria.scoring.maxAgeDays` (`pre-filter.ts`'s `isTooOld`) rejects a
+posting older than a configured number of days, before it reaches Stage A.
+It is a second departure from this ADR's own default — the first being
+Amendment 3 — and for the same shape of reason: the unknown-axis rule
+protects against punishing a source for saying less, not against an
+unbounded corpus.
+
+**Age has no unknown state to be lenient about.** Every posting has a
+`firstSeenAt`; this system always knows when it first saw one, even when the
+source states no `publishedAt`. So the rule reads `publishedAt ??
+firstSeenAt` rather than passing on absence — falling back to a weaker,
+same-direction fact instead of applying leniency to a genuinely missing one.
+`firstSeenAt` only ever _under_-estimates age (a posting collected today may
+have been open for months), so the fallback errs toward scoring something
+that should have been skipped, never toward skipping something fresh.
+
+**Consequence worth naming:** ADR-021's bulk CIEE import gives thousands of
+postings one shared `firstSeenAt`. This rule does nothing to them until that
+timestamp ages past the limit, then drops the whole batch at once. It bounds
+how old the corpus is allowed to get from a given point forward; it is not a
+retroactive cut to a backlog that already exists. Set to 7 in
+`criteria.yaml` at the same time this was written — see the comment there for
+the measurement behind that number, and ADR-022 for why a nightly cycle's
+wall-clock is worth protecting in the first place.
