@@ -32,10 +32,13 @@ LLM_MODEL=                # OpenRouter model slug, e.g. deepseek/deepseek-v4-fla
 N8N_WEBHOOK_URL=          # required when an n8n-backed source is enabled
 N8N_WEBHOOK_TOKEN=        # shared secret for that webhook
 DATABASE_PATH=            # default ./data/argos.db
-LOG_LEVEL=                # default info
 API_KEY=                  # required (M9) — Bearer token every HTTP route needs
 API_PORT=                 # default 3000 — Tailscale-bound at the compose level
 ATLAS_TAILSCALE_IP=       # compose-only (M9) — Atlas's `tailscale ip -4`, never read by the app
+CRITERIA_PATH=            # default ./config/criteria.yaml
+PROFILE_PATH=             # default ./config/profile.yaml
+TAXONOMY_PATH=            # default ./config/taxonomy.yaml
+BACKUPS_DIR=              # default ./backups
 ```
 
 `.env.example` carries every key with a fictional or empty value and a comment.
@@ -105,8 +108,8 @@ Rules:
 1. **Fail at startup, never lazily.** A configuration error must stop the process
    with a message naming the file and field — not surface three stages later as
    odd behavior.
-2. **No silent defaults for decisions.** A missing `LOG_LEVEL` defaults to
-   `info`. A missing `trackWeights` is an error. Defaulting a decision hides the
+2. **No silent defaults for decisions.** A missing `API_PORT` defaults to
+   `3000`. A missing `trackWeights` is an error. Defaulting a decision hides the
    fact that nobody made it.
 3. **Precedence: environment > file > built-in default.** One order, everywhere.
 4. **Secrets are never logged**, including at `debug`, and never included in an
