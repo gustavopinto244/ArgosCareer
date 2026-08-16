@@ -68,6 +68,7 @@ function criteria(): Criteria {
     blockedCompanies: [],
     minKeywordAdherence: 0,
     maxAgeDays: null,
+    undatedBacklogCutoverAt: null,
     tracks: { dev: ["backend"], security: [], automation: [] },
     trackExclusions: { dev: [], security: [], automation: [] },
     schedule: {

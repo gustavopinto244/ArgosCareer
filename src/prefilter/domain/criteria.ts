@@ -141,6 +141,27 @@ export const CriteriaSchema = z.object({
    * is worth keeping"; this answers "what is worth paying to score".
    */
   maxAgeDays: z.number().int().positive().nullable().default(null),
+  /**
+   * Business rule (ADR-011 Amendment 5): a posting with no `publishedAt`,
+   * first seen at or before this instant, is presumed already past
+   * `maxAgeDays` — unconditionally, regardless of the actual gap between
+   * `firstSeenAt` and now. `null` (the default) disables the rule.
+   *
+   * This does **not** backdate `firstSeenAt` itself — that field stays an
+   * honest record of when this system actually observed a posting
+   * (`docs/05-domain-model.md`), and a fabricated value would corrupt any
+   * later reader of it, M10's market analysis included. The cutover is a
+   * separate, explicit policy line instead: everything undated collected up
+   * to this point is presumed stale; anything undated collected *after* it
+   * — "entering" postings, from ongoing collection — gets the normal
+   * `maxAgeDays` grace period via `firstSeenAt`, same as before.
+   *
+   * Meant to be set once, to "now" at the moment this policy is adopted, and
+   * left in place — it is a permanent dividing line between "the backlog
+   * this rule was written to clear" and everything collected afterward, not
+   * a value that needs updating over time.
+   */
+  undatedBacklogCutoverAt: z.coerce.date().nullable().default(null),
   tracks: z.record(ProfileTrackSchema, z.array(z.string().min(1))),
   /**
    * Phrases that veto a track even when one of its keywords matched
