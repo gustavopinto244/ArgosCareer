@@ -3,8 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import "reflect-metadata";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { INestApplication } from "@nestjs/common";
+import { NestExpressApplication } from "@nestjs/platform-express";
 import { Test } from "@nestjs/testing";
+import { JSON_BODY_LIMIT } from "../../../src/http-config";
 import request from "supertest";
 import { ApiModule } from "../../../src/api/infrastructure/api.module";
 import { COLLECTOR } from "../../../src/api/infrastructure/collector.provider";
@@ -65,7 +66,7 @@ class FakeNotifier implements NotifierPort, TextNotifier {
 }
 
 let dir: string;
-let app: INestApplication;
+let app: NestExpressApplication;
 let db: Db;
 let env: NodeJS.ProcessEnv;
 let fakeCollector: FakeCollector;
@@ -107,7 +108,12 @@ beforeEach(async () => {
       },
     })
     .compile();
-  app = moduleRef.createNestApplication();
+  app = moduleRef.createNestApplication<NestExpressApplication>();
+  // Same limit `main.ts`'s real bootstrap applies (JSON_BODY_LIMIT) —
+  // applied here too so the suite's default 100kb body limit cannot hide a
+  // regression of the real one (the exact bug the Indeed collector's first
+  // production run hit — see the "large payload" test below).
+  app.useBodyParser("json", { limit: JSON_BODY_LIMIT });
   await app.init();
 
   // A second connection to the same file (safe under WAL — db.ts), used only
@@ -385,6 +391,29 @@ describe("POST /runs/collect/external (ADR-027)", () => {
 
     releaseFirst();
     await first;
+  });
+
+  it("accepts a batch well over Express's 100kb default — the Indeed collector's first real run hit this exact 413", async () => {
+    // A single real Indeed posting's description alone was enough to blow
+    // past the framework default; padding one field to ~300kb reproduces
+    // that with a self-contained fixture instead of a real large payload.
+    const bigDescription = "x".repeat(300_000);
+    const postings = Array.from({ length: 5 }, (_, i) => ({
+      sourceId: `in-${i}`,
+      payload: {
+        ...gupyPayload(i, "Estágio Grande", "Empresa Grande"),
+        description: bigDescription,
+      },
+    }));
+
+    const res = await auth(
+      request(app.getHttpServer())
+        .post("/runs/collect/external")
+        .send({ source: "gupy", postings }),
+    );
+
+    expect(res.status).not.toBe(413);
+    expect(res.status).toBe(201);
   });
 });
 

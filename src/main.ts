@@ -1,6 +1,8 @@
 import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
+import { NestExpressApplication } from "@nestjs/platform-express";
 import { AppModule } from "./app.module";
+import { JSON_BODY_LIMIT } from "./http-config";
 
 /**
  * M9: the process now listens — `ApiModule` (`src/api/infrastructure`) gives
@@ -15,8 +17,9 @@ import { AppModule } from "./app.module";
  * unchanged from M8, now covering the HTTP listener too.
  */
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
   app.enableShutdownHooks();
+  app.useBodyParser("json", { limit: JSON_BODY_LIMIT });
   const port = Number(process.env.API_PORT ?? 3000);
   await app.listen(port);
 }
