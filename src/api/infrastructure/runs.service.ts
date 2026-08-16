@@ -5,7 +5,14 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { executeCollect, executeDedup, executeDeliver } from "../../cli/main";
+import {
+  executeCollect,
+  executeDedup,
+  executeDeliver,
+  executeIngestExternal,
+  ExternalRawPosting,
+} from "../../cli/main";
+import { normalizerFor } from "../../posting/infrastructure/normalizer-registry";
 import { NotifierPort } from "../../delivery/domain/ports/notifier.port";
 import { Db } from "../../persistence/infrastructure/db";
 import {
@@ -176,6 +183,41 @@ export class RunsService {
     );
     if (!outcome.ok) {
       throw new ConflictException("scoreAndDeliver is already running");
+    }
+    return outcome.result;
+  }
+
+  /**
+   * ADR-027: the receiving end of a source that fetches outside this
+   * process entirely — jobspy, run from a host-side script in an ephemeral
+   * container, never inside this container (no Docker socket mounted here,
+   * deliberately). The host script is the only intended caller; there is no
+   * MCP tool for this, since it is a machine-to-machine ingest path, not a
+   * capability Hermes has any reason to invoke.
+   *
+   * Shares the `collect` `RunLock` kind with `collect()` above (ADR-024) —
+   * an external ingest racing the scheduled Gupy/CIEE cycle is the same
+   * class of problem that guard already exists for.
+   */
+  async ingestExternal(
+    source: string,
+    postings: readonly ExternalRawPosting[],
+  ) {
+    const normalize = normalizerFor(source);
+    if (!normalize) {
+      throw new BadRequestException(
+        `No normalizer registered for source "${source}"`,
+      );
+    }
+    if (postings.length === 0) {
+      throw new BadRequestException("'postings' must not be empty");
+    }
+
+    const outcome = await runExclusive(this.runLock, "collect", () =>
+      executeIngestExternal(this.db, source, normalize, postings),
+    );
+    if (!outcome.ok) {
+      throw new ConflictException("collect is already running");
     }
     return outcome.result;
   }

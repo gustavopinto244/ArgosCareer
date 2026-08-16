@@ -40,6 +40,6 @@ describe("normalizerFor", () => {
   });
 
   it("lists what this build can normalize", () => {
-    expect(registeredSources()).toEqual(["ciee", "gupy"]);
+    expect(registeredSources()).toEqual(["ciee", "gupy", "indeed"]);
   });
 });

@@ -1,5 +1,19 @@
-import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+} from "@nestjs/common";
+import { ExternalRawPosting } from "../../cli/main";
 import { CollectParams, RunsService } from "./runs.service";
+
+export interface IngestExternalBody {
+  readonly source?: string;
+  readonly postings?: readonly ExternalRawPosting[];
+}
 
 /**
  * Read-only run inspection and stage re-execution (M9), thin over
@@ -42,5 +56,23 @@ export class RunsController {
   @Post("runs/deliver")
   deliver() {
     return this.runs.deliver();
+  }
+
+  /**
+   * ADR-027 — the host-side jobspy script's only entry point. `source` and
+   * `postings` are required at this layer (a plain shape check, not a Zod
+   * schema — `RawPosting.payload` is deliberately `unknown`, validated
+   * tolerantly downstream by whichever normalizer the `source` resolves to,
+   * the same boundary Gupy/CIEE's own payloads cross).
+   */
+  @Post("runs/collect/external")
+  collectExternal(@Body() body: IngestExternalBody = {}) {
+    if (!body.source) {
+      throw new BadRequestException("'source' is required");
+    }
+    if (!Array.isArray(body.postings)) {
+      throw new BadRequestException("'postings' must be an array");
+    }
+    return this.runs.ingestExternal(body.source, body.postings);
   }
 }

@@ -410,7 +410,11 @@ persisted that would need migrating if either changed.
 
 One per pull request, each meeting the M3 criteria:
 
-- [ ] Google Jobs / Indeed via ephemeral `--rm` Python container
+- [ ] Google Jobs / Indeed via ephemeral `--rm` Python container — **receiving
+      side done** (ADR-027: schema, normalizer, authenticated ingest
+      endpoint, tested); **host-side `jobspy` script and its Atlas
+      scheduling not started** — nothing calls the endpoint in production
+      yet
 - [ ] LinkedIn, public visitor endpoints only — **never authenticated with a
       personal session or cookies** (`CLAUDE.md` §3)
 - [ ] `N8nCollector` behind `CollectorPort`, with one long-tail source proving

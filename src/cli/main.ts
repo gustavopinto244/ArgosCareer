@@ -15,7 +15,10 @@
 import { parseArgs } from "node:util";
 import { CollectorPort } from "../posting/domain/ports/collector.port";
 import { collectorFor } from "../posting/infrastructure/collector-registry";
-import { normalizerFor } from "../posting/infrastructure/normalizer-registry";
+import {
+  Normalizer,
+  normalizerFor,
+} from "../posting/infrastructure/normalizer-registry";
 import {
   DEFAULT_DEDUP_CONFIG,
   DedupConfig,
@@ -231,6 +234,104 @@ export async function executeCollect(
     isNew,
     alreadySeen,
     ...(firstError === undefined ? {} : { error: firstError }),
+  };
+}
+
+export interface ExternalRawPosting {
+  readonly sourceId: string;
+  readonly payload: unknown;
+}
+
+export interface IngestExternalOutcome {
+  readonly runId: string;
+  readonly collected: number;
+  readonly normalized: number;
+  readonly unnormalizable: number;
+  readonly isNew: number;
+  readonly alreadySeen: number;
+}
+
+/**
+ * The testable core of the external-ingest endpoint (ADR-027) — a source
+ * that fetches outside this process (jobspy, in an ephemeral container on
+ * Atlas's host, never inside the app container) and hands over already-
+ * fetched raw postings instead of this process making the network call
+ * itself. Everything after "already have the raw payloads" is identical to
+ * `executeCollect`'s inner loop: normalize, upsert, count.
+ *
+ * `normalize` is passed in already resolved, not looked up by `source`
+ * internally — the caller (`RunsService.ingestExternal`) rejects an
+ * unregistered source with 400 before a run row is even opened, since every
+ * item would be unnormalizable and starting a run to record that is not
+ * useful. This function's contract is simpler as a result: given a working
+ * normalizer, normalize and store this exact batch.
+ *
+ * No recency-window filtering (ADR-019/`executeCollect`'s `cutoff`) —
+ * deliberately out of scope for v1. The pre-filter's `maxAgeDays`
+ * (ADR-011 Amendment 4) already bounds what reaches the LLM regardless of
+ * which stage a posting entered through, so skipping the window here costs
+ * extra storage of an old posting, never extra LLM spend — see ADR-027's
+ * consequences.
+ *
+ * Bookkeeping matches `executeCollect`/`executeDedup`: the run row closes
+ * as `failed` before a throw is re-raised, never left open (#49).
+ */
+export async function executeIngestExternal(
+  db: Db,
+  source: string,
+  normalize: Normalizer,
+  postings: readonly ExternalRawPosting[],
+  now: () => Date = () => new Date(),
+): Promise<IngestExternalOutcome> {
+  const postingsRepo = new PostingsRepository(db);
+  const runsRepo = new RunsRepository(db);
+  const runId = runsRepo.start("collect", now());
+
+  let normalized = 0;
+  let unnormalizable = 0;
+  let isNew = 0;
+  let alreadySeen = 0;
+
+  try {
+    const collectedAt = now();
+    for (const raw of postings) {
+      const posting = normalize(
+        { source, sourceId: raw.sourceId, payload: raw.payload },
+        collectedAt,
+      );
+      if (!posting) {
+        unnormalizable += 1;
+        continue;
+      }
+      normalized += 1;
+      const { wasNew } = postingsRepo.upsert(posting);
+      if (wasNew) isNew += 1;
+      else alreadySeen += 1;
+    }
+  } catch (cause) {
+    runsRepo.finish(runId, now(), "failed", {
+      collectedCount: postings.length,
+      normalizedCount: normalized,
+      newCount: isNew,
+      alreadySeenCount: alreadySeen,
+    });
+    throw cause;
+  }
+
+  runsRepo.finish(runId, now(), "success", {
+    collectedCount: postings.length,
+    normalizedCount: normalized,
+    newCount: isNew,
+    alreadySeenCount: alreadySeen,
+  });
+
+  return {
+    runId,
+    collected: postings.length,
+    normalized,
+    unnormalizable,
+    isNew,
+    alreadySeen,
   };
 }
 
