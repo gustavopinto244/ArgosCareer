@@ -24,6 +24,18 @@ export const ScoringConfigSchema = z.object({
   }),
   minExtractedRequirements: z.number().int().nonnegative(),
   blockingCapScore: z.number(),
+  /**
+   * How many stage B requirement calls may be in flight at once (ADR-022).
+   * Defaulted, not required, so a criteria file written before this existed
+   * keeps working — the same backward-compatibility discipline the rest of
+   * this schema uses.
+   *
+   * Not a Stage C input, unlike everything above it: this changes how long
+   * scoring takes and nothing about what it produces. It lives here because
+   * it is an operational dial that must be turnable without a deploy, which
+   * is what `config/criteria.yaml` is for.
+   */
+  stageBConcurrency: z.number().int().positive().default(8),
 });
 
 /**

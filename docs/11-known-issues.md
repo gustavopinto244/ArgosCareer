@@ -33,7 +33,27 @@ Opened 2026-08-16, after the incident recorded in
 
 ## A1 — Scoring the backlog takes ~18 hours
 
-**Status:** open · **Found:** 2026-08-16, measuring the fix for #49
+**Status:** fixed by ADR-022, pending measurement on a real run ·
+**Found:** 2026-08-16, measuring the fix for #49
+
+> **Resolution.** Stage B now issues its requirement calls concurrently,
+> bounded by `scoring.stageBConcurrency` (default 8), with the first call of
+> each posting issued alone to warm ADR-013's cached prefix.
+>
+> Measured on the same posting, same 25 requirements, cache-busted so both
+> arms really call the model: **146.9 s → 10.2 s, a 14.4× speedup**, and cost
+> fell rather than rose. Full reasoning, the measurement's caveats, and why
+> batching was rejected for now, in
+> [ADR-022](adr/022-bounded-concurrency-in-stage-b.md).
+>
+> **The backlog is now ~4–6 h, not ~18 h — but not the 2–3 h first guessed,
+> because the bottleneck moved rather than disappeared.** See A3. This entry
+> stays open until a real run replaces the extrapolation with a number.
+>
+> One correction to what this entry originally said: it claimed bounded
+> concurrency "changes scoring behaviour". It does not. Same prompt per
+> requirement, same isolation, same cache keys, same answers — only the
+> waiting overlaps. Batching is the option that changes behaviour.
 
 Stage B issues one sequential model call **per requirement**. One real posting
 measured end to end against `deepseek/deepseek-v4-flash-0731`:
@@ -53,16 +73,41 @@ window the model runs in" stops being true.
 The 71% cache hit rate says ADR-013's static-prefix design is working, so the
 remaining time is latency × 26 round trips, not prompt size.
 
-**Resolving it** means one of: bounded concurrency across stage B's
-requirements; batching all requirements for a posting into a single call; or
-capping postings per run and draining across nights. The first two change
-scoring behaviour and both need an ADR — batching in particular changes what
-the model sees at once, which is exactly the variable M7's calibration
-protocol says to move one at a time. Deliberately not done inside an incident
-fix.
-
 **Related:** A2 — an 18-hour run and a scheduler with no overlap guard are
-only compatible by luck.
+only compatible by luck. Concurrency shortens the run; it does not add the
+guard, and A2 stays open.
+
+**Also related:** concurrency makes HTTP 429 reachable where sequential calls
+never approached a rate limit, and `OpenRouterClient` folds a non-2xx into the
+retry budget instead of backing off. Same shape as B3. Not triggered yet;
+noted so it is not a surprise if it is.
+
+---
+
+## A3 — Stage A is now the pipeline's bottleneck
+
+**Status:** open · **Found:** 2026-08-16, measuring ADR-022
+
+With Stage B down to ~10 s per posting, the dominant cost is Stage A: one call
+per posting, emitting the entire requirement list as JSON, which is the
+largest completion the pipeline produces. Back-solved from the ADR-022
+measurements it sits around **40–67 s per posting**, against ~10 s for all 25
+Stage B calls combined.
+
+Stage A cannot be split the way Stage B was — it is a single call, not a fan
+out. The levers are different ones:
+
+- **Concurrency across postings.** ADR-022 rejected this for Stage B (option
+  D) because Stage B already had a better axis. Stage A does not, so the
+  reasoning that rejected it does not carry over and it should be
+  re-evaluated on its own terms.
+- **A smaller completion.** Much of Stage A's output is requirement text
+  copied near-verbatim from the posting. Whether it needs to be is a prompt
+  question, and a prompt change means a new version and recalibration.
+
+Both are scoring-adjacent enough to want an ADR, and neither should be
+attempted while the numbers are extrapolations from a handful of postings.
+**Measure the first real backlog run first.**
 
 ---
 
