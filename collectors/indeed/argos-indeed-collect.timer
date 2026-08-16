@@ -1,0 +1,13 @@
+[Unit]
+Description=Run the Indeed collector twice daily
+
+[Timer]
+# Twice daily, not matching Gupy/CIEE's 4h cadence (ADR-009) — deliberately
+# more conservative given ADR-028's exception: every run to apis.indeed.com
+# is a robots.txt-disallowed, identity-forged request, and there is no
+# reason to make more of them than freshness actually needs.
+OnCalendar=*-*-* 02,14:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
