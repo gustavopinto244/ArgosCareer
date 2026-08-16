@@ -7,7 +7,7 @@
  *   argos collect [--job-name <text>] [--city <text>] [--max-results <n>]
  *                 [--since-days <n>]  # one-off wider window, e.g. after
  *                                     # adding a query term (ADR-019)
- *   argos dedup [--similarity-threshold <0-1>] [--window-days <n>]
+ *   argos dedup [--similarity-threshold <0-1>] [--window-days <n>] [--reset]
  *   argos deliver
  *   argos studyplan
  */
@@ -508,10 +508,20 @@ function dedupCommand(args: string[]): void {
     options: {
       "similarity-threshold": { type: "string" },
       "window-days": { type: "string" },
+      reset: { type: "boolean" },
     },
   });
 
-  const outcome = executeDedup(openDatabase(), {
+  const db = openDatabase();
+  // `--reset` clears existing flags first, so a corrected pass can re-decide
+  // every posting. Needed because markDuplicate only ever sets: fixing the
+  // rule does not un-flag what the old rule got wrong.
+  if (values.reset) {
+    const cleared = new PostingsRepository(db).clearDuplicateFlags();
+    console.log(`dedup --reset: cleared ${cleared} existing duplicate flags`);
+  }
+
+  const outcome = executeDedup(db, {
     similarityThreshold: values["similarity-threshold"]
       ? Number(values["similarity-threshold"])
       : DEFAULT_DEDUP_CONFIG.similarityThreshold,

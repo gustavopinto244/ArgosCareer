@@ -151,3 +151,96 @@ describe("dedupSimilarPostings", () => {
     expect(repository.count()).toBe(2);
   });
 });
+
+describe("dedupSimilarPostings — locations must not contradict", () => {
+  // The bug this covers, measured on the real corpus 2026-08-16: 267 of 406
+  // marked duplicates were postings in DIFFERENT cities. A company hiring
+  // the same role in two cities is hiring twice, and flagging one discards a
+  // real opening — including a "Pessoa Desenvolvedora Backend Python" in Rio.
+
+  it("does not merge the same role at the same company in two cities", () => {
+    insert({
+      sourceId: "1",
+      title: "Consultor de Desenvolvimento",
+      location: { kind: "known", city: "São Paulo" },
+    });
+    insert({
+      sourceId: "2",
+      title: "Consultor de Desenvolvimento",
+      location: { kind: "known", city: "Belo Horizonte" },
+    });
+
+    const outcome = dedupSimilarPostings(repository);
+
+    expect(outcome.markedDuplicate).toBe(0);
+    expect(repository.findActive()).toHaveLength(2);
+  });
+
+  it("still merges the same role at the same company in the same city", () => {
+    // Titles must differ after normalization, or layer 1 catches them on the
+    // fingerprint and layer 2 never gets a look — "Backend" and "Back-end"
+    // normalize identically, which is itself the point of layer 1.
+    insert({ sourceId: "1", title: "Estágio em Desenvolvimento Backend" });
+    insert({
+      sourceId: "2",
+      title: "Estágio em Desenvolvimento Backend Júnior",
+    });
+
+    const outcome = dedupSimilarPostings(repository);
+
+    expect(outcome.markedDuplicate).toBe(1);
+  });
+
+  it("does not merge when only one side states a city", () => {
+    // Exactly the shape that ate the real Backend Python posting: the
+    // canonical had no city at all, so nothing contradicted and everything
+    // merged. Unknown is not agreement.
+    insert({
+      sourceId: "1",
+      title: "Pessoa Desenvolvedora Backend Python",
+      location: { kind: "unknown" },
+    });
+    insert({
+      sourceId: "2",
+      title: "Pessoa Desenvolvedora Backend Python",
+      location: { kind: "known", city: "Rio de Janeiro" },
+    });
+
+    const outcome = dedupSimilarPostings(repository);
+
+    expect(outcome.markedDuplicate).toBe(0);
+  });
+
+  it("merges when both sides are equally unknown — nothing contradicts", () => {
+    insert({
+      sourceId: "1",
+      title: "Estágio em Dados",
+      location: { kind: "unknown" },
+    });
+    insert({
+      sourceId: "2",
+      title: "Estágio em Dados Analytics",
+      location: { kind: "unknown" },
+    });
+
+    const outcome = dedupSimilarPostings(repository);
+
+    expect(outcome.markedDuplicate).toBe(1);
+  });
+});
+
+describe("PostingsRepository.clearDuplicateFlags", () => {
+  it("restores flagged postings whole, so a corrected pass can re-decide", () => {
+    insert({ sourceId: "1", title: "Estágio em Dados" });
+    insert({ sourceId: "2", title: "Estágio em Dados Analytics" });
+    dedupSimilarPostings(repository);
+    expect(repository.findActive()).toHaveLength(1);
+
+    const cleared = repository.clearDuplicateFlags();
+
+    // Nothing was ever deleted — markDuplicate only sets a column — so the
+    // posting comes back intact rather than needing re-collection.
+    expect(cleared).toBe(1);
+    expect(repository.findActive()).toHaveLength(2);
+  });
+});
