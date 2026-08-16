@@ -17,10 +17,25 @@ principle 1.
 
 ## Logging
 
-Pino, JSON to stdout, integrated with journald under systemd — the same setup as
-`atlas-manager`.
+**What exists today: NestJS's built-in `Logger`, human-readable, to stdout.**
+The long-running service (`SchedulerService`, and Nest's own boot output) logs
+through it; the CLI writes to stdout with `console.log`/`console.error`, which
+is correct for a command a person runs and reads. In production that means
+`docker logs argos-career` gives readable lines, and nothing else consumes them.
+
+> **This page described Pino, JSON output and journald integration for a long
+> time, and none of it was ever built.** Pino was never a dependency,
+> `LOG_LEVEL` was documented but read by no code, and the structured fields
+> below were never emitted. Found by the audit of 2026-08-15 and corrected
+> here rather than left as a promise: a specification nobody implemented is
+> worse than an honest gap, because it makes every later reader trust
+> something that is not there. The design is kept below, marked for what it
+> is — a plan, not a description.
 
 ### Levels, and what each means
+
+Conventions for the `Logger` calls that exist, and the contract structured
+logging would have to keep if it lands.
 
 | Level   | Meaning                        | Example                                                                    |
 | ------- | ------------------------------ | -------------------------------------------------------------------------- |
@@ -33,7 +48,11 @@ Pino, JSON to stdout, integrated with journald under systemd — the same setup 
 pipeline survive lands here, which makes "warnings in the last week" the question
 worth asking.
 
-### Every log line carries the run
+### Every log line carries the run — **not implemented**
+
+The design below is what structured logging should emit. Nothing emits it
+today; `runId` reaches the operator only through the `runs` table and the
+CLI's own output.
 
 ```
 runId        ULID, one per cron trigger
@@ -42,6 +61,17 @@ stage        collect | normalize | dedup | prefilter | score | deliver
 source       when the line concerns one source
 fingerprint  when the line concerns one posting
 ```
+
+**What the gap actually costs.** Little, at this size: one operator, one
+machine, a corpus in the hundreds, and `runs` rows that already answer "what
+happened in this cycle" better than a log grep would. The `runs` table is the
+real observability surface, and it is implemented.
+
+**What would justify building it.** A second consumer reading logs
+programmatically, a second machine to correlate across, or a debugging session
+that `runs` rows genuinely cannot answer. Until one of those is true, adding
+Pino would be work spent on a problem this project does not have — which is
+why the correction here was to fix the document, not to install the library.
 
 Two independent crons (ADR-009) means two kinds of run, each with its own
 `runId`: a `collection` run touches `collect` through `prefilter`; a

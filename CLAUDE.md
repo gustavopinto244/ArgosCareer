@@ -84,8 +84,11 @@ LinkedIn is P2 and public visitor endpoints only.
 - TypeScript, Node 24 (`engines: >=22.12.0` — below that, `require(esm)` is
   behind a flag and `nodenext` semantics do not hold)
 - **NestJS** — its DI container imposes ports-and-adapters naturally (ADR-001)
-- **Zod** (validation, including LLM output), **Pino** (JSON logs),
-  **Vitest** + Supertest (tests), **Drizzle ORM + SQLite** (persistence)
+- **Zod** (validation, including LLM output), **Vitest** + Supertest (tests),
+  **Drizzle ORM + SQLite** (persistence)
+- Logging is NestJS's built-in `Logger` — human-readable, not structured.
+  Pino was named here for a long time and never installed; `docs/08` records
+  what that costs and what would justify adding it.
 - `@nestjs/schedule` for scheduling
 - Docker Compose for deployment, GitHub Actions for CI
 
