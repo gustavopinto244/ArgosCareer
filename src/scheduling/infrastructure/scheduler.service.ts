@@ -181,8 +181,11 @@ export class SchedulerService implements OnModuleInit {
    * cron expression offset by some guessed number of minutes from
    * `scoreAndDeliver.time` — that would race the actual run length instead
    * of following it. `executeDeliver` has already called `runsRepo.finish`
-   * by the time control returns here (both on success and on failure), so
-   * there is never an unfinished run for the backup to catch mid-write.
+   * by the time control returns here — on success, on a failed send, and (as
+   * of 2026-08-16) on a throw, which is the case this comment previously
+   * asserted without it being true: an exception out of the scoring loop
+   * skipped `finish` entirely and left the row open forever. So there is
+   * never an unfinished run for the backup to catch mid-write.
    *
    * Synchronous and best-effort: a failed backup is logged and alerted, not
    * thrown — a backup failure must not be mistaken for a pipeline failure

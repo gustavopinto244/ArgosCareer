@@ -94,7 +94,17 @@ export class StageAExtractor {
       };
     }
 
-    const prompt = buildStageAPrompt(posting.title, posting.description);
+    // Building the prompt reads the template off disk, so it can fail for
+    // reasons that have nothing to do with the model — and until now it did
+    // so by throwing straight through `ApiScorer.score`, which promises the
+    // opposite. `attempts: 0` is literal: the model was never asked.
+    let prompt: string;
+    try {
+      prompt = buildStageAPrompt(posting.title, posting.description);
+    } catch {
+      return { ok: false, reason: "extraction_failed", attempts: 0 };
+    }
+
     const result = await parseModelOutputWithRetries(
       ExtractionOutputSchema,
       this.ask,

@@ -53,7 +53,14 @@ export class StageBMatcher {
 
     const matches: Match[] = [];
     for (const requirement of requirements) {
-      const prompt = buildStageBPrompt(requirement, profile);
+      // Same disk read, same contract, as stage A — see `StageAExtractor`.
+      let prompt: string;
+      try {
+        prompt = buildStageBPrompt(requirement, profile);
+      } catch {
+        return { ok: false, reason: "matching_failed", attempts: 0 };
+      }
+
       const result = await parseModelOutputWithRetries(
         MatchOutputSchema,
         this.ask,

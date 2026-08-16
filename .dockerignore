@@ -10,7 +10,6 @@ backups
 config/profile.yaml
 test
 docs
-prompts
 CHANGELOG.md
 CONTRIBUTING.md
 SECURITY.md

@@ -24,6 +24,7 @@ import {
 import { Criteria } from "../../src/prefilter/domain/criteria";
 import { Profile } from "../../src/profile/domain/profile";
 import { StubScorer } from "../../src/scoring/infrastructure/stub-scorer";
+import { ScorerPort } from "../../src/scoring/domain/ports/scorer.port";
 import { Digest } from "../../src/delivery/domain/digest";
 import {
   NotifierPort,
@@ -390,6 +391,28 @@ describe("executeCollect — collector dispatch by source", () => {
     expect(asked).toEqual(["ciee", "gupy", "ciee"]);
   });
 
+  it("closes the run as failed when resolving a collector throws", async () => {
+    // Collectors themselves cannot throw (principle 1), so the reachable
+    // throw inside `executeCollect` is everything around them — resolution,
+    // and the database writes. Either way the run row must not be left open;
+    // see the matching test for `executeDeliver`.
+    await expect(
+      executeCollect(
+        db,
+        () => {
+          throw new Error("registry exploded");
+        },
+        [{ source: "gupy" }],
+        undefined,
+        0,
+      ),
+    ).rejects.toThrow("registry exploded");
+
+    const [run] = new RunsRepository(db).findRecent("collect", 1);
+    expect(run?.outcome).toBe("failed");
+    expect(run?.finishedAt).not.toBeNull();
+  });
+
   it("defaults a query with no source to gupy", async () => {
     const asked: string[] = [];
     await executeCollect(
@@ -668,6 +691,47 @@ describe("executeDeliver", () => {
     const run = runsRepo.findById(outcome.runId);
     expect(run?.outcome).toBe("success");
     expect(run?.deliveredCount).toBe(1);
+  });
+
+  it("closes the run as failed when the scorer throws, instead of leaving it open forever", async () => {
+    const collector = stubCollector({
+      source: "gupy",
+      collectedAt: new Date(),
+      postings: [
+        {
+          source: "gupy",
+          sourceId: "1",
+          payload: gupyPayload(1, "Estágio em Backend"),
+        },
+      ],
+    });
+    await executeCollect(db, () => collector, [{}], undefined, 0);
+
+    const criteria = deliverCriteria();
+    const { notifier } = recordingNotifier();
+    // `ScorerPort` forbids this (ADR-006), and on 2026-08-16 `ApiScorer` did
+    // it anyway: a prompt template missing from the image threw straight
+    // through. What matters here is not the throw but the bookkeeping — the
+    // run row must not survive as `finishedAt: null`, which `/health` reads
+    // as "still running" and `findLatestFinished` skips.
+    const throwingScorer: ScorerPort = {
+      score: () => {
+        throw new Error("ENOENT: no such file or directory");
+      },
+    };
+
+    await expect(
+      executeDeliver(db, throwingScorer, notifier, criteria, deliverProfile()),
+    ).rejects.toThrow("ENOENT");
+
+    const runsRepo = new RunsRepository(db);
+    const [run] = runsRepo.findRecent("scoreAndDeliver", 1);
+    expect(run?.outcome).toBe("failed");
+    expect(run?.finishedAt).not.toBeNull();
+    // The pre-filter had already passed one posting before the throw; the
+    // row records that rather than flattening the run to zeroes.
+    expect(run?.filteredCount).toBe(1);
+    expect(run?.scoredCount).toBe(0);
   });
 
   it("never notifies the same posting twice (ADR-007) — a second run finds nothing to deliver", async () => {

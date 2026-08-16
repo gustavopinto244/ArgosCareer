@@ -1,4 +1,6 @@
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { Profile, UNVERIFIED } from "../../../src/profile/domain/profile";
 import { Requirement } from "../../../src/scoring/domain/types";
@@ -9,6 +11,7 @@ import {
   STAGE_A_PROMPT_VERSION,
   STAGE_B_PROMPT_PATH,
   STAGE_B_PROMPT_VERSION,
+  verifyPromptTemplates,
 } from "../../../src/scoring/infrastructure/prompts";
 
 function profile(overrides: Partial<Profile> = {}): Profile {
@@ -196,5 +199,37 @@ describe("buildStageBPrompt", () => {
 
     expect(evidenceIndex).toBeGreaterThan(-1);
     expect(requirementIndex).toBeGreaterThan(evidenceIndex);
+  });
+});
+
+describe("verifyPromptTemplates", () => {
+  it("returns null when both real templates load", () => {
+    expect(verifyPromptTemplates()).toBeNull();
+  });
+
+  it("returns a message naming the missing file rather than throwing", () => {
+    const error = verifyPromptTemplates([
+      "./prompts/stage-a-extraction.v3.md",
+      "./prompts/does-not-exist.md",
+    ]);
+
+    expect(error).toContain("Prompt template unavailable");
+    expect(error).toContain("does-not-exist.md");
+  });
+
+  it("reports a template that exists but has no fenced block", () => {
+    const dir = mkdtempSync(join(tmpdir(), "argos-bad-prompt-"));
+    const path = join(dir, "no-fence.md");
+    writeFileSync(path, "Commentary only, nobody wrote the template.\n");
+
+    try {
+      // A file present but unusable is the failure the ENOENT case hid: both
+      // must reach `buildScorer` as a misconfiguration, not a stack trace.
+      expect(verifyPromptTemplates([path])).toContain(
+        "No fenced template block found",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

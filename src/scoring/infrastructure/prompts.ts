@@ -28,6 +28,34 @@ function loadTemplate(filePath: string): string {
   return match[1];
 }
 
+/**
+ * Reads both templates once, up front, and reports the first that cannot be
+ * loaded — a missing file, or a file with no fenced block.
+ *
+ * Exists because a prompt template is a *deployment* fact, not a per-posting
+ * one: if `stage-a-extraction.v3.md` is absent, it is absent for all 2292
+ * postings, and discovering that per posting turns one packaging mistake into
+ * a batch of identical failures. `buildScorer` calls this so the condition
+ * surfaces as the misconfiguration it is, on the same path that already
+ * reports a missing LLM_API_KEY, instead of as a stack trace at 03:00.
+ *
+ * Returns the message rather than throwing, matching `BuildScorerResult` —
+ * the caller decides whether that becomes a console line or a Telegram alert.
+ */
+export function verifyPromptTemplates(
+  paths: readonly string[] = [STAGE_A_PROMPT_PATH, STAGE_B_PROMPT_PATH],
+): string | null {
+  for (const path of paths) {
+    try {
+      loadTemplate(path);
+    } catch (cause) {
+      const detail = cause instanceof Error ? cause.message : String(cause);
+      return `Prompt template unavailable: ${detail}`;
+    }
+  }
+  return null;
+}
+
 function substitute(
   template: string,
   values: Readonly<Record<string, string>>,

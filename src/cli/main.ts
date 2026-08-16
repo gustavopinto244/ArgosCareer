@@ -139,63 +139,78 @@ export async function executeCollect(
   let unnormalizable = 0;
   let firstError: string | undefined;
 
-  for (const [index, query] of queries.entries()) {
-    // The collector's own interval only spaces out pages *within* one query,
-    // so the gap between queries is this loop's responsibility (CLAUDE.md §6).
-    if (index > 0 && queryIntervalMs > 0) await sleep(queryIntervalMs);
+  // Same bookkeeping guarantee `executeDeliver` documents: a throw between
+  // `start` and `finish` must not leave the row open. Collectors cannot throw
+  // (principle 1) and the normalizers use `safeParse`, so the realistic
+  // trigger here is the database itself — a locked or full disk mid-upsert.
+  // Narrower than the deliver case, identical in consequence.
+  try {
+    for (const [index, query] of queries.entries()) {
+      // The collector's own interval only spaces out pages *within* one query,
+      // so the gap between queries is this loop's responsibility (CLAUDE.md §6).
+      if (index > 0 && queryIntervalMs > 0) await sleep(queryIntervalMs);
 
-    // `source` decides who fetches, exactly as `RawPosting.source` decides
-    // who normalizes. A query naming a source this build cannot collect from
-    // is a config error, reported rather than skipped.
-    const source =
-      typeof query === "object" && query !== null && "source" in query
-        ? String((query as { source?: unknown }).source ?? "gupy")
-        : "gupy";
-    const collector = collectors(source);
-    if (!collector) {
-      failures += 1;
-      firstError ??= `No collector registered for source "${source}"`;
-      continue;
-    }
-
-    const result = await collector.collect(query);
-    collected += result.postings.length;
-
-    if (result.error) {
-      failures += 1;
-      firstError ??= result.error.message;
-      continue;
-    }
-
-    const collectedAt = now();
-    for (const raw of result.postings) {
-      // Dispatch by the source the payload declares, not by which collector
-      // was passed in — an unregistered source is a wiring bug, and saying
-      // so beats dropping every posting and looking like an empty source.
-      const normalize = normalizerFor(raw.source);
-      if (!normalize) {
-        firstError ??= `No normalizer registered for source "${raw.source}"`;
-        unnormalizable += 1;
+      // `source` decides who fetches, exactly as `RawPosting.source` decides
+      // who normalizes. A query naming a source this build cannot collect from
+      // is a config error, reported rather than skipped.
+      const source =
+        typeof query === "object" && query !== null && "source" in query
+          ? String((query as { source?: unknown }).source ?? "gupy")
+          : "gupy";
+      const collector = collectors(source);
+      if (!collector) {
+        failures += 1;
+        firstError ??= `No collector registered for source "${source}"`;
         continue;
       }
-      const posting = normalize(raw, collectedAt);
-      if (!posting) continue;
-      // A posting the source never dated passes: absence of a date is not
-      // evidence of an old posting, the same leniency ADR-011 applies to an
-      // unknown location/workMode.
-      if (
-        cutoff !== null &&
-        posting.publishedAt !== null &&
-        posting.publishedAt.getTime() < cutoff.getTime()
-      ) {
-        tooOld += 1;
+
+      const result = await collector.collect(query);
+      collected += result.postings.length;
+
+      if (result.error) {
+        failures += 1;
+        firstError ??= result.error.message;
         continue;
       }
-      normalized += 1;
-      const { wasNew } = postingsRepo.upsert(posting);
-      if (wasNew) isNew += 1;
-      else alreadySeen += 1;
+
+      const collectedAt = now();
+      for (const raw of result.postings) {
+        // Dispatch by the source the payload declares, not by which collector
+        // was passed in — an unregistered source is a wiring bug, and saying
+        // so beats dropping every posting and looking like an empty source.
+        const normalize = normalizerFor(raw.source);
+        if (!normalize) {
+          firstError ??= `No normalizer registered for source "${raw.source}"`;
+          unnormalizable += 1;
+          continue;
+        }
+        const posting = normalize(raw, collectedAt);
+        if (!posting) continue;
+        // A posting the source never dated passes: absence of a date is not
+        // evidence of an old posting, the same leniency ADR-011 applies to an
+        // unknown location/workMode.
+        if (
+          cutoff !== null &&
+          posting.publishedAt !== null &&
+          posting.publishedAt.getTime() < cutoff.getTime()
+        ) {
+          tooOld += 1;
+          continue;
+        }
+        normalized += 1;
+        const { wasNew } = postingsRepo.upsert(posting);
+        if (wasNew) isNew += 1;
+        else alreadySeen += 1;
+      }
     }
+  } catch (cause) {
+    runsRepo.finish(runId, now(), "failed", {
+      collectedCount: collected,
+      normalizedCount: normalized,
+      newCount: isNew,
+      alreadySeenCount: alreadySeen,
+    });
+    throw cause;
   }
 
   const allFailed = failures === queries.length;
@@ -235,7 +250,15 @@ export function executeDedup(
   const runsRepo = new RunsRepository(db);
   const runId = runsRepo.start("dedup", now());
 
-  const outcome = dedupSimilarPostings(postingsRepo, config);
+  let outcome;
+  try {
+    outcome = dedupSimilarPostings(postingsRepo, config);
+  } catch (cause) {
+    // See `executeCollect` — the row is closed before the throw is re-raised
+    // so an open `finishedAt: null` can only ever mean "still running".
+    runsRepo.finish(runId, now(), "failed", { duplicateCount: 0 });
+    throw cause;
+  }
 
   runsRepo.finish(runId, now(), "success", {
     duplicateCount: outcome.markedDuplicate,
@@ -285,93 +308,122 @@ export async function executeDeliver(
   const runId = runsRepo.start("scoreAndDeliver", now());
   const startedAt = now();
 
-  const lastDelivery = runsRepo.findLatestFinished(
-    "scoreAndDeliver",
-    "success",
-  );
-  const since = lastDelivery?.finishedAt ?? null;
-  const collectRuns = runsRepo.findRunsSince("collect", since);
-  const dedupRuns = runsRepo.findRunsSince("dedup", since);
+  // Counters live outside the try so the catch can record how far the run
+  // actually got, rather than writing zeroes over a batch that filtered 200
+  // postings and died on the 30th.
+  let filteredCount = 0;
+  let scoredCount = 0;
 
-  const collected = collectRuns.reduce((sum, r) => sum + r.collectedCount, 0);
-  const newCount = collectRuns.reduce((sum, r) => sum + r.newCount, 0);
-  const duplicateCount = dedupRuns.reduce(
-    (sum, r) => sum + r.duplicateCount,
-    0,
-  );
-  const deduplicated = Math.max(0, newCount - duplicateCount);
-  // Only one collector exists in M6 (Gupy) and runs carry no per-source
-  // breakdown yet — a failed collect run in the window is reported as
-  // "gupy" until a multi-source run records which source actually failed.
-  const failedSources = collectRuns.some((r) => r.outcome === "failed")
-    ? ["gupy"]
-    : [];
-
-  const profileKeywords = deriveProfileKeywords(profile);
-  const profileHash = hashProfile(profile);
-
-  const filtered = postingsRepo
-    .findUnnotified()
-    .filter(
-      (posting) =>
-        applyPreFilter(posting, criteria, profileKeywords, startedAt).passed,
-    );
-
-  const scoredEntries: ScoredPosting[] = [];
-  for (const posting of filtered) {
-    const result = await scorer.score(posting, profileHash);
-    if (result.ok) scoredEntries.push({ posting, outcome: result });
-  }
-
-  const digest = composeDigest({
-    runId,
-    generatedAt: startedAt,
-    scored: scoredEntries,
-    periodBlocked: [],
-    summary: {
-      collected,
-      deduplicated,
-      filtered: filtered.length,
-      scored: scoredEntries.length,
-      failedSources,
-    },
-  });
-
-  const notifyResult = await notifier.notify(digest);
-
-  if (!notifyResult.ok) {
+  // Every exit from here on must close the run row. It did not before: when
+  // `scorer.score` threw (2026-08-16, a prompt template missing from the
+  // container image), the row was left with `finishedAt: null` forever, which
+  // `/health` reads as "still running" and `findLatestFinished` skips
+  // entirely — so a hard failure was indistinguishable from a long batch, and
+  // `lastSuccessfulRun` kept pointing at the previous day. The throw is
+  // re-raised after bookkeeping: alerting is the caller's job, this only
+  // makes sure the row tells the truth first.
+  try {
+    return await deliver();
+  } catch (cause) {
     runsRepo.finish(runId, now(), "failed", {
-      filteredCount: filtered.length,
-      scoredCount: scoredEntries.length,
+      filteredCount,
+      scoredCount,
       deliveredCount: 0,
     });
+    throw cause;
+  }
+
+  async function deliver(): Promise<DeliverOutcome> {
+    const lastDelivery = runsRepo.findLatestFinished(
+      "scoreAndDeliver",
+      "success",
+    );
+    const since = lastDelivery?.finishedAt ?? null;
+    const collectRuns = runsRepo.findRunsSince("collect", since);
+    const dedupRuns = runsRepo.findRunsSince("dedup", since);
+
+    const collected = collectRuns.reduce((sum, r) => sum + r.collectedCount, 0);
+    const newCount = collectRuns.reduce((sum, r) => sum + r.newCount, 0);
+    const duplicateCount = dedupRuns.reduce(
+      (sum, r) => sum + r.duplicateCount,
+      0,
+    );
+    const deduplicated = Math.max(0, newCount - duplicateCount);
+    // Only one collector exists in M6 (Gupy) and runs carry no per-source
+    // breakdown yet — a failed collect run in the window is reported as
+    // "gupy" until a multi-source run records which source actually failed.
+    const failedSources = collectRuns.some((r) => r.outcome === "failed")
+      ? ["gupy"]
+      : [];
+
+    const profileKeywords = deriveProfileKeywords(profile);
+    const profileHash = hashProfile(profile);
+
+    const filtered = postingsRepo
+      .findUnnotified()
+      .filter(
+        (posting) =>
+          applyPreFilter(posting, criteria, profileKeywords, startedAt).passed,
+      );
+    filteredCount = filtered.length;
+
+    const scoredEntries: ScoredPosting[] = [];
+    for (const posting of filtered) {
+      const result = await scorer.score(posting, profileHash);
+      if (result.ok) scoredEntries.push({ posting, outcome: result });
+      scoredCount = scoredEntries.length;
+    }
+
+    const digest = composeDigest({
+      runId,
+      generatedAt: startedAt,
+      scored: scoredEntries,
+      periodBlocked: [],
+      summary: {
+        collected,
+        deduplicated,
+        filtered: filteredCount,
+        scored: scoredCount,
+        failedSources,
+      },
+    });
+
+    const notifyResult = await notifier.notify(digest);
+
+    if (!notifyResult.ok) {
+      runsRepo.finish(runId, now(), "failed", {
+        filteredCount,
+        scoredCount,
+        deliveredCount: 0,
+      });
+      return {
+        runId,
+        filtered: filteredCount,
+        scored: scoredCount,
+        delivered: 0,
+        error: notifyResult.error.message,
+      };
+    }
+
+    const deliveredAt = now();
+    const sent = [...digest.recommended, ...digest.review];
+    for (const entry of sent) {
+      postingsRepo.markNotified(entry.posting.fingerprint, deliveredAt);
+    }
+
+    runsRepo.finish(runId, deliveredAt, "success", {
+      filteredCount,
+      scoredCount,
+      deliveredCount: sent.length,
+    });
+
     return {
       runId,
-      filtered: filtered.length,
-      scored: scoredEntries.length,
-      delivered: 0,
-      error: notifyResult.error.message,
+      filtered: filteredCount,
+      scored: scoredCount,
+      delivered: sent.length,
     };
   }
-
-  const deliveredAt = now();
-  const sent = [...digest.recommended, ...digest.review];
-  for (const entry of sent) {
-    postingsRepo.markNotified(entry.posting.fingerprint, deliveredAt);
-  }
-
-  runsRepo.finish(runId, deliveredAt, "success", {
-    filteredCount: filtered.length,
-    scoredCount: scoredEntries.length,
-    deliveredCount: sent.length,
-  });
-
-  return {
-    runId,
-    filtered: filtered.length,
-    scored: scoredEntries.length,
-    delivered: sent.length,
-  };
 }
 
 export interface StudyPlanOutcome {

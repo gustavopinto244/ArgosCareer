@@ -231,3 +231,33 @@ describe("StageAExtractor.extract — posting with no description", () => {
     expect(extractionsRepo.find(p.fingerprint, "a-v3")).toBeNull();
   });
 });
+
+describe("when the prompt template cannot be read", () => {
+  // The real 2026-08-16 condition: the template is absent from the process's
+  // view of the filesystem. `ApiScorer`'s docblock promises a failure at
+  // either stage "returns as a value, never throws", and before this it did
+  // throw — out of the scoring loop and past `runsRepo.finish`.
+  it("returns a typed failure with attempts 0 rather than throwing", async () => {
+    const original = process.cwd();
+    const empty = mkdtempSync(join(tmpdir(), "argos-no-prompts-"));
+    const ask = vi.fn();
+
+    try {
+      process.chdir(empty);
+      const extractor = new StageAExtractor(ask, extractionsRepo);
+      const result = await extractor.extract(posting());
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.reason).toBe("extraction_failed");
+        // Literal: a template that never loaded means the model was never
+        // asked, so no attempt was spent and none should be reported.
+        expect(result.attempts).toBe(0);
+      }
+      expect(ask).not.toHaveBeenCalled();
+    } finally {
+      process.chdir(original);
+      rmSync(empty, { recursive: true, force: true });
+    }
+  });
+});
