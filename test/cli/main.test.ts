@@ -312,6 +312,87 @@ describe("executeCollect — recency window (ADR-019)", () => {
   });
 });
 
+describe("executeCollect — multi-source dispatch", () => {
+  it("normalizes each source with its own normalizer in one cycle", async () => {
+    // The bug this guards: executeCollect used to call normalizeGupyJob
+    // directly, so a second source's payloads were handed to Gupy's schema,
+    // failed validation and vanished — indistinguishable from an empty
+    // source.
+    const collector: CollectorPort = {
+      collect: async (criteria) => {
+        const which = (criteria as { source?: string }).source;
+        return which === "ciee"
+          ? {
+              source: "ciee",
+              collectedAt: new Date(),
+              postings: [
+                {
+                  source: "ciee",
+                  sourceId: "9000001",
+                  payload: {
+                    codigoVaga: 9000001,
+                    tipoVaga: "ESTAGIO",
+                    nomeEmpresa: "ALFA SERVICOS DIGITAIS LTDA",
+                    areaProfissional: "Informática",
+                    nivelEscolar: "SU",
+                    local: { cidade: "Rio de Janeiro", uf: "RJ" },
+                    atividades: ["Atividade exemplo"],
+                  },
+                },
+              ],
+            }
+          : {
+              source: "gupy",
+              collectedAt: new Date(),
+              postings: [
+                {
+                  source: "gupy",
+                  sourceId: "1",
+                  payload: gupyPayload(1, "Estágio em Backend"),
+                },
+              ],
+            };
+      },
+    };
+
+    const outcome = await executeCollect(
+      db,
+      collector,
+      [{ source: "gupy" }, { source: "ciee" }],
+      undefined,
+      0,
+    );
+
+    expect(outcome.normalized).toBe(2);
+    expect(outcome.unnormalizable).toBe(0);
+    expect(outcome.error).toBeUndefined();
+
+    const titles = new PostingsRepository(db)
+      .findActive()
+      .map((p) => p.title)
+      .sort();
+    expect(titles).toEqual(["Estágio em Backend", "Estágio em Informática"]);
+  });
+
+  it("reports an unregistered source as a wiring bug, not an empty source", async () => {
+    const collector: CollectorPort = {
+      collect: async () => ({
+        source: "linkedin",
+        collectedAt: new Date(),
+        postings: [
+          { source: "linkedin", sourceId: "1", payload: { anything: true } },
+        ],
+      }),
+    };
+
+    const outcome = await executeCollect(db, collector, [{}], undefined, 0);
+
+    expect(outcome.normalized).toBe(0);
+    expect(outcome.unnormalizable).toBe(1);
+    expect(outcome.error).toContain("No normalizer registered");
+  });
+});
+
 describe("executeDedup", () => {
   it("scans the corpus and records a run without touching a collector", async () => {
     const collector = stubCollector({
