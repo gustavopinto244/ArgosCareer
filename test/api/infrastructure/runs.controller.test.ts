@@ -126,6 +126,10 @@ function auth(req: request.Test): request.Test {
   return req.set("Authorization", `Bearer ${API_KEY}`);
 }
 
+function gupyPayload(id: number, name: string, careerPageName = "Empresa X") {
+  return { id, name, careerPageName };
+}
+
 describe("ApiKeyGuard", () => {
   it("rejects a request with no Authorization header", async () => {
     await request(app.getHttpServer()).get("/health").expect(401);
@@ -282,6 +286,105 @@ describe("POST /runs/collect", () => {
       city: "Rio de Janeiro",
       maxResults: 10,
     });
+  });
+});
+
+describe("POST /runs/collect/external (ADR-027)", () => {
+  it("requires auth, same as every other route", async () => {
+    await request(app.getHttpServer())
+      .post("/runs/collect/external")
+      .expect(401);
+  });
+
+  it("requires 'source'", async () => {
+    const res = await auth(
+      request(app.getHttpServer())
+        .post("/runs/collect/external")
+        .send({ postings: [{ sourceId: "1", payload: {} }] }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("requires 'postings' to be an array", async () => {
+    const res = await auth(
+      request(app.getHttpServer())
+        .post("/runs/collect/external")
+        .send({ source: "gupy", postings: "not an array" }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects an unregistered source before opening a run row", async () => {
+    const res = await auth(
+      request(app.getHttpServer())
+        .post("/runs/collect/external")
+        .send({
+          source: "no-such-source",
+          postings: [{ sourceId: "1", payload: {} }],
+        }),
+    );
+    expect(res.status).toBe(400);
+    expect(new RunsRepository(db).findRecent("collect", 10)).toHaveLength(0);
+  });
+
+  it("rejects an empty postings array", async () => {
+    const res = await auth(
+      request(app.getHttpServer())
+        .post("/runs/collect/external")
+        .send({ source: "gupy", postings: [] }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("normalizes real gupy-shaped payloads and writes a 'collect' run", async () => {
+    const res = await auth(
+      request(app.getHttpServer())
+        .post("/runs/collect/external")
+        .send({
+          source: "gupy",
+          postings: [
+            { sourceId: "1", payload: gupyPayload(1, "Estágio Externo") },
+          ],
+        }),
+    );
+
+    expect(res.status).toBe(201);
+    expect(res.body.normalized).toBe(1);
+    expect(res.body.isNew).toBe(1);
+
+    const run = new RunsRepository(db).findById(res.body.runId);
+    expect(run?.kind).toBe("collect");
+    expect(run?.outcome).toBe("success");
+  });
+
+  it("shares the 'collect' RunLock with POST /runs/collect (ADR-024) — rejected while one is in flight", async () => {
+    let releaseFirst!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    fakeCollector.collect = async (criteria: unknown) => {
+      fakeCollector.calls.push(criteria);
+      await gate;
+      return { source: "fake", postings: [], collectedAt: new Date() };
+    };
+
+    const first = auth(
+      request(app.getHttpServer()).post("/runs/collect").send({}),
+    ).then((res) => res);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const second = await auth(
+      request(app.getHttpServer())
+        .post("/runs/collect/external")
+        .send({
+          source: "gupy",
+          postings: [{ sourceId: "1", payload: gupyPayload(1, "X") }],
+        }),
+    );
+    expect(second.status).toBe(409);
+
+    releaseFirst();
+    await first;
   });
 });
 

@@ -6,8 +6,10 @@ import {
   executeCollect,
   executeDedup,
   executeDeliver,
+  executeIngestExternal,
   executeStudyPlan,
 } from "../../src/cli/main";
+import { createPosting, Posting } from "../../src/posting/domain/posting";
 import { Taxonomy } from "../../src/market/domain/taxonomy";
 import { TextNotifier } from "../../src/delivery/infrastructure/telegram-notifier";
 import {
@@ -652,6 +654,136 @@ function recordingNotifier(result: NotifyResult = { ok: true }): {
     },
   };
 }
+
+describe("executeIngestExternal", () => {
+  const NOW = new Date("2026-08-16T14:00:00Z");
+
+  /** A minimal, faithful stand-in for `normalizeIndeedJob` — the point of
+   * this suite is `executeIngestExternal`'s own loop/bookkeeping, not the
+   * real normalizer, which has its own test file. */
+  function fakeNormalizer(): {
+    normalize: (
+      raw: { source: string; sourceId: string; payload: unknown },
+      now: Date,
+    ) => Posting | null;
+    calls: unknown[];
+  } {
+    const calls: unknown[] = [];
+    return {
+      calls,
+      normalize: (raw, now) => {
+        calls.push(raw.payload);
+        const payload = raw.payload as { title?: string; company?: string };
+        if (!payload.title || !payload.company) return null;
+        return createPosting({
+          source: raw.source,
+          sourceId: raw.sourceId,
+          company: payload.company,
+          title: payload.title,
+          location: { kind: "unknown" },
+          workMode: "unknown",
+          collectedAt: now,
+          firstSeenAt: now,
+          lastSeenAt: now,
+          rawPayload: payload,
+        });
+      },
+    };
+  }
+
+  it("normalizes and upserts a batch, recording one 'collect' run", async () => {
+    const { normalize } = fakeNormalizer();
+    const outcome = await executeIngestExternal(
+      db,
+      "indeed",
+      normalize,
+      [
+        { sourceId: "in-1", payload: { title: "Estágio A", company: "X" } },
+        { sourceId: "in-2", payload: { title: "Estágio B", company: "Y" } },
+      ],
+      () => NOW,
+    );
+
+    expect(outcome.collected).toBe(2);
+    expect(outcome.normalized).toBe(2);
+    expect(outcome.isNew).toBe(2);
+    expect(outcome.alreadySeen).toBe(0);
+    expect(outcome.unnormalizable).toBe(0);
+
+    const run = new RunsRepository(db).findById(outcome.runId);
+    expect(run?.kind).toBe("collect");
+    expect(run?.outcome).toBe("success");
+
+    const stored = new PostingsRepository(db).findActive();
+    expect(stored).toHaveLength(2);
+    expect(stored.map((p) => p.source)).toEqual(["indeed", "indeed"]);
+  });
+
+  it("counts an item the normalizer rejects as unnormalizable, not a thrown error", async () => {
+    const { normalize } = fakeNormalizer();
+    const outcome = await executeIngestExternal(
+      db,
+      "indeed",
+      normalize,
+      [
+        { sourceId: "in-1", payload: { title: "Estágio A", company: "X" } },
+        { sourceId: "in-2", payload: { title: "no company" } }, // rejected
+      ],
+      () => NOW,
+    );
+
+    expect(outcome.normalized).toBe(1);
+    expect(outcome.unnormalizable).toBe(1);
+    const run = new RunsRepository(db).findById(outcome.runId);
+    expect(run?.outcome).toBe("success");
+  });
+
+  it("re-ingesting the same sourceId upserts rather than duplicating", async () => {
+    const { normalize } = fakeNormalizer();
+    const first = await executeIngestExternal(
+      db,
+      "indeed",
+      normalize,
+      [{ sourceId: "in-1", payload: { title: "Estágio A", company: "X" } }],
+      () => NOW,
+    );
+    expect(first.isNew).toBe(1);
+
+    const second = await executeIngestExternal(
+      db,
+      "indeed",
+      normalize,
+      [{ sourceId: "in-1", payload: { title: "Estágio A", company: "X" } }],
+      () => NOW,
+    );
+    expect(second.isNew).toBe(0);
+    expect(second.alreadySeen).toBe(1);
+    expect(new PostingsRepository(db).findActive()).toHaveLength(1);
+  });
+
+  it("closes the run as failed, not orphaned, when the normalizer throws", async () => {
+    // Same bookkeeping guarantee executeCollect/executeDeliver already
+    // carry (#49) — a throw between start and finish must not leave the
+    // row open forever.
+    const throwing = () => {
+      throw new Error("boom");
+    };
+
+    await expect(
+      executeIngestExternal(
+        db,
+        "indeed",
+        throwing,
+        [{ sourceId: "in-1", payload: {} }],
+        () => NOW,
+      ),
+    ).rejects.toThrow("boom");
+
+    const [run] = new RunsRepository(db).findRecent("collect", 1);
+    expect(run?.outcome).toBe("failed");
+    expect(run?.finishedAt).not.toBeNull();
+  });
+});
 
 describe("executeDeliver", () => {
   it("takes an unnotified posting end to end: pre-filter, score, digest, notify, mark notified", async () => {

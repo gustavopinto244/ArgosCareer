@@ -2,6 +2,7 @@ import { Posting } from "../domain/posting";
 import { RawPosting } from "../domain/raw-posting";
 import { normalizeCieeVaga } from "./ciee-normalizer";
 import { normalizeGupyJob } from "./gupy-normalizer";
+import { normalizeIndeedJob } from "./indeed-normalizer";
 
 /**
  * `RawPosting` → `Posting` for one source. Every normalizer returns `null`
@@ -33,6 +34,7 @@ export type Normalizer = (raw: RawPosting, now: Date) => Posting | null;
 const NORMALIZERS: ReadonlyMap<string, Normalizer> = new Map([
   ["gupy", normalizeGupyJob],
   ["ciee", normalizeCieeVaga],
+  ["indeed", normalizeIndeedJob],
 ]);
 
 /**
