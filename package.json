@@ -23,6 +23,7 @@
     "restore": "tsx scripts/restore.ts",
     "measure:prefilter": "tsx scripts/measure-prefilter-cut.ts",
     "probe:terms": "tsx scripts/probe-query-terms.ts",
+    "report:scoring": "tsx scripts/report-scoring.ts",
     "calibration:generate": "tsx scripts/generate-calibration-set.ts",
     "calibration:run": "tsx --env-file-if-exists=.env scripts/run-calibration.ts",
     "typecheck": "tsc --noEmit",
