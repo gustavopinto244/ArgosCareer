@@ -33,7 +33,22 @@ Opened 2026-08-16, after the incident recorded in
 
 ## A1 — Scoring the backlog takes ~18 hours
 
-**Status:** open · **Found:** 2026-08-16, measuring the fix for #49
+**Status:** fixed by ADR-022, pending measurement on a real run ·
+**Found:** 2026-08-16, measuring the fix for #49
+
+> **Resolution.** Stage B now issues its requirement calls concurrently,
+> bounded by `scoring.stageBConcurrency` (default 8), with the first call of
+> each posting issued alone to warm ADR-013's cached prefix. Expected to move
+> the backlog from ~18 h toward 2–3 h. **That number is an expectation, not a
+> measurement** — the real figure depends on provider latency under
+> concurrency, which is the variable this changed. This entry stays open until
+> a real run confirms it. Full reasoning, and why batching was rejected for
+> now, in [ADR-022](adr/022-bounded-concurrency-in-stage-b.md).
+>
+> One correction to what this entry originally said: it claimed bounded
+> concurrency "changes scoring behaviour". It does not. Same prompt per
+> requirement, same isolation, same cache keys, same answers — only the
+> waiting overlaps. Batching is the option that changes behaviour.
 
 Stage B issues one sequential model call **per requirement**. One real posting
 measured end to end against `deepseek/deepseek-v4-flash-0731`:
@@ -53,16 +68,14 @@ window the model runs in" stops being true.
 The 71% cache hit rate says ADR-013's static-prefix design is working, so the
 remaining time is latency × 26 round trips, not prompt size.
 
-**Resolving it** means one of: bounded concurrency across stage B's
-requirements; batching all requirements for a posting into a single call; or
-capping postings per run and draining across nights. The first two change
-scoring behaviour and both need an ADR — batching in particular changes what
-the model sees at once, which is exactly the variable M7's calibration
-protocol says to move one at a time. Deliberately not done inside an incident
-fix.
-
 **Related:** A2 — an 18-hour run and a scheduler with no overlap guard are
-only compatible by luck.
+only compatible by luck. Concurrency shortens the run; it does not add the
+guard, and A2 stays open.
+
+**Also related:** concurrency makes HTTP 429 reachable where sequential calls
+never approached a rate limit, and `OpenRouterClient` folds a non-2xx into the
+retry budget instead of backing off. Same shape as B3. Not triggered yet;
+noted so it is not a surprise if it is.
 
 ---
 

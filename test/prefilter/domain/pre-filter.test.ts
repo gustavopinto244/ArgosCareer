@@ -38,6 +38,7 @@ function baseCriteria(overrides: Partial<Criteria> = {}): Criteria {
       thresholds: { apply: 70, review: 45 },
       minExtractedRequirements: 1,
       blockingCapScore: 35,
+      stageBConcurrency: 8,
     },
     ...overrides,
   };

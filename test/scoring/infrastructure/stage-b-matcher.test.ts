@@ -256,3 +256,162 @@ describe("StageBMatcher.match — failure, never throws", () => {
     expect(matchesRepo.find("fp1", "hash1", "b-v2")).toBeNull();
   });
 });
+
+describe("StageBMatcher.match — bounded concurrency (ADR-022)", () => {
+  /** Resolves each call only when the test says so, so in-flight count is
+   * observable rather than inferred from timing. */
+  function controllableAsk() {
+    let inFlight = 0;
+    let peakInFlight = 0;
+    const pending: (() => void)[] = [];
+    const askedFor: string[] = [];
+
+    const ask = vi.fn(async (prompt: string) => {
+      // The requirement text is the only part that varies per call.
+      askedFor.push(
+        prompt.includes("REQ-") ? prompt.split("REQ-")[1]![0]! : "",
+      );
+      inFlight += 1;
+      peakInFlight = Math.max(peakInFlight, inFlight);
+      await new Promise<void>((resolve) => pending.push(resolve));
+      inFlight -= 1;
+      return '{"status":"met","evidence":"Built atlas-manager\'s HTTP layer in Node.js."}';
+    });
+
+    return {
+      ask,
+      askedFor,
+      peak: () => peakInFlight,
+      waiting: () => pending.length,
+      releaseAll: () => {
+        while (pending.length) pending.shift()!();
+      },
+    };
+  }
+
+  function requirements(count: number): Requirement[] {
+    return Array.from({ length: count }, (_, i) =>
+      requirement({ text: `REQ-${i} Node.js experience` }),
+    );
+  }
+
+  it("keeps at most `concurrency` calls in flight", async () => {
+    const c = controllableAsk();
+    const matcher = new StageBMatcher(c.ask, matchesRepo, "b-v2", 3);
+
+    const running = matcher.match(
+      "fp1",
+      requirements(9),
+      profile(),
+      "h",
+      () => NOW,
+    );
+
+    // The warming call goes out alone first (see below); release it, then
+    // let the pool fill and check it never exceeds the bound.
+    await vi.waitFor(() => expect(c.waiting()).toBe(1));
+    c.releaseAll();
+    await vi.waitFor(() => expect(c.waiting()).toBe(3));
+    c.releaseAll();
+    await vi.waitFor(() => expect(c.waiting()).toBeGreaterThan(0));
+    c.releaseAll();
+    await vi.waitFor(() => expect(c.waiting()).toBeGreaterThan(0));
+    c.releaseAll();
+
+    const result = await running;
+    expect(result.ok).toBe(true);
+    expect(c.peak()).toBeLessThanOrEqual(3);
+    expect(c.ask).toHaveBeenCalledTimes(9);
+  });
+
+  it("issues the first requirement alone, to warm the cached prefix", async () => {
+    const c = controllableAsk();
+    const matcher = new StageBMatcher(c.ask, matchesRepo, "b-v2", 8);
+
+    const running = matcher.match(
+      "fp1",
+      requirements(8),
+      profile(),
+      "h",
+      () => NOW,
+    );
+
+    // ADR-013's PROFILE_EVIDENCE prefix is only worth caching if something
+    // populates it before the fan-out races the same miss eight ways.
+    await vi.waitFor(() => expect(c.ask).toHaveBeenCalledTimes(1));
+    expect(c.peak()).toBe(1);
+
+    c.releaseAll();
+    await vi.waitFor(() => expect(c.waiting()).toBe(7));
+    c.releaseAll();
+
+    await running;
+  });
+
+  it("preserves requirement order even when calls settle out of order", async () => {
+    // Answers come back shortest-delay-first, which is the opposite of the
+    // order they were issued in. Stage C reads matches positionally against
+    // the requirement list, so a reordering here would silently mis-attribute
+    // every answer.
+    const order = ["2", "0", "3", "1"];
+    let call = 0;
+    const ask = vi.fn(async (prompt: string) => {
+      const index = prompt.split("REQ-")[1]![0]!;
+      const delay = order.indexOf(index) * 5;
+      call += 1;
+      await new Promise((r) => setTimeout(r, delay));
+      return `{"status":"met","evidence":"answer for ${index}"}`;
+    });
+
+    const matcher = new StageBMatcher(ask, matchesRepo, "b-v2", 4);
+    const result = await matcher.match(
+      "fp1",
+      requirements(4),
+      profile(),
+      "h",
+      () => NOW,
+    );
+
+    expect(call).toBe(4);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.matches.map((m) => m.requirement.text)).toEqual([
+        "REQ-0 Node.js experience",
+        "REQ-1 Node.js experience",
+        "REQ-2 Node.js experience",
+        "REQ-3 Node.js experience",
+      ]);
+      expect(result.matches.map((m) => m.evidence)).toEqual([
+        "answer for 0",
+        "answer for 1",
+        "answer for 2",
+        "answer for 3",
+      ]);
+    }
+  });
+
+  it("stops asking once a requirement fails, and caches nothing", async () => {
+    // The sequential loop returned on the first failure; concurrency must not
+    // turn that into "ask all 20 anyway". Calls already in flight still
+    // settle, so the bound is the assertion, not an exact count.
+    const ask = vi.fn(async (prompt: string) =>
+      prompt.includes("REQ-1 ")
+        ? "not json at all"
+        : '{"status":"met","evidence":"e"}',
+    );
+    const matcher = new StageBMatcher(ask, matchesRepo, "b-v2", 2);
+
+    const result = await matcher.match(
+      "fp1",
+      requirements(20),
+      profile(),
+      "h",
+      () => NOW,
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("matching_failed");
+    expect(ask.mock.calls.length).toBeLessThan(20);
+    expect(matchesRepo.find("fp1", "h", "b-v2")).toBeNull();
+  });
+});
