@@ -48,6 +48,16 @@ COPY drizzle ./drizzle
 # ADR-004 forbids. The ignore is what makes this safe; do not remove it.
 COPY config/ ./config/
 
+# The stage A/B prompt templates, which `prompts.ts` reads at scoring time by
+# relative path. Same omission as config/taxonomy.yaml above, and it shipped:
+# `prompts` was listed in .dockerignore, so the directory never entered the
+# build context and `/app/prompts` did not exist in the image at all. It stayed
+# invisible because a scoreAndDeliver run that filters down to zero postings
+# never loads a prompt — the first run with something to score, 2026-08-16,
+# was also the first to hit it. A directory copy, for the same reason config/
+# is one: a new prompt version must not be able to break the image by omission.
+COPY prompts/ ./prompts/
+
 # config/profile.yaml (gitignored, personal — ADR-004) and .env are never
 # baked into the image; compose.production.yaml mounts/injects them at
 # runtime. data/ (the SQLite database) is a named volume, not a layer.

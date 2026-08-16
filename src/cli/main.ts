@@ -285,93 +285,122 @@ export async function executeDeliver(
   const runId = runsRepo.start("scoreAndDeliver", now());
   const startedAt = now();
 
-  const lastDelivery = runsRepo.findLatestFinished(
-    "scoreAndDeliver",
-    "success",
-  );
-  const since = lastDelivery?.finishedAt ?? null;
-  const collectRuns = runsRepo.findRunsSince("collect", since);
-  const dedupRuns = runsRepo.findRunsSince("dedup", since);
+  // Counters live outside the try so the catch can record how far the run
+  // actually got, rather than writing zeroes over a batch that filtered 200
+  // postings and died on the 30th.
+  let filteredCount = 0;
+  let scoredCount = 0;
 
-  const collected = collectRuns.reduce((sum, r) => sum + r.collectedCount, 0);
-  const newCount = collectRuns.reduce((sum, r) => sum + r.newCount, 0);
-  const duplicateCount = dedupRuns.reduce(
-    (sum, r) => sum + r.duplicateCount,
-    0,
-  );
-  const deduplicated = Math.max(0, newCount - duplicateCount);
-  // Only one collector exists in M6 (Gupy) and runs carry no per-source
-  // breakdown yet — a failed collect run in the window is reported as
-  // "gupy" until a multi-source run records which source actually failed.
-  const failedSources = collectRuns.some((r) => r.outcome === "failed")
-    ? ["gupy"]
-    : [];
-
-  const profileKeywords = deriveProfileKeywords(profile);
-  const profileHash = hashProfile(profile);
-
-  const filtered = postingsRepo
-    .findUnnotified()
-    .filter(
-      (posting) =>
-        applyPreFilter(posting, criteria, profileKeywords, startedAt).passed,
-    );
-
-  const scoredEntries: ScoredPosting[] = [];
-  for (const posting of filtered) {
-    const result = await scorer.score(posting, profileHash);
-    if (result.ok) scoredEntries.push({ posting, outcome: result });
-  }
-
-  const digest = composeDigest({
-    runId,
-    generatedAt: startedAt,
-    scored: scoredEntries,
-    periodBlocked: [],
-    summary: {
-      collected,
-      deduplicated,
-      filtered: filtered.length,
-      scored: scoredEntries.length,
-      failedSources,
-    },
-  });
-
-  const notifyResult = await notifier.notify(digest);
-
-  if (!notifyResult.ok) {
+  // Every exit from here on must close the run row. It did not before: when
+  // `scorer.score` threw (2026-08-16, a prompt template missing from the
+  // container image), the row was left with `finishedAt: null` forever, which
+  // `/health` reads as "still running" and `findLatestFinished` skips
+  // entirely — so a hard failure was indistinguishable from a long batch, and
+  // `lastSuccessfulRun` kept pointing at the previous day. The throw is
+  // re-raised after bookkeeping: alerting is the caller's job, this only
+  // makes sure the row tells the truth first.
+  try {
+    return await deliver();
+  } catch (cause) {
     runsRepo.finish(runId, now(), "failed", {
-      filteredCount: filtered.length,
-      scoredCount: scoredEntries.length,
+      filteredCount,
+      scoredCount,
       deliveredCount: 0,
     });
+    throw cause;
+  }
+
+  async function deliver(): Promise<DeliverOutcome> {
+    const lastDelivery = runsRepo.findLatestFinished(
+      "scoreAndDeliver",
+      "success",
+    );
+    const since = lastDelivery?.finishedAt ?? null;
+    const collectRuns = runsRepo.findRunsSince("collect", since);
+    const dedupRuns = runsRepo.findRunsSince("dedup", since);
+
+    const collected = collectRuns.reduce((sum, r) => sum + r.collectedCount, 0);
+    const newCount = collectRuns.reduce((sum, r) => sum + r.newCount, 0);
+    const duplicateCount = dedupRuns.reduce(
+      (sum, r) => sum + r.duplicateCount,
+      0,
+    );
+    const deduplicated = Math.max(0, newCount - duplicateCount);
+    // Only one collector exists in M6 (Gupy) and runs carry no per-source
+    // breakdown yet — a failed collect run in the window is reported as
+    // "gupy" until a multi-source run records which source actually failed.
+    const failedSources = collectRuns.some((r) => r.outcome === "failed")
+      ? ["gupy"]
+      : [];
+
+    const profileKeywords = deriveProfileKeywords(profile);
+    const profileHash = hashProfile(profile);
+
+    const filtered = postingsRepo
+      .findUnnotified()
+      .filter(
+        (posting) =>
+          applyPreFilter(posting, criteria, profileKeywords, startedAt).passed,
+      );
+    filteredCount = filtered.length;
+
+    const scoredEntries: ScoredPosting[] = [];
+    for (const posting of filtered) {
+      const result = await scorer.score(posting, profileHash);
+      if (result.ok) scoredEntries.push({ posting, outcome: result });
+      scoredCount = scoredEntries.length;
+    }
+
+    const digest = composeDigest({
+      runId,
+      generatedAt: startedAt,
+      scored: scoredEntries,
+      periodBlocked: [],
+      summary: {
+        collected,
+        deduplicated,
+        filtered: filteredCount,
+        scored: scoredCount,
+        failedSources,
+      },
+    });
+
+    const notifyResult = await notifier.notify(digest);
+
+    if (!notifyResult.ok) {
+      runsRepo.finish(runId, now(), "failed", {
+        filteredCount,
+        scoredCount,
+        deliveredCount: 0,
+      });
+      return {
+        runId,
+        filtered: filteredCount,
+        scored: scoredCount,
+        delivered: 0,
+        error: notifyResult.error.message,
+      };
+    }
+
+    const deliveredAt = now();
+    const sent = [...digest.recommended, ...digest.review];
+    for (const entry of sent) {
+      postingsRepo.markNotified(entry.posting.fingerprint, deliveredAt);
+    }
+
+    runsRepo.finish(runId, deliveredAt, "success", {
+      filteredCount,
+      scoredCount,
+      deliveredCount: sent.length,
+    });
+
     return {
       runId,
-      filtered: filtered.length,
-      scored: scoredEntries.length,
-      delivered: 0,
-      error: notifyResult.error.message,
+      filtered: filteredCount,
+      scored: scoredCount,
+      delivered: sent.length,
     };
   }
-
-  const deliveredAt = now();
-  const sent = [...digest.recommended, ...digest.review];
-  for (const entry of sent) {
-    postingsRepo.markNotified(entry.posting.fingerprint, deliveredAt);
-  }
-
-  runsRepo.finish(runId, deliveredAt, "success", {
-    filteredCount: filtered.length,
-    scoredCount: scoredEntries.length,
-    deliveredCount: sent.length,
-  });
-
-  return {
-    runId,
-    filtered: filtered.length,
-    scored: scoredEntries.length,
-    delivered: sent.length,
-  };
 }
 
 export interface StudyPlanOutcome {

@@ -7,6 +7,7 @@ import { Profile } from "../../profile/domain/profile";
 import { ScorerPort } from "../domain/ports/scorer.port";
 import { ApiScorer } from "./api-scorer";
 import { OpenRouterClient } from "./openrouter-client";
+import { verifyPromptTemplates } from "./prompts";
 import { StageAExtractor } from "./stage-a-extractor";
 import { StageBMatcher } from "./stage-b-matcher";
 import { StubScorer } from "./stub-scorer";
@@ -46,6 +47,16 @@ export function buildScorer(
           "SCORER_ADAPTER=api requires LLM_API_KEY and LLM_MODEL (ADR-012)",
       };
     }
+    // Before the first posting, not during it: the templates are read from
+    // disk at scoring time, and on 2026-08-16 they were not in the container
+    // image at all. Checked here so a packaging mistake is reported as a
+    // misconfiguration, next to the missing-API-key case, rather than
+    // throwing out of `ApiScorer.score` mid-batch.
+    const promptError = verifyPromptTemplates();
+    if (promptError) {
+      return { ok: false, error: promptError };
+    }
+
     const client = new OpenRouterClient({
       apiKey,
       model,
