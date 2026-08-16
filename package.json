@@ -17,6 +17,7 @@
     "start": "node --env-file-if-exists=.env dist/main.js",
     "cli": "tsx --env-file-if-exists=.env src/cli/main.ts",
     "fixture:gupy": "tsx scripts/fixture-gupy.ts",
+    "fixture:ciee": "tsx scripts/fixture-ciee.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",
     "backup": "tsx scripts/backup.ts",

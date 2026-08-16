@@ -1,0 +1,203 @@
+{
+  "content": [
+    {
+      "codigoVaga": 9000001,
+      "tipoVaga": "ESTAGIO",
+      "nomeEmpresa": "ALFA SERVICOS DIGITAIS LTDA",
+      "areaAtuacao": null,
+      "areaProfissional": "Informática",
+      "salario": null,
+      "bolsaAuxilio": 1000,
+      "quantidadeBeneficios": 3,
+      "tipoAuxilioBolsa": "Mensal",
+      "tipoValorBolsa": "FIXO",
+      "tipoSalarioValor": null,
+      "tipoSalario": null,
+      "bolsaAuxilioDe": null,
+      "bolsaAuxilioAte": null,
+      "salarioDe": null,
+      "salarioAte": null,
+      "beneficios": [
+        {
+          "codigo": 12008,
+          "beneficio": "Totalpass",
+          "valor": 0
+        },
+        {
+          "codigo": 12009,
+          "beneficio": "Parceria com o Sesc",
+          "valor": 0
+        }
+      ],
+      "descricao": "Desenvolvimento de programas de computador sob encomenda",
+      "local": {
+        "tipoLogradouro": null,
+        "endereco": null,
+        "numero": null,
+        "bairro": "Centro",
+        "complemento": null,
+        "cep": null,
+        "cidade": "Rio de Janeiro",
+        "uf": "RJ"
+      },
+      "tipoHorario": "A_COMBINAR",
+      "horarioEntrada": null,
+      "horarioSaida": null,
+      "atividades": [
+        "Atividade exemplo 1 da vaga 1",
+        "Atividade exemplo 2 da vaga 1",
+        "Atividade exemplo 3 da vaga 1"
+      ],
+      "requisitos": {
+        "semestreInicio": 7,
+        "semestreFinal": 9,
+        "escolas": null
+      },
+      "nivelEscolar": "SU",
+      "logo": null
+    },
+    {
+      "codigoVaga": 9000002,
+      "tipoVaga": "ESTAGIO",
+      "nomeEmpresa": "BETA COMERCIO DE ALIMENTOS SA",
+      "areaAtuacao": null,
+      "areaProfissional": "DEMAIS AREAS - 20H ESTAGIO SEMANAL",
+      "salario": null,
+      "bolsaAuxilio": 729.98,
+      "quantidadeBeneficios": 1,
+      "tipoAuxilioBolsa": "Mensal",
+      "tipoValorBolsa": "FIXO",
+      "tipoSalarioValor": null,
+      "tipoSalario": null,
+      "bolsaAuxilioDe": null,
+      "bolsaAuxilioAte": null,
+      "salarioDe": null,
+      "salarioAte": null,
+      "beneficios": [],
+      "descricao": "Comércio varejista de mercadorias em geral",
+      "local": {
+        "tipoLogradouro": null,
+        "endereco": null,
+        "numero": null,
+        "bairro": "Bela Vista",
+        "complemento": null,
+        "cep": null,
+        "cidade": "São Paulo",
+        "uf": "SP"
+      },
+      "tipoHorario": "DEFINIDO",
+      "horarioEntrada": "14:00:00",
+      "horarioSaida": "18:00:00",
+      "atividades": [
+        "Atividade exemplo 1 da vaga 2",
+        "Atividade exemplo 2 da vaga 2",
+        "Atividade exemplo 3 da vaga 2",
+        "Atividade exemplo 4 da vaga 2",
+        "Atividade exemplo 5 da vaga 2"
+      ],
+      "requisitos": {
+        "semestreInicio": 3,
+        "semestreFinal": 6,
+        "escolas": null
+      },
+      "nivelEscolar": "EM",
+      "logo": null
+    },
+    {
+      "codigoVaga": 9000003,
+      "tipoVaga": "ESTAGIO",
+      "nomeEmpresa": "GAMA INDUSTRIA EXEMPLO ME",
+      "areaAtuacao": null,
+      "areaProfissional": "Ensino Médio",
+      "salario": null,
+      "bolsaAuxilio": 800,
+      "quantidadeBeneficios": 1,
+      "tipoAuxilioBolsa": "Mensal",
+      "tipoValorBolsa": "FIXO",
+      "tipoSalarioValor": null,
+      "tipoSalario": null,
+      "bolsaAuxilioDe": null,
+      "bolsaAuxilioAte": null,
+      "salarioDe": null,
+      "salarioAte": null,
+      "beneficios": [],
+      "descricao": null,
+      "local": {
+        "tipoLogradouro": null,
+        "endereco": null,
+        "numero": null,
+        "bairro": "Centro",
+        "complemento": null,
+        "cep": null,
+        "cidade": "Cidade Exemplo",
+        "uf": "MG"
+      },
+      "tipoHorario": "DEFINIDO",
+      "horarioEntrada": "08:00:00",
+      "horarioSaida": "12:00:00",
+      "atividades": [
+        "Atividade exemplo 1 da vaga 3",
+        "Atividade exemplo 2 da vaga 3",
+        "Atividade exemplo 3 da vaga 3"
+      ],
+      "requisitos": {
+        "semestreInicio": null,
+        "semestreFinal": null,
+        "escolas": null
+      },
+      "nivelEscolar": "EM",
+      "logo": null
+    },
+    {
+      "codigoVaga": 9000004,
+      "tipoVaga": "ESTAGIO",
+      "nomeEmpresa": "DELTA LOGISTICA EXEMPLO",
+      "areaAtuacao": null,
+      "areaProfissional": "Ensino Médio",
+      "salario": null,
+      "bolsaAuxilio": null,
+      "quantidadeBeneficios": 1,
+      "tipoAuxilioBolsa": "Mensal",
+      "tipoValorBolsa": "A_COMBINAR",
+      "tipoSalarioValor": null,
+      "tipoSalario": null,
+      "bolsaAuxilioDe": 750,
+      "bolsaAuxilioAte": 1125,
+      "salarioDe": null,
+      "salarioAte": null,
+      "beneficios": [],
+      "descricao": "Transporte rodoviário de carga",
+      "local": {
+        "tipoLogradouro": null,
+        "endereco": null,
+        "numero": null,
+        "bairro": null,
+        "complemento": null,
+        "cep": null,
+        "cidade": "Vila Exemplo",
+        "uf": "ES"
+      },
+      "tipoHorario": "A_COMBINAR",
+      "horarioEntrada": null,
+      "horarioSaida": null,
+      "atividades": [
+        "Atividade exemplo 1 da vaga 4",
+        "Atividade exemplo 2 da vaga 4",
+        "Atividade exemplo 3 da vaga 4",
+        "Atividade exemplo 4 da vaga 4"
+      ],
+      "requisitos": {
+        "semestreInicio": 1,
+        "semestreFinal": 4,
+        "escolas": null
+      },
+      "nivelEscolar": "EM",
+      "logo": null
+    }
+  ],
+  "totalElements": 4,
+  "totalPages": 1,
+  "last": true,
+  "number": 0,
+  "size": 4
+}

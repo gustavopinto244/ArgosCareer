@@ -13,7 +13,7 @@
  */
 import { parseArgs } from "node:util";
 import { CollectorPort } from "../posting/domain/ports/collector.port";
-import { normalizeGupyJob } from "../posting/infrastructure/gupy-normalizer";
+import { normalizerFor } from "../posting/infrastructure/normalizer-registry";
 import { GupyCollector } from "../posting/infrastructure/gupy-collector";
 import {
   DEFAULT_DEDUP_CONFIG,
@@ -57,6 +57,9 @@ export interface CollectOutcome {
    * quietly discarding everything shows up instead of looking like a dead
    * source. */
   readonly tooOld: number;
+  /** Postings from a source with no registered normalizer — a wiring bug,
+   * not a degraded source, and it must not look like one. */
+  readonly unnormalizable: number;
   readonly isNew: number;
   readonly alreadySeen: number;
   readonly error?: string;
@@ -126,6 +129,7 @@ export async function executeCollect(
   let alreadySeen = 0;
   let failures = 0;
   let tooOld = 0;
+  let unnormalizable = 0;
   let firstError: string | undefined;
 
   for (const [index, query] of queries.entries()) {
@@ -144,7 +148,16 @@ export async function executeCollect(
 
     const collectedAt = now();
     for (const raw of result.postings) {
-      const posting = normalizeGupyJob(raw, collectedAt);
+      // Dispatch by the source the payload declares, not by which collector
+      // was passed in — an unregistered source is a wiring bug, and saying
+      // so beats dropping every posting and looking like an empty source.
+      const normalize = normalizerFor(raw.source);
+      if (!normalize) {
+        firstError ??= `No normalizer registered for source "${raw.source}"`;
+        unnormalizable += 1;
+        continue;
+      }
+      const posting = normalize(raw, collectedAt);
       if (!posting) continue;
       // A posting the source never dated passes: absence of a date is not
       // evidence of an old posting, the same leniency ADR-011 applies to an
@@ -177,6 +190,7 @@ export async function executeCollect(
     collected,
     normalized,
     tooOld,
+    unnormalizable,
     isNew,
     alreadySeen,
     ...(firstError === undefined ? {} : { error: firstError }),
@@ -460,6 +474,9 @@ async function collectCommand(args: string[]): Promise<void> {
   console.log(
     `collect (run ${outcome.runId}): ${outcome.collected} collected, ` +
       `${outcome.normalized} normalized, ${outcome.tooOld} outside the recency window, ` +
+      (outcome.unnormalizable > 0
+        ? `${outcome.unnormalizable} with no normalizer, `
+        : "") +
       `${outcome.isNew} new, ${outcome.alreadySeen} already seen`,
   );
 }
