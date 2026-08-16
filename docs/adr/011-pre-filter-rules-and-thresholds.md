@@ -6,6 +6,7 @@ Accepted — amended 2026-08-15, see
 [Amendment 1](#amendment-1--2026-08-15-title-rules-match-whole-words-not-substrings)
 and
 [Amendment 2](#amendment-2--2026-08-15-track-keywords-match-whole-words-too)
+and [Amendment 3](#amendment-3--2026-08-16-location-leniency-becomes-asymmetric)
 
 ## Date
 
@@ -239,3 +240,28 @@ aliases, which are multi-word or distinctive (`TypeScript`, `PostgreSQL`,
 `Linux server administration`), and the rule is disabled at floor 0 anyway.
 If it is ever enabled, re-check it against this same failure mode rather than
 assuming — which is exactly the mistake Amendment 1 made.
+
+---
+
+## Amendment 3 — 2026-08-16: location leniency becomes asymmetric
+
+The original rule rejected only when **both** axes were known-bad, so an
+unknown `workMode` passed regardless of city. That held while Gupy was the
+only source and usually stated it.
+
+CIEE states no work mode at all — the field does not exist on the record.
+Switching it on took the pre-filter's pass count from 127 to **1,987**, with
+São Paulo (216), Brasília (133) and Fortaleza (77) all passing on the theory
+that they "cannot be ruled out as remote", and all of them headed for paid
+Stage A extraction.
+
+**Decision:** reject when the city is known and disallowed, whatever the work
+mode. An unknown _location_ still passes, unchanged — it genuinely cannot be
+ruled out as being in the target region.
+
+The asymmetry is the whole point: absence of evidence about _how_ the work
+happens does not outweigh positive evidence about _where_ it happens.
+
+**Measured before changing it:** of the 1,700 postings passing only because
+of the old rule, **1,700 were CIEE and 0 were Gupy**. Tightening cost nothing
+that was working. Pass count went 1,987 → 291. Full reasoning in ADR-021.

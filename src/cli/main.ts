@@ -13,8 +13,8 @@
  */
 import { parseArgs } from "node:util";
 import { CollectorPort } from "../posting/domain/ports/collector.port";
+import { collectorFor } from "../posting/infrastructure/collector-registry";
 import { normalizerFor } from "../posting/infrastructure/normalizer-registry";
-import { GupyCollector } from "../posting/infrastructure/gupy-collector";
 import {
   DEFAULT_DEDUP_CONFIG,
   DedupConfig,
@@ -95,9 +95,16 @@ export interface RecencyWindow {
   readonly backfillDays: number;
 }
 
+/**
+ * Resolves the collector for a query's `source`. Production passes
+ * `collectorFor`; tests pass a stub so no suite ever touches the network
+ * (docs/07-testing-strategy.md).
+ */
+export type CollectorResolver = (source: string) => CollectorPort | null;
+
 export async function executeCollect(
   db: Db,
-  collector: CollectorPort,
+  collectors: CollectorResolver,
   queries: readonly unknown[],
   now: () => Date = () => new Date(),
   queryIntervalMs: number = DEFAULT_QUERY_INTERVAL_MS,
@@ -136,6 +143,20 @@ export async function executeCollect(
     // The collector's own interval only spaces out pages *within* one query,
     // so the gap between queries is this loop's responsibility (CLAUDE.md §6).
     if (index > 0 && queryIntervalMs > 0) await sleep(queryIntervalMs);
+
+    // `source` decides who fetches, exactly as `RawPosting.source` decides
+    // who normalizes. A query naming a source this build cannot collect from
+    // is a config error, reported rather than skipped.
+    const source =
+      typeof query === "object" && query !== null && "source" in query
+        ? String((query as { source?: unknown }).source ?? "gupy")
+        : "gupy";
+    const collector = collectors(source);
+    if (!collector) {
+      failures += 1;
+      firstError ??= `No collector registered for source "${source}"`;
+      continue;
+    }
 
     const result = await collector.collect(query);
     collected += result.postings.length;
@@ -458,7 +479,7 @@ async function collectCommand(args: string[]): Promise<void> {
 
   const outcome = await executeCollect(
     openDatabase(),
-    new GupyCollector(),
+    collectorFor,
     queries,
     () => new Date(),
     criteria.collection.queryIntervalMs,

@@ -28,7 +28,7 @@ const PROFILE_HASH = "hash1";
 function criteria(): Criteria {
   return {
     collection: {
-      queries: [{}],
+      queries: [{ source: "gupy" }],
       queryIntervalMs: 0,
       recencyDays: 1,
       backfillDays: 7,

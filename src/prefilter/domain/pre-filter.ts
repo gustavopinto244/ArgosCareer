@@ -39,16 +39,23 @@ function isExpired(posting: Posting, now: Date): boolean {
 }
 
 /**
- * Rio de Janeiro metro, or remote (CLAUDE.md §6). Rejects only when **both**
- * axes are definitively known-bad — `workMode` known and not remote, **and**
- * `location` known and not in the configured cities. Either axis being
- * `unknown` passes rather than silently discarding or accepting (M5): an
- * unknown `workMode` cannot be ruled out as remote, and an unknown location
- * cannot be ruled out as being in the target region.
+ * Rio de Janeiro metro, or remote (CLAUDE.md §6).
+ *
+ * Leniency is **asymmetric**, and ADR-011 Amendment 3 explains why the
+ * original symmetric version had to change. An unknown *location* still
+ * passes: the posting cannot be ruled out as being in the target region.
+ * An unknown *work mode* no longer rescues a posting whose city is known
+ * and outside it — absence of evidence about how the work happens does not
+ * outweigh positive evidence about where it happens.
+ *
+ * The original rule was written when Gupy was the only source and usually
+ * stated `workMode`. CIEE never states it, so under the symmetric rule
+ * every São Paulo, Brasília and Fortaleza posting passed on the theory that
+ * it "cannot be ruled out as remote" — 1,700 of them, measured.
  */
 function isLocationAllowed(posting: Posting, criteria: Criteria): boolean {
   if (posting.workMode === "remote") return criteria.location.allowRemote;
-  if (posting.workMode === "unknown") return true;
+  // An unknown location is still unknown, from any source.
   if (posting.location.kind === "unknown") return true;
 
   const normalizedCity = normalize(posting.location.city);

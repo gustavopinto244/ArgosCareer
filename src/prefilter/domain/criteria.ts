@@ -32,6 +32,13 @@ export const ScoringConfigSchema = z.object({
  * transport detail — `pageSize`, timeouts and backoff stay in the adapter.
  */
 export const CollectionQuerySchema = z.object({
+  /**
+   * Which collector answers this query (`src/posting/infrastructure/
+   * collector-registry.ts`). Defaults to `gupy` so a criteria file written
+   * before a second source existed keeps meaning exactly what it meant —
+   * the same backward-compatibility discipline the rest of this schema uses.
+   */
+  source: z.string().min(1).default("gupy"),
   jobName: z.string().min(1).optional(),
   city: z.string().min(1).optional(),
   isRemoteWork: z.boolean().optional(),
@@ -97,7 +104,7 @@ export const CollectionSchema = z.object({
  */
 export const CriteriaSchema = z.object({
   collection: CollectionSchema.default({
-    queries: [{}],
+    queries: [{ source: "gupy" }],
     queryIntervalMs: 1_500,
     recencyDays: 1,
     backfillDays: 7,

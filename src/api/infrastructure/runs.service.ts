@@ -111,7 +111,7 @@ export class RunsService {
     const queries = isAdHoc ? [params] : this.criteria.collection.queries;
     return executeCollect(
       this.db,
-      this.collector,
+      () => this.collector,
       queries,
       () => new Date(),
       this.criteria.collection.queryIntervalMs,

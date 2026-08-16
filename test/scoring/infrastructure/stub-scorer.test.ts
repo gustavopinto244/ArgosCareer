@@ -8,7 +8,7 @@ const NOW = new Date("2026-08-14T03:00:00Z");
 function criteria(overrides: Partial<Criteria> = {}): Criteria {
   return {
     collection: {
-      queries: [{}],
+      queries: [{ source: "gupy" }],
       queryIntervalMs: 0,
       recencyDays: 1,
       backfillDays: 7,

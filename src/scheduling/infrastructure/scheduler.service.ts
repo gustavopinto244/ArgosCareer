@@ -9,7 +9,7 @@ import {
   runMigrations,
 } from "../../persistence/infrastructure/db";
 import { RunsRepository } from "../../persistence/infrastructure/runs-repository";
-import { GupyCollector } from "../../posting/infrastructure/gupy-collector";
+import { collectorFor } from "../../posting/infrastructure/collector-registry";
 import { Criteria } from "../../prefilter/domain/criteria";
 import { loadCriteria } from "../../prefilter/infrastructure/criteria-loader";
 import { Profile } from "../../profile/domain/profile";
@@ -123,7 +123,7 @@ export class SchedulerService implements OnModuleInit {
     try {
       await executeCollect(
         this.db,
-        new GupyCollector(),
+        collectorFor,
         this.criteria.collection.queries,
         () => new Date(),
         this.criteria.collection.queryIntervalMs,
