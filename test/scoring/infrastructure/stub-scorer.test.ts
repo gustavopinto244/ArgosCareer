@@ -19,6 +19,7 @@ function criteria(overrides: Partial<Criteria> = {}): Criteria {
     blockedCompanies: [],
     minKeywordAdherence: 0,
     maxAgeDays: null,
+    undatedBacklogCutoverAt: null,
     tracks: {
       dev: ["backend"],
       security: ["segurança"],

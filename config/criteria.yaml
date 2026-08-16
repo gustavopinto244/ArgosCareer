@@ -186,6 +186,20 @@ minKeywordAdherence: 0
 # backlog that exists today. It starts acting once a week has passed.
 maxAgeDays: 7
 
+# Business rule (ADR-011 Amendment 5): an undated posting first seen at or
+# before this instant is presumed already past maxAgeDays, unconditionally --
+# not measured against firstSeenAt, just treated as stale. Distinguishes the
+# 2026-08-16 backlog (2,079 CIEE postings that will never get a publishedAt,
+# all sharing one firstSeenAt from the bulk import) from postings that enter
+# afterward through ordinary collection, which still get the normal
+# maxAgeDays grace period via firstSeenAt -- unaffected by this line.
+#
+# Set once, to the moment this policy was adopted, and left in place. Not a
+# value to keep bumping forward: everything collected up to here is "the
+# backlog this rule exists to clear," everything after is "entering," and
+# that dividing line does not move.
+undatedBacklogCutoverAt: "2026-08-16T12:15:00Z"
+
 # Keyword classification per track, feeding trackAlignment (docs/04). A
 # posting matching a track's list is classified into it; matching none
 # leaves it unknown (trackWeights.unknown), not rejected.

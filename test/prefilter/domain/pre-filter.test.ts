@@ -19,6 +19,7 @@ function baseCriteria(overrides: Partial<Criteria> = {}): Criteria {
     blockedCompanies: ["Empresa Bloqueada"],
     minKeywordAdherence: 0,
     maxAgeDays: null,
+    undatedBacklogCutoverAt: null,
     tracks: {
       dev: ["backend", "node"],
       security: ["segurança"],
@@ -233,6 +234,74 @@ describe("applyPreFilter — maxAgeDays (age limit)", () => {
       NOW,
     );
     expect(outcome.reason).toBe("expired");
+  });
+});
+
+describe("applyPreFilter — undatedBacklogCutoverAt (ADR-011 Amendment 5)", () => {
+  const CUTOVER = new Date("2026-08-16T12:00:00Z");
+
+  it("does nothing when the cutover is null (the default)", () => {
+    const outcome = applyPreFilter(
+      posting({ publishedAt: null, firstSeenAt: NOW }), // just seen, no date
+      baseCriteria({ maxAgeDays: 7, undatedBacklogCutoverAt: null }),
+      [],
+      NOW,
+    );
+    expect(outcome.passed).toBe(true);
+  });
+
+  it("rejects an undated posting first seen at or before the cutover, regardless of actual age", () => {
+    const outcome = applyPreFilter(
+      // firstSeenAt equals the cutover exactly and NOW is the same instant —
+      // by real elapsed time this posting is 0 days old, not 7.
+      posting({ publishedAt: null, firstSeenAt: CUTOVER }),
+      baseCriteria({ maxAgeDays: 7, undatedBacklogCutoverAt: CUTOVER }),
+      [],
+      CUTOVER,
+    );
+    expect(outcome.reason).toBe("too_old");
+  });
+
+  it("does not reject an undated posting first seen after the cutover — it is 'entering', not backlog", () => {
+    const outcome = applyPreFilter(
+      posting({
+        publishedAt: null,
+        firstSeenAt: new Date(CUTOVER.getTime() + 1000), // one second after
+      }),
+      baseCriteria({ maxAgeDays: 7, undatedBacklogCutoverAt: CUTOVER }),
+      [],
+      new Date(CUTOVER.getTime() + 1000),
+    );
+    expect(outcome.passed).toBe(true);
+  });
+
+  it("does not apply to a posting that does have a publishedAt, even before the cutover", () => {
+    // A dated posting's freshness is a measured fact, not a presumption —
+    // the cutover exists specifically for the undated case.
+    const outcome = applyPreFilter(
+      posting({
+        publishedAt: new Date(CUTOVER.getTime() - 1000),
+        firstSeenAt: new Date(CUTOVER.getTime() - 1000),
+      }),
+      baseCriteria({ maxAgeDays: 7, undatedBacklogCutoverAt: CUTOVER }),
+      [],
+      CUTOVER,
+    );
+    expect(outcome.passed).toBe(true);
+  });
+
+  it("never mutates firstSeenAt — the posting's own record is untouched", () => {
+    const original = posting({ publishedAt: null, firstSeenAt: CUTOVER });
+    const before = original.firstSeenAt.getTime();
+
+    applyPreFilter(
+      original,
+      baseCriteria({ maxAgeDays: 7, undatedBacklogCutoverAt: CUTOVER }),
+      [],
+      CUTOVER,
+    );
+
+    expect(original.firstSeenAt.getTime()).toBe(before);
   });
 });
 

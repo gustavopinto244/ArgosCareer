@@ -156,15 +156,25 @@ only, all older than a day) and thousands.
 Not a bug in the sense that the code does what ADR-019 says. The problem is
 that ADR-019's reasoning assumed the undated posting was the exception.
 
-> **Partial mitigation, 2026-08-16.** `criteria.scoring.maxAgeDays`
+> **Mitigated at the pre-filter, 2026-08-16.** `criteria.maxAgeDays`
 > (ADR-011 Amendment 4) stops an old posting from reaching the LLM, with the
-> same `firstSeenAt` fallback this entry proposed. **This is a pre-filter
-> rule, not a collection rule — it is a different stage from the one this
-> entry is actually about.** It bounds what gets scored, which is the
-> concrete cost this project pays (Stage A/B calls). It does nothing about
-> what ADR-019 governs: the corpus itself still grows without limit, every
-> CIEE posting is still collected and stored regardless of age, and
-> `recencyDays: 1` is still inert for 100% of CIEE. Left open for that reason.
+> same `firstSeenAt` fallback this entry proposed, and
+> `criteria.undatedBacklogCutoverAt` (Amendment 5) turns that into an
+> immediate business rule rather than a week-long wait: every undated
+> posting collected up to 2026-08-16T12:15:00Z — the entire pre-existing
+> CIEE backlog — is presumed already past `maxAgeDays` outright, once this
+> code is deployed. **This is still a pre-filter rule, not a collection
+> rule — a different stage from the one this entry is actually about.** It
+> bounds what gets scored, which is the concrete cost this project pays
+> (Stage A/B calls). It does nothing about what ADR-019 governs: the corpus
+> itself still grows without limit, every CIEE posting is still collected
+> and stored regardless of age, and `recencyDays: 1` is still inert for
+> 100% of CIEE. Left open for that reason.
+>
+> **Deployment note:** this needs a container restart to take effect, and a
+> restart mid-run kills whatever `scoreAndDeliver` cycle is in flight — no
+> graceful drain exists, so the run's row orphans (C1) and that night's
+> digest does not go out. Deploy only between cycles, never during one.
 
 **Resolving the rest** means deciding what "recent" means for a source that
 never publishes dates, at the **collection** stage — not re-admitting the

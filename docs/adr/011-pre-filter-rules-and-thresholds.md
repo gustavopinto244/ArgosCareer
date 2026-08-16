@@ -9,6 +9,8 @@ and
 and [Amendment 3](#amendment-3--2026-08-16-location-leniency-becomes-asymmetric)
 and
 [Amendment 4](#amendment-4--2026-08-16-an-age-limit-deliberately-exempted-from-the-unknown-axis-rule)
+and
+[Amendment 5](#amendment-5--2026-08-16-a-business-rule-for-the-existing-undated-backlog)
 
 ## Date
 
@@ -294,3 +296,37 @@ retroactive cut to a backlog that already exists. Set to 7 in
 `criteria.yaml` at the same time this was written — see the comment there for
 the measurement behind that number, and ADR-022 for why a nightly cycle's
 wall-clock is worth protecting in the first place.
+
+## Amendment 5 — 2026-08-16: a business rule for the existing undated backlog
+
+Amendment 4 above states its own limit plainly: the `firstSeenAt` fallback
+does nothing for ADR-021's bulk CIEE import until real time carries every
+shared `firstSeenAt` past `maxAgeDays`. Requested directly: treat every
+posting already collected without a date as presumed stale now, without
+waiting a week for the clock to run out — and make that a standing rule, not
+a one-off database edit.
+
+**Decision:** `criteria.undatedBacklogCutoverAt`, a configured instant. An
+undated posting first seen at or before it is presumed already past
+`maxAgeDays`, unconditionally — not measured, just decided. An undated
+posting first seen after it is untouched by this rule and gets Amendment 4's
+ordinary `firstSeenAt`-based grace period, same as before. The cutover is the
+line between "the backlog this rule exists to clear" and postings that enter
+afterward through ordinary collection.
+
+**Explicitly rejected: backdating `firstSeenAt` itself.** That field is this
+system's honest record of when it first observed a posting
+(`docs/05-domain-model.md`), read by anything that later looks at the corpus
+— M10's market analysis among it. Fabricating an earlier value to make the
+existing age rule fire would plant a false fact exactly where CLAUDE.md §15
+forbids one ("do not invent a fact that can be checked"), and it would corrupt
+that fact for every future reader, not only this rule. The cutover is a
+separate, explicit, git-tracked policy line instead — a decision about what
+to do with unknown-age postings, not a claim about when they were seen.
+
+**Consequence:** the rule is a one-way ratchet by design, not a value meant
+to move. Set once, to the moment this policy was adopted
+(`2026-08-16T12:15:00Z`), and left in place. It becomes redundant, not wrong,
+once real time carries the pre-cutover backlog's `firstSeenAt` past
+`maxAgeDays` on its own — at that point Amendment 4's ordinary rule would
+reject the same postings anyway, so there is no cleanup step to schedule.

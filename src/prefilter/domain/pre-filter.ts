@@ -61,14 +61,30 @@ function isExpired(posting: Posting, now: Date): boolean {
  * The consequence worth knowing: a bulk import gives thousands of postings
  * the same `firstSeenAt`, so this rule does nothing for them until the window
  * passes and then drops them all at once. It is a bound on growth, not a
- * retroactive cleanup.
+ * retroactive cleanup — `undatedBacklogCutoverAt` below is what makes it one.
+ *
+ * `undatedBacklogCutoverAt` (ADR-011 Amendment 5) is checked first and, when
+ * it fires, short-circuits the `maxAgeDays` math entirely: an undated
+ * posting first seen at or before the cutover is presumed already past the
+ * limit, full stop, rather than having its real gap computed. That is a
+ * deliberate business decision, not a measurement — see the schema comment
+ * on `Criteria.undatedBacklogCutoverAt` for why `firstSeenAt` itself is never
+ * rewritten to express it.
  */
 function isTooOld(
   posting: Posting,
   maxAgeDays: number | null,
+  undatedBacklogCutoverAt: Date | null,
   now: Date,
 ): boolean {
   if (maxAgeDays === null) return false;
+  if (
+    posting.publishedAt === null &&
+    undatedBacklogCutoverAt !== null &&
+    posting.firstSeenAt.getTime() <= undatedBacklogCutoverAt.getTime()
+  ) {
+    return true;
+  }
   const reference = posting.publishedAt ?? posting.firstSeenAt;
   const ageMs = now.getTime() - reference.getTime();
   return ageMs > maxAgeDays * 24 * 60 * 60 * 1000;
@@ -160,7 +176,14 @@ export function applyPreFilter(
   }
   // After `expired`, before `location`: both are single-field date checks and
   // a closed posting is the more decisive rejection of the two.
-  if (isTooOld(posting, criteria.maxAgeDays, now)) {
+  if (
+    isTooOld(
+      posting,
+      criteria.maxAgeDays,
+      criteria.undatedBacklogCutoverAt,
+      now,
+    )
+  ) {
     return { passed: false, reason: "too_old", tracks };
   }
   if (!isLocationAllowed(posting, criteria)) {
