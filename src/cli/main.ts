@@ -139,63 +139,78 @@ export async function executeCollect(
   let unnormalizable = 0;
   let firstError: string | undefined;
 
-  for (const [index, query] of queries.entries()) {
-    // The collector's own interval only spaces out pages *within* one query,
-    // so the gap between queries is this loop's responsibility (CLAUDE.md §6).
-    if (index > 0 && queryIntervalMs > 0) await sleep(queryIntervalMs);
+  // Same bookkeeping guarantee `executeDeliver` documents: a throw between
+  // `start` and `finish` must not leave the row open. Collectors cannot throw
+  // (principle 1) and the normalizers use `safeParse`, so the realistic
+  // trigger here is the database itself — a locked or full disk mid-upsert.
+  // Narrower than the deliver case, identical in consequence.
+  try {
+    for (const [index, query] of queries.entries()) {
+      // The collector's own interval only spaces out pages *within* one query,
+      // so the gap between queries is this loop's responsibility (CLAUDE.md §6).
+      if (index > 0 && queryIntervalMs > 0) await sleep(queryIntervalMs);
 
-    // `source` decides who fetches, exactly as `RawPosting.source` decides
-    // who normalizes. A query naming a source this build cannot collect from
-    // is a config error, reported rather than skipped.
-    const source =
-      typeof query === "object" && query !== null && "source" in query
-        ? String((query as { source?: unknown }).source ?? "gupy")
-        : "gupy";
-    const collector = collectors(source);
-    if (!collector) {
-      failures += 1;
-      firstError ??= `No collector registered for source "${source}"`;
-      continue;
-    }
-
-    const result = await collector.collect(query);
-    collected += result.postings.length;
-
-    if (result.error) {
-      failures += 1;
-      firstError ??= result.error.message;
-      continue;
-    }
-
-    const collectedAt = now();
-    for (const raw of result.postings) {
-      // Dispatch by the source the payload declares, not by which collector
-      // was passed in — an unregistered source is a wiring bug, and saying
-      // so beats dropping every posting and looking like an empty source.
-      const normalize = normalizerFor(raw.source);
-      if (!normalize) {
-        firstError ??= `No normalizer registered for source "${raw.source}"`;
-        unnormalizable += 1;
+      // `source` decides who fetches, exactly as `RawPosting.source` decides
+      // who normalizes. A query naming a source this build cannot collect from
+      // is a config error, reported rather than skipped.
+      const source =
+        typeof query === "object" && query !== null && "source" in query
+          ? String((query as { source?: unknown }).source ?? "gupy")
+          : "gupy";
+      const collector = collectors(source);
+      if (!collector) {
+        failures += 1;
+        firstError ??= `No collector registered for source "${source}"`;
         continue;
       }
-      const posting = normalize(raw, collectedAt);
-      if (!posting) continue;
-      // A posting the source never dated passes: absence of a date is not
-      // evidence of an old posting, the same leniency ADR-011 applies to an
-      // unknown location/workMode.
-      if (
-        cutoff !== null &&
-        posting.publishedAt !== null &&
-        posting.publishedAt.getTime() < cutoff.getTime()
-      ) {
-        tooOld += 1;
+
+      const result = await collector.collect(query);
+      collected += result.postings.length;
+
+      if (result.error) {
+        failures += 1;
+        firstError ??= result.error.message;
         continue;
       }
-      normalized += 1;
-      const { wasNew } = postingsRepo.upsert(posting);
-      if (wasNew) isNew += 1;
-      else alreadySeen += 1;
+
+      const collectedAt = now();
+      for (const raw of result.postings) {
+        // Dispatch by the source the payload declares, not by which collector
+        // was passed in — an unregistered source is a wiring bug, and saying
+        // so beats dropping every posting and looking like an empty source.
+        const normalize = normalizerFor(raw.source);
+        if (!normalize) {
+          firstError ??= `No normalizer registered for source "${raw.source}"`;
+          unnormalizable += 1;
+          continue;
+        }
+        const posting = normalize(raw, collectedAt);
+        if (!posting) continue;
+        // A posting the source never dated passes: absence of a date is not
+        // evidence of an old posting, the same leniency ADR-011 applies to an
+        // unknown location/workMode.
+        if (
+          cutoff !== null &&
+          posting.publishedAt !== null &&
+          posting.publishedAt.getTime() < cutoff.getTime()
+        ) {
+          tooOld += 1;
+          continue;
+        }
+        normalized += 1;
+        const { wasNew } = postingsRepo.upsert(posting);
+        if (wasNew) isNew += 1;
+        else alreadySeen += 1;
+      }
     }
+  } catch (cause) {
+    runsRepo.finish(runId, now(), "failed", {
+      collectedCount: collected,
+      normalizedCount: normalized,
+      newCount: isNew,
+      alreadySeenCount: alreadySeen,
+    });
+    throw cause;
   }
 
   const allFailed = failures === queries.length;
@@ -235,7 +250,15 @@ export function executeDedup(
   const runsRepo = new RunsRepository(db);
   const runId = runsRepo.start("dedup", now());
 
-  const outcome = dedupSimilarPostings(postingsRepo, config);
+  let outcome;
+  try {
+    outcome = dedupSimilarPostings(postingsRepo, config);
+  } catch (cause) {
+    // See `executeCollect` — the row is closed before the throw is re-raised
+    // so an open `finishedAt: null` can only ever mean "still running".
+    runsRepo.finish(runId, now(), "failed", { duplicateCount: 0 });
+    throw cause;
+  }
 
   runsRepo.finish(runId, now(), "success", {
     duplicateCount: outcome.markedDuplicate,

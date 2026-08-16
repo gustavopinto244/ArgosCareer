@@ -391,6 +391,28 @@ describe("executeCollect — collector dispatch by source", () => {
     expect(asked).toEqual(["ciee", "gupy", "ciee"]);
   });
 
+  it("closes the run as failed when resolving a collector throws", async () => {
+    // Collectors themselves cannot throw (principle 1), so the reachable
+    // throw inside `executeCollect` is everything around them — resolution,
+    // and the database writes. Either way the run row must not be left open;
+    // see the matching test for `executeDeliver`.
+    await expect(
+      executeCollect(
+        db,
+        () => {
+          throw new Error("registry exploded");
+        },
+        [{ source: "gupy" }],
+        undefined,
+        0,
+      ),
+    ).rejects.toThrow("registry exploded");
+
+    const [run] = new RunsRepository(db).findRecent("collect", 1);
+    expect(run?.outcome).toBe("failed");
+    expect(run?.finishedAt).not.toBeNull();
+  });
+
   it("defaults a query with no source to gupy", async () => {
     const asked: string[] = [];
     await executeCollect(
