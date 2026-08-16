@@ -26,6 +26,29 @@ function withinWindow(a: Date, b: Date, windowDays: number): boolean {
 }
 
 /**
+ * Two postings can only be the same opening if their locations do not
+ * contradict each other. Same company and a similar title is not enough:
+ * a company hiring the same role in two cities is hiring twice.
+ *
+ * Merging is destructive — the loser is flagged and drops out of every later
+ * stage — so the conservative reading wins wherever the answer is unclear.
+ * Both cities known and equal merges; both unknown merges (nothing
+ * contradicts); exactly one known does **not**, because that is precisely
+ * the shape that ate a real "Pessoa Desenvolvedora Backend Python" in Rio
+ * whose canonical had no city at all.
+ */
+function locationsAgree(a: Posting, b: Posting): boolean {
+  const aKnown = a.location.kind === "known";
+  const bKnown = b.location.kind === "known";
+  if (!aKnown && !bKnown) return true;
+  if (aKnown !== bKnown) return false;
+  return (
+    normalize((a.location as { city: string }).city) ===
+    normalize((b.location as { city: string }).city)
+  );
+}
+
+/**
  * Layer 2 of dedup (ADR-0010, docs/02-architecture.md): same company,
  * textual title similarity within a time window. Layer 1 (exact fingerprint)
  * is already enforced by `PostingsRepository.upsert`'s unique index; this
@@ -71,6 +94,7 @@ export function dedupSimilarPostings(
     for (const candidate of sorted) {
       const match = kept.find(
         (canonical) =>
+          locationsAgree(canonical, candidate) &&
           withinWindow(
             canonical.firstSeenAt,
             candidate.firstSeenAt,

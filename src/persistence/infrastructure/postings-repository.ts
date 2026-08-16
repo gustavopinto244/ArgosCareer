@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import {
   Location,
   Posting,
@@ -149,6 +149,30 @@ export class PostingsRepository {
       .where(eq(postings.company, company))
       .all();
     return rows.map(rowToPosting);
+  }
+
+  /**
+   * Clears every similarity-duplicate flag, so a corrected dedup pass can
+   * re-decide from scratch.
+   *
+   * Non-destructive by construction: `markDuplicate` only ever sets a
+   * column, so nothing was deleted when a posting was flagged, and clearing
+   * the flag restores it whole. That is what makes fixing a dedup bug a
+   * re-run rather than a re-collection — the corpus is not a cache
+   * (`05-domain-model.md`), and this is the payoff for it.
+   */
+  clearDuplicateFlags(): number {
+    const affected = this.db
+      .select()
+      .from(postings)
+      .where(isNotNull(postings.duplicateOfFingerprint))
+      .all().length;
+    this.db
+      .update(postings)
+      .set({ duplicateOfFingerprint: null })
+      .where(isNotNull(postings.duplicateOfFingerprint))
+      .run();
+    return affected;
   }
 
   markDuplicate(fingerprint: string, duplicateOfFingerprint: string): void {

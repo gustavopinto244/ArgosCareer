@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted
+Accepted — amended 2026-08-16, see
+[Amendment 1](#amendment-1--2026-08-16-locations-must-not-contradict)
 
 ## Date
 
@@ -149,3 +150,51 @@ actual CLI-level test M4 asks for.
 - Reversing the algorithm choice is cheap: `dedupSimilarPostings` depends only
   on `computeTitleSimilarity`'s signature (two strings in, a number out), so
   swapping the implementation later does not touch the repository or the CLI.
+
+---
+
+## Amendment 1 — 2026-08-16: locations must not contradict
+
+Layer 2 grouped by company and compared titles within a time window. It never
+looked at the city. A company hiring the same role in two cities is hiring
+twice, and flagging one of them discards a real opening.
+
+Measured on the real corpus once a second source made it visible:
+
+|                                     |         |
+| ----------------------------------- | ------- |
+| postings flagged as duplicates      | 406     |
+| **flagged across different cities** | **267** |
+| of those, in the Rio metro region   | 17      |
+
+The examples are unambiguous — MICHELIN's "Consultor de Desenvolvimento" in
+São Paulo flagged against Belo Horizonte, Sicredi's "Gerente de
+Desenvolvimento" in Sarandi against Toledo. The one that settles it is a
+**"Pessoa Desenvolvedora Backend Python" in Rio de Janeiro**, discarded
+against a canonical posting that stated no city at all: exactly the kind of
+posting this project exists to find.
+
+This was never a CIEE bug. It had been eating Gupy postings since M4 and only
+became visible when the corpus grew fivefold.
+
+**Decision:** a merge additionally requires the two locations not to
+contradict. Both known and equal merges. Both unknown merges — nothing
+contradicts. **Exactly one known does not**, because that is the shape that
+ate the Backend Python posting: unknown is not agreement.
+
+The asymmetry is deliberate and matches the direction of harm. Merging is
+destructive — the loser drops out of every later stage — while declining to
+merge only leaves a possible duplicate in the corpus, which layer 1 still
+catches whenever the fingerprints truly match.
+
+**Repairing the data, not just the rule.** Fixing the comparison does not
+un-flag what the old rule got wrong, so `argos dedup --reset` clears existing
+flags and lets a corrected pass re-decide. That is safe precisely because
+`markDuplicate` only ever _sets_ a column — nothing was deleted when a
+posting was flagged, so clearing it restores the posting whole. It is the
+concrete payoff of "the corpus is not a cache" (`05-domain-model.md`): a
+dedup bug is a re-run, never a re-collection.
+
+Measured after the repair: 406 flags → **131**, 275 postings recovered,
+pre-filter passes 291 → **310**, and **zero** remaining duplicates flagged
+across different cities.
