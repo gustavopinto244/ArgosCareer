@@ -39,6 +39,7 @@ revisited on its merits instead of re-argued from memory.
 | [025](adr/025-unknown-track-score-cap.md)                             | Cap the score of a posting that matches no configured track                | Accepted | 2026-08-16 |
 | [026](adr/026-recalibrate-toward-track-fit.md)                        | Recalibrate the score weights toward track fit                             | Accepted | 2026-08-16 |
 | [027](adr/027-indeed-via-external-jobspy-and-authenticated-ingest.md) | Indeed via an external `jobspy` process, ingested through the API boundary | Accepted | 2026-08-16 |
+| [028](adr/028-indeed-exception-to-the-polite-collector-rule.md)       | Accept, deliberately, that Indeed via jobspy breaks two collector rules    | Accepted | 2026-08-16 |
 
 ## When an ADR is required
 
