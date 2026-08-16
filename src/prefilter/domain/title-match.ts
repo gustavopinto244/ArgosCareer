@@ -61,8 +61,13 @@ export function titleMatchesAny(
 }
 
 /**
- * Whole-word match for a *keyword list* term — `tracks` and
- * `trackExclusions`, whose entries carry punctuation variants (`back-end`,
+ * Whole-word match for a *keyword list* term against arbitrary text —
+ * `tracks` and `trackExclusions` against a posting title, and M10's skill
+ * taxonomy against a requirement's text. (Named `keywordMatchesTitle`
+ * when ADR-011 Amendment 2 introduced it; renamed once the taxonomy
+ * became a second caller and "Title" stopped being true.)
+ *
+ * Entries carry punctuation variants (`back-end`,
  * `node.js`, `ci/cd`, `full-stack`) that plain whole-word matching would
  * miss, and short tokens (`api`, `soc`, `ciber`) that plain substring
  * matching gets catastrophically wrong.
@@ -87,13 +92,30 @@ export function titleMatchesAny(
  * Neither pass can match `api` inside `fisioterapia`, because in both the
  * candidate must occupy a whole word.
  */
-export function keywordMatchesTitle(title: string, keyword: string): boolean {
-  const spaced = ` ${normalizeTitle(title)} `;
+export function keywordMatchesText(text: string, keyword: string): boolean {
   const spacedKeyword = normalizeTitle(keyword);
   if (spacedKeyword === "") return false;
-  if (spaced.includes(` ${spacedKeyword} `)) return true;
 
-  const collapsed = ` ${normalize(title)} `;
+  // A keyword that is a single token after normalization uses the collapsed
+  // pass ONLY. The spaced pass splits punctuated words — "Node.js" becomes
+  // the two tokens "node" and "js" — and a bare single-token keyword would
+  // then match a fragment of an unrelated term: the alias `JS` matched
+  // inside "Node.js", counting a Node.js requirement as a separate
+  // JavaScript mention in the market aggregates. The collapsed pass reads
+  // "Node.js" as the single token "nodejs", where `js` correctly does not
+  // match, while "Noções de JS" still does.
+  const collapsed = ` ${normalize(text)} `;
   const collapsedKeyword = normalize(keyword);
+  if (!spacedKeyword.includes(" ")) {
+    return (
+      collapsedKeyword !== "" && collapsed.includes(` ${collapsedKeyword} `)
+    );
+  }
+
+  // Multi-token keywords need both passes: the spaced one matches
+  // "back-end" against "Back-End Developer", the collapsed one against
+  // "Backend Developer".
+  const spaced = ` ${normalizeTitle(text)} `;
+  if (spaced.includes(` ${spacedKeyword} `)) return true;
   return collapsedKeyword !== "" && collapsed.includes(` ${collapsedKeyword} `);
 }

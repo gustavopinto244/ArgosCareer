@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  keywordMatchesTitle,
+  keywordMatchesText,
   normalizeTitle,
   titleMatchesAny,
 } from "../../../src/prefilter/domain/title-match";
@@ -108,7 +108,7 @@ describe("titleMatchesAny — edges", () => {
   });
 });
 
-describe("keywordMatchesTitle — track keywords (ADR-011 Amendment 2)", () => {
+describe("keywordMatchesText — track keywords (ADR-011 Amendment 2)", () => {
   it.each([
     ["Estágio de Social Media", "soc"],
     ["ESTAGIÁRIO JURÍDICO (SOCIETÁRIO E NEGÓCIOS)", "soc"],
@@ -116,32 +116,32 @@ describe("keywordMatchesTitle — track keywords (ADR-011 Amendment 2)", () => {
     ["Estagiário de Fisioterapia - Leblon", "api"],
     ["Estagiário de Direito | Auster Capital", "api"],
   ])("does not match %s against the short keyword %s", (title, keyword) => {
-    expect(keywordMatchesTitle(title, keyword)).toBe(false);
+    expect(keywordMatchesText(title, keyword)).toBe(false);
   });
 
   it("still matches a short keyword standing as its own word", () => {
-    expect(keywordMatchesTitle("Estágio SOC | Blue Team", "soc")).toBe(true);
-    expect(keywordMatchesTitle("Estágio - API REST", "api")).toBe(true);
+    expect(keywordMatchesText("Estágio SOC | Blue Team", "soc")).toBe(true);
+    expect(keywordMatchesText("Estágio - API REST", "api")).toBe(true);
   });
 
   it("keeps hyphen-insensitivity, the reason substring matching existed", () => {
     // Both spellings of the title must match both spellings of the keyword.
-    expect(keywordMatchesTitle("Back-End Developer", "back-end")).toBe(true);
-    expect(keywordMatchesTitle("Backend Developer", "back-end")).toBe(true);
-    expect(keywordMatchesTitle("Estágio Node.js", "node.js")).toBe(true);
-    expect(keywordMatchesTitle("Estágio NodeJS", "node.js")).toBe(true);
-    expect(keywordMatchesTitle("Pipeline CI/CD", "ci/cd")).toBe(true);
+    expect(keywordMatchesText("Back-End Developer", "back-end")).toBe(true);
+    expect(keywordMatchesText("Backend Developer", "back-end")).toBe(true);
+    expect(keywordMatchesText("Estágio Node.js", "node.js")).toBe(true);
+    expect(keywordMatchesText("Estágio NodeJS", "node.js")).toBe(true);
+    expect(keywordMatchesText("Pipeline CI/CD", "ci/cd")).toBe(true);
   });
 
   it("matches a multi-word exclusion phrase", () => {
     expect(
-      keywordMatchesTitle(
+      keywordMatchesText(
         "ESTAGIÁRIO DE DESENVOLVIMENTO DE EMBALAGENS",
         "desenvolvimento de embalagens",
       ),
     ).toBe(true);
     expect(
-      keywordMatchesTitle(
+      keywordMatchesText(
         "Estágio em Desenvolvimento Backend",
         "desenvolvimento de embalagens",
       ),
