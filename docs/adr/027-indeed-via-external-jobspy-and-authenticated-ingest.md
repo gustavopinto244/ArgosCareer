@@ -3,8 +3,10 @@
 ## Status
 
 Accepted. Receiving side (schema, normalizer, ingest endpoint) implemented
-and tested; the host-side collection script and its Atlas scheduling are not
-— see Consequences.
+and tested. The host-side collector (`collectors/indeed/`) exists as of
+ADR-028 — see that ADR for the polite-collector exception it required —
+but had not yet been deployed and scheduled on Atlas as of this line being
+written; see `collectors/indeed/README.md` for that step.
 
 ## Date
 
@@ -144,14 +146,13 @@ inventing new ones. `argos-career`'s container privilege posture is
 unchanged — still no Docker socket, still nothing beyond outbound HTTP and
 the Telegram/OpenRouter calls it already makes.
 
-**Not done, and this ADR is explicit about it:** the actual host-side
-script that runs `jobspy` and calls this endpoint does not exist yet, nor
-does its scheduling on Atlas (cron or systemd timer), nor a `criteria.yaml`
-query configuration for what to search Indeed for. `POST
-/runs/collect/external` is fully built, tested, and ready to receive —
-nothing currently calls it in production. Indeed collection is not live
-after this ADR merges; it becomes live once the host script ships as a
-follow-up.
+**Not done at the time this ADR was written, since resolved:** the host
+script itself (`collectors/indeed/`) and its `robots.txt`/User-Agent
+question (ADR-028). Still genuinely open: actually **deploying and
+scheduling** it on Atlas — building the image, installing the systemd
+units, confirming a real run lands postings in production — is a deploy
+step, not a code change, and is tracked as such rather than claimed here
+before it happens.
 
 **A real, accepted gap:** the host script itself, wherever it runs, still
 needs a way to authenticate — the same `API_KEY` every other caller of this

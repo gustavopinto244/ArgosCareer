@@ -1,0 +1,16 @@
+[Unit]
+Description=Collect Indeed postings via jobspy and ingest into argos-career
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/apps/argos-career/app/collectors/indeed/.env
+ExecStart=/usr/bin/docker run --rm \
+  -e SEARCH_TERM \
+  -e LOCATION \
+  -e COUNTRY_INDEED \
+  -e RESULTS_WANTED \
+  -e ARGOS_API_URL \
+  -e ARGOS_API_KEY \
+  argos-indeed-collector:local
