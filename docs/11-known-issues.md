@@ -237,7 +237,8 @@ re-sent next run, not that a chunk is lost.
 
 ## B4 — Jooble's API returns 403 regardless of key
 
-**Status:** open, blocked externally · **Found:** 2026-08-16
+**Status:** parked — investigated as far as reasonably possible, no path
+forward found · **Found:** 2026-08-16 · **Closed off:** 2026-08-16
 
 `POST https://jooble.org/api/{key}` returns 403 with a real registered key.
 The decisive measurement is that it returns **byte-identical** 403s (4631
@@ -254,12 +255,34 @@ and concluded a valid key would get through. The absence of `cf-mitigated`
 distinguishes less than it appeared to. `scripts/fixture-jooble.ts` now
 records both probes and the correction.
 
-**Resolving it** starts outside this repository: open
-`https://jooble.org/api/about` in a logged-in browser, confirm the key is
-active, and read the request format that page documents. Forging a browser
-User-Agent is not an option (CLAUDE.md §6). Until the block is understood,
-no fixture can be captured, and CLAUDE.md §6's rule stands — the Zod schema
-is not written before the response is seen.
+> **Follow-up, 2026-08-16.** The obvious next step — log into
+> `jooble.org/api/about`, confirm the key is active, and either read the
+> documented request format or capture a working request from a live
+> "try it" console via the browser's network inspector — was attempted and
+> did not turn up a path forward. The account side offers nothing that
+> explains a 403 identical for a real and a fake key; whatever is blocking
+> this sits somewhere this project has no visibility into (the account, a
+> plan restriction, an IP-range block, or the endpoint having moved).
+>
+> **Parked, not actively pursued further.** Forging a browser User-Agent to
+> get past an unexplained block is not on the table (CLAUDE.md §6), and
+> without a working request to observe, no fixture can be captured and no
+> honest Zod schema can be written (CLAUDE.md §15 — do not invent a fact
+> that can be checked, and this one currently cannot be). Worth noting while
+> parking it: Jooble is an **aggregator** (`docs/02-architecture.md`'s
+> source-topology table) — "high by construction" overlap with whatever it
+> republishes, which for a Brazilian internship search likely means
+> Gupy/CIEE postings a second time. Getting it working would also mean
+> building the cross-source dedup layer `docs/02` already flags as
+> necessary "the moment one [aggregator] is added" — real additional work,
+> not just a fixture and a schema. That cost, on top of a block with no
+> known fix, is why this is parked rather than escalated (e.g. a support
+> ticket to Jooble) for now.
+>
+> `JOOBLE_API_KEY` stays in `.env`/`.env.example` and the fixture script
+> stays in `scripts/` — inert, no cost to leaving them — in case the block
+> resolves itself later (a plan change, a fixed endpoint) without this
+> being revisited deliberately.
 
 ---
 
