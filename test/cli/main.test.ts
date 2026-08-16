@@ -607,6 +607,7 @@ function deliverCriteria(): Criteria {
       thresholds: { apply: 70, review: 45 },
       minExtractedRequirements: 1,
       blockingCapScore: 35,
+      unknownTrackCapScore: 50,
       stageBConcurrency: 8,
     },
   };

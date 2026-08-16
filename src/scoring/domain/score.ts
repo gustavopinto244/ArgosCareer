@@ -128,11 +128,21 @@ export function computeScore(
     config.weights.trackAlignment * trackAlignment;
 
   const blockingFailure = findBlockingFailure(matches);
-  // The cap is an upper bound, not a floor: a posting already scoring below
-  // it is not raised (docs/04-scoring-model.md).
-  const score = blockingFailure
-    ? Math.min(rawScore, config.blockingCapScore)
-    : rawScore;
+  // Both caps are upper bounds, not floors: a posting already scoring below
+  // one is not raised by it (docs/04-scoring-model.md). They stack — a
+  // blocked, off-track posting is capped by whichever is lower — because
+  // they answer different questions: `blockingFailure` is about a specific
+  // requirement, `tracks.length === 0` is about the posting's kind not
+  // matching what is being searched for at all (ADR-025). Coverage alone
+  // cannot be trusted to separate "the right kind of role, poorly matched"
+  // from "the wrong kind of role, trivially satisfied" — a generic customer
+  // service or HR posting has little to fail against, so mandatoryCoverage
+  // routinely saturates near 1.0 for reasons that have nothing to do with
+  // fit, and trackAlignment's 15% weight is not enough on its own to pull
+  // that back down.
+  let score = rawScore;
+  if (blockingFailure) score = Math.min(score, config.blockingCapScore);
+  if (tracks.length === 0) score = Math.min(score, config.unknownTrackCapScore);
 
   // Counts verifiable requirements, not all of them (ADR-015). Excluding
   // traits from coverage opens a hole this closes: a posting asking only for

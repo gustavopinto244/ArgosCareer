@@ -314,6 +314,17 @@ scoring:
   minExtractedRequirements: 1
   # Score ceiling when a blocking requirement fails (docs/04).
   blockingCapScore: 35
+  # Score ceiling when a posting matches no configured track (ADR-025).
+  # trackAlignment alone is only 15% of the formula -- not enough to stop a
+  # generic, easy-to-satisfy posting (customer service, HR, sales) from
+  # scoring near the top on coverage alone. Measured on a real digest
+  # 2026-08-16: an HR "Benefícios" internship scored 91 and verdict apply,
+  # ahead of genuine dev postings at 63 review, because mandatoryCoverage
+  # and desirableCoverage both hit 1.00 -- a generic posting has little to
+  # fail against. 50 sits in the middle of the review band (45-69): still
+  # visible (an unknown track is a classifier gap, not necessarily a bad
+  # posting -- docs/04), never mistaken for a strong match again.
+  unknownTrackCapScore: 50
   # How many stage B requirement calls run at once (ADR-022). Stage B is one
   # call per requirement and ~25 requirements per posting, so sequential it
   # measured 213.8s for a single posting -- roughly 18h to score the 310

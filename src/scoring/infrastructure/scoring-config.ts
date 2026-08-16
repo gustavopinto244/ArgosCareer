@@ -10,5 +10,6 @@ export function buildScoringConfig(criteria: Criteria): ScoringConfig {
     trackWeights: criteria.trackWeights,
     minExtractedRequirements: criteria.scoring.minExtractedRequirements,
     blockingCapScore: criteria.scoring.blockingCapScore,
+    unknownTrackCapScore: criteria.scoring.unknownTrackCapScore,
   };
 }

@@ -148,6 +148,25 @@ The weights are configuration and provisional, like every other number on this
 page. Changing search strategy — adding a track, reweighting one — must not
 require touching the application (principle 3).
 
+**`unknownTrackCapScore` bounds what an unknown track can still score, even
+at 100% coverage (ADR-025).** `trackAlignment` is only 15% of the formula, so
+even at its floor (`unknown: 0.4`) an unknown-track posting can still reach
+91 if both coverages hit 1.0 — which a generic, easy-to-satisfy posting
+(customer service, HR, sales) does routinely, not because it is a strong
+match but because it demands little of substance. Measured on a real digest:
+an HR "Benefícios" internship scored 91, `apply`, ahead of genuine dev
+postings at 63, `review`.
+
+```
+if (tracks.length === 0) score = min(score, unknownTrackCapScore)
+```
+
+Set to **50** — inside the `review` band (45–69), not below it. This is
+deliberately consistent with `unknown: 0.4`'s own reasoning above: the
+posting stays _visible_ (an unknown track is a classifier gap, not
+necessarily a bad posting), it simply can no longer reach `apply` on
+coverage alone. The cap is a cap, not a floor — see below.
+
 ### Blocking requirements override everything
 
 If any `blocking` requirement fails, the score is **capped at 35** and
@@ -160,6 +179,11 @@ requirement means the model was unsure, and unsure is not a pass.
 The cap is a cap, not an assignment: a posting scoring 20 that also fails a
 blocking requirement stays at 20. The cap only prevents a blocked posting from
 outranking a viable one.
+
+**Stacks with `unknownTrackCapScore` above**, whichever is lower applying — a
+blocked, off-track posting is bound by both, since they answer different
+questions: a specific requirement failing versus the posting not being the
+kind of role searched for at all.
 
 ### Only verifiable requirements are scored
 

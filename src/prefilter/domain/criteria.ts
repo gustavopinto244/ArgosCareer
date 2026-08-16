@@ -25,6 +25,16 @@ export const ScoringConfigSchema = z.object({
   minExtractedRequirements: z.number().int().nonnegative(),
   blockingCapScore: z.number(),
   /**
+   * Score ceiling when a posting matches no configured track (ADR-025).
+   * `trackAlignment` alone caps out at 15% of the formula, which is not
+   * enough to stop a generic, easy-to-satisfy posting — customer service,
+   * HR, sales — from scoring near the top on coverage alone. Required, not
+   * defaulted: this changes real scoring output for real postings, and a
+   * criteria file predating it should fail validation rather than silently
+   * keep producing the inflated scores this exists to fix.
+   */
+  unknownTrackCapScore: z.number(),
+  /**
    * How many stage B requirement calls may be in flight at once (ADR-022).
    * Defaulted, not required, so a criteria file written before this existed
    * keeps working — the same backward-compatibility discipline the rest of
