@@ -18,6 +18,7 @@ function criteria(overrides: Partial<Criteria> = {}): Criteria {
     location: { cities: [], allowRemote: true },
     blockedCompanies: [],
     minKeywordAdherence: 0,
+    maxAgeDays: null,
     tracks: {
       dev: ["backend"],
       security: ["segurança"],

@@ -128,6 +128,19 @@ export const CriteriaSchema = z.object({
   /** Minimum count of profile keywords that must appear in a posting's text
    * before it is worth LLM budget. */
   minKeywordAdherence: z.number().int().nonnegative().default(0),
+  /**
+   * Reject a posting older than this many days before it reaches the LLM.
+   * `null` (the default) disables the rule entirely, so a criteria file
+   * written before this existed keeps meaning what it meant.
+   *
+   * Distinct from `collection.recencyDays`, which drops postings at
+   * *collection* time and never lets them into the corpus. This one runs in
+   * the pre-filter, so the posting is still stored, still counted by M10's
+   * market analysis, and still available if the window is later widened — it
+   * is only excluded from the expensive part. ADR-019's window answers "what
+   * is worth keeping"; this answers "what is worth paying to score".
+   */
+  maxAgeDays: z.number().int().positive().nullable().default(null),
   tracks: z.record(ProfileTrackSchema, z.array(z.string().min(1))),
   /**
    * Phrases that veto a track even when one of its keywords matched

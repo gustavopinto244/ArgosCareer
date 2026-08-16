@@ -18,6 +18,7 @@ function baseCriteria(overrides: Partial<Criteria> = {}): Criteria {
     location: { cities: ["Rio de Janeiro", "Niterói"], allowRemote: true },
     blockedCompanies: ["Empresa Bloqueada"],
     minKeywordAdherence: 0,
+    maxAgeDays: null,
     tracks: {
       dev: ["backend", "node"],
       security: ["segurança"],
@@ -155,6 +156,83 @@ describe("applyPreFilter — expired", () => {
       NOW,
     );
     expect(outcome.passed).toBe(true);
+  });
+});
+
+describe("applyPreFilter — maxAgeDays (age limit)", () => {
+  it("does nothing when maxAgeDays is null (the default)", () => {
+    const outcome = applyPreFilter(
+      posting({
+        publishedAt: new Date("2020-01-01T00:00:00Z"),
+        firstSeenAt: new Date("2020-01-01T00:00:00Z"),
+      }),
+      baseCriteria({ maxAgeDays: null }),
+      [],
+      NOW,
+    );
+    expect(outcome.passed).toBe(true);
+  });
+
+  it("rejects a posting older than the limit by publishedAt", () => {
+    const outcome = applyPreFilter(
+      posting({ publishedAt: new Date("2026-08-01T00:00:00Z") }), // 13 days before NOW
+      baseCriteria({ maxAgeDays: 7 }),
+      [],
+      NOW,
+    );
+    expect(outcome.reason).toBe("too_old");
+  });
+
+  it("passes a posting within the limit by publishedAt", () => {
+    const outcome = applyPreFilter(
+      posting({ publishedAt: new Date("2026-08-10T00:00:00Z") }), // 4 days before NOW
+      baseCriteria({ maxAgeDays: 7 }),
+      [],
+      NOW,
+    );
+    expect(outcome.passed).toBe(true);
+  });
+
+  it("falls back to firstSeenAt when publishedAt is absent — CIEE's usual case", () => {
+    const outcome = applyPreFilter(
+      posting({
+        publishedAt: null,
+        firstSeenAt: new Date("2026-08-01T00:00:00Z"), // 13 days before NOW
+      }),
+      baseCriteria({ maxAgeDays: 7 }),
+      [],
+      NOW,
+    );
+    expect(outcome.reason).toBe("too_old");
+  });
+
+  it("prefers publishedAt over firstSeenAt when both are present", () => {
+    // A posting collected recently but published long ago is old; the
+    // opposite (published recently, collected late) should not happen in
+    // practice, but publishedAt is still the stronger claim when it exists.
+    const outcome = applyPreFilter(
+      posting({
+        publishedAt: new Date("2026-08-01T00:00:00Z"), // 13 days before NOW
+        firstSeenAt: NOW,
+      }),
+      baseCriteria({ maxAgeDays: 7 }),
+      [],
+      NOW,
+    );
+    expect(outcome.reason).toBe("too_old");
+  });
+
+  it("is checked after expired, so a closed posting reports as expired", () => {
+    const outcome = applyPreFilter(
+      posting({
+        applicationDeadline: new Date("2026-01-01T00:00:00Z"),
+        publishedAt: new Date("2026-08-01T00:00:00Z"),
+      }),
+      baseCriteria({ maxAgeDays: 7 }),
+      [],
+      NOW,
+    );
+    expect(outcome.reason).toBe("expired");
   });
 });
 

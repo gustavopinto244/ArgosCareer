@@ -132,18 +132,20 @@ which is what `docs/08` exists to prevent.
 
 ## B1 — CIEE is exempt from the recency window
 
-**Status:** open · **Found:** 2026-08-16, explaining a `normalized: 0` run
+**Status:** open, LLM cost mitigated · **Found:** 2026-08-16, explaining a
+`normalized: 0` run
 
-ADR-019 filters collected postings by publication date, with
+ADR-019 filters **collected** postings by publication date, with
 `recencyDays: 1`, and deliberately lets a posting with no date through:
 absence of a date is not evidence of an old posting.
 
-In production, **every** CIEE posting has no date:
+In production, **every** CIEE posting has no date, and the Gupy figure has
+gotten worse since this entry was first written:
 
 ```
 source  count  published_at IS NULL
-ciee     2091  2091   (100%)
-gupy      263   115   (44%)
+ciee     2079  2079   (100%)
+gupy      558   436   (78%, was 44% on 2026-08-15)
 ```
 
 CIEE supplies 89% of the corpus, so for the dominant source the window is not
@@ -154,10 +156,19 @@ only, all older than a day) and thousands.
 Not a bug in the sense that the code does what ADR-019 says. The problem is
 that ADR-019's reasoning assumed the undated posting was the exception.
 
-**Resolving it** means deciding what "recent" means for a source that never
-publishes dates — `firstSeenAt` as a fallback is the obvious candidate, and it
-would need to not re-admit the whole corpus on the first run that adopts it.
-Amends ADR-019.
+> **Partial mitigation, 2026-08-16.** `criteria.scoring.maxAgeDays`
+> (ADR-011 Amendment 4) stops an old posting from reaching the LLM, with the
+> same `firstSeenAt` fallback this entry proposed. **This is a pre-filter
+> rule, not a collection rule — it is a different stage from the one this
+> entry is actually about.** It bounds what gets scored, which is the
+> concrete cost this project pays (Stage A/B calls). It does nothing about
+> what ADR-019 governs: the corpus itself still grows without limit, every
+> CIEE posting is still collected and stored regardless of age, and
+> `recencyDays: 1` is still inert for 100% of CIEE. Left open for that reason.
+
+**Resolving the rest** means deciding what "recent" means for a source that
+never publishes dates, at the **collection** stage — not re-admitting the
+whole corpus on the first run that adopts it. Amends ADR-019.
 
 ---
 

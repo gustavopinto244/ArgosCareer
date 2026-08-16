@@ -167,6 +167,25 @@ blockedCompanies: []
 # too coarse a signal.
 minKeywordAdherence: 0
 
+# Reject a posting older than this many days before it reaches the LLM
+# (measured from publishedAt when the source states one, firstSeenAt when it
+# does not -- src/prefilter/domain/pre-filter.ts). null disables the rule.
+# This is a considered exception to ADR-011's leniency rule ("an unknown axis
+# passes") -- age is the one axis where absence of evidence should not rescue
+# a posting, because the fallback (firstSeenAt) only ever under-estimates it.
+#
+# 7. Set to a week, not left null, on purpose: scoring an already-week-old
+# posting spends real LLM budget on something increasingly likely to be
+# filled or closed by the time it reaches the digest.
+#
+# Measured 2026-08-16 at the moment this was set: 100% of CIEE's 2,079 active
+# postings and 78% of Gupy's carry no publishedAt at all, so today this rule
+# does almost nothing -- every CIEE posting from the 2026-08-16 bulk import
+# shares one firstSeenAt, and none of them are 7 days old yet. It is a bound
+# on how old the corpus is allowed to get from here, not a cut to the
+# backlog that exists today. It starts acting once a week has passed.
+maxAgeDays: 7
+
 # Keyword classification per track, feeding trackAlignment (docs/04). A
 # posting matching a track's list is classified into it; matching none
 # leaves it unknown (trackWeights.unknown), not rejected.
