@@ -23,6 +23,8 @@ import {
   evaluateDeliveryOutcome,
   evaluateMissedRuns,
 } from "../domain/alerts";
+import { RunLock, runExclusive } from "../domain/run-lock";
+import { RUN_LOCK } from "./run-lock.provider";
 
 /**
  * Turns `schedule.collection.intervalHours` into a standard 5-field cron
@@ -80,6 +82,7 @@ export class SchedulerService implements OnModuleInit {
   // requirement than DI wiring itself should have.
   constructor(
     @Inject(SchedulerRegistry) private readonly registry: SchedulerRegistry,
+    @Inject(RUN_LOCK) private readonly runLock: RunLock,
   ) {}
 
   onModuleInit(): void {
@@ -118,20 +121,55 @@ export class SchedulerService implements OnModuleInit {
 
   /** Collect → dedup, then check collection-health and missed-run alerts —
    * the natural place for the missed-run check, since this cycle already
-   * runs every few hours regardless of what it finds (docs/08). */
+   * runs every few hours regardless of what it finds (docs/08).
+   *
+   * Both phases are guarded (ADR-024): a tick landing while a manual
+   * `POST /runs/collect`/`run_dedup` (or a prior tick that overran) is
+   * still in flight logs and skips that phase rather than starting a
+   * second one against the same corpus. A locked-out `collect` skips the
+   * whole cycle, including the alert check — the alert logic only reads
+   * run history that a skipped tick never changes, so there is nothing new
+   * to evaluate.
+   */
   private async runCollectionCycle(): Promise<void> {
-    try {
-      await executeCollect(
-        this.db,
-        collectorFor,
-        this.criteria.collection.queries,
-        () => new Date(),
-        this.criteria.collection.queryIntervalMs,
-        this.criteria.collection,
+    // Preserves the original try/catch's shape: a thrown collect means
+    // dedup is skipped for this tick too, not attempted against whatever
+    // partial state the throw left behind — `collected.result` carries that
+    // decision out of the locked section rather than nesting a second
+    // `runExclusive` inside the same closure.
+    const collected = await runExclusive(this.runLock, "collect", async () => {
+      try {
+        await executeCollect(
+          this.db,
+          collectorFor,
+          this.criteria.collection.queries,
+          () => new Date(),
+          this.criteria.collection.queryIntervalMs,
+          this.criteria.collection,
+        );
+        return true;
+      } catch (cause) {
+        this.logger.error("Collection cycle threw unexpectedly", cause);
+        return false;
+      }
+    });
+
+    if (!collected.ok) {
+      this.logger.warn(
+        "Skipped this collection tick: a collect run is already in flight.",
       );
-      executeDedup(this.db);
-    } catch (cause) {
-      this.logger.error("Collection cycle threw unexpectedly", cause);
+      return;
+    }
+
+    if (collected.result) {
+      const dedupped = await runExclusive(this.runLock, "dedup", () =>
+        Promise.resolve().then(() => executeDedup(this.db)),
+      );
+      if (!dedupped.ok) {
+        this.logger.warn(
+          "Skipped this cycle's dedup phase: a dedup run is already in flight.",
+        );
+      }
     }
 
     await this.sendAlerts(this.evaluateAfterCollection());
@@ -148,29 +186,51 @@ export class SchedulerService implements OnModuleInit {
       return;
     }
 
-    try {
-      const outcome = await executeDeliver(
-        this.db,
-        built.scorer,
-        this.notifier,
-        this.criteria,
-        this.profile,
+    // ADR-024: the concrete incident this guards against — a manual
+    // `POST /runs/deliver` landing while this tick's own multi-hour run was
+    // still scoring would otherwise score and could notify the same
+    // postings twice. `sendAlerts` deliberately does not fire here: a
+    // locked-out tick is expected and benign (a manual check-now call ran
+    // long), not the unexpected-failure case the alert paths below cover.
+    const lockedOut = !this.runLock.tryAcquire("scoreAndDeliver");
+    if (lockedOut) {
+      this.logger.warn(
+        "Skipped this scoreAndDeliver tick: a run is already in flight.",
       );
+      return;
+    }
 
-      const run = runsRepo.findById(outcome.runId);
-      if (run) {
-        await this.sendAlerts(
-          evaluateDeliveryOutcome(
-            run,
-            this.criteria.alerts.scoreFailureRateThreshold,
-          ),
+    // The lock is released in `finally`, before `runBackup` — a lock held
+    // across the backup step would block a manual `deliver` from starting
+    // during what is otherwise just a file copy, for no reason connected to
+    // what the lock actually protects (ADR-024).
+    try {
+      try {
+        const outcome = await executeDeliver(
+          this.db,
+          built.scorer,
+          this.notifier,
+          this.criteria,
+          this.profile,
         );
+
+        const run = runsRepo.findById(outcome.runId);
+        if (run) {
+          await this.sendAlerts(
+            evaluateDeliveryOutcome(
+              run,
+              this.criteria.alerts.scoreFailureRateThreshold,
+            ),
+          );
+        }
+      } catch (cause) {
+        this.logger.error("scoreAndDeliver cycle threw unexpectedly", cause);
+        await this.sendAlerts([
+          { text: "scoreAndDeliver cycle threw an unexpected error." },
+        ]);
       }
-    } catch (cause) {
-      this.logger.error("scoreAndDeliver cycle threw unexpectedly", cause);
-      await this.sendAlerts([
-        { text: "scoreAndDeliver cycle threw an unexpected error." },
-      ]);
+    } finally {
+      this.runLock.release("scoreAndDeliver");
     }
 
     this.runBackup();

@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Inject,
   Injectable,
   NotFoundException,
@@ -15,6 +16,8 @@ import { Criteria } from "../../prefilter/domain/criteria";
 import { CollectorPort } from "../../posting/domain/ports/collector.port";
 import { Profile } from "../../profile/domain/profile";
 import { buildScorer } from "../../scoring/infrastructure/build-scorer";
+import { RunLock, runExclusive } from "../../scheduling/domain/run-lock";
+import { RUN_LOCK } from "../../scheduling/infrastructure/run-lock.provider";
 import { COLLECTOR } from "./collector.provider";
 import { CRITERIA, PROFILE } from "./config.provider";
 import { DATABASE } from "./database.provider";
@@ -60,6 +63,7 @@ export class RunsService {
     @Inject(NOTIFIER) private readonly notifier: NotifierPort,
     @Inject(CRITERIA) private readonly criteria: Criteria,
     @Inject(PROFILE) private readonly profile: Profile,
+    @Inject(RUN_LOCK) private readonly runLock: RunLock,
   ) {}
 
   /**
@@ -103,24 +107,43 @@ export class RunsService {
    * "run this stage" regardless of what triggered it (principle 2), now
    * proven a fourth way (CLI, scheduler, REST, MCP).
    */
-  collect(params: CollectParams) {
+  /**
+   * ADR-024: rejects with 409 (`ConflictException`) rather than starting a
+   * second `collect` on top of one already running — the scheduler's own
+   * 4-hourly tick is the most likely thing to collide with a manual call,
+   * not another manual call racing itself.
+   */
+  async collect(params: CollectParams) {
     // An empty body means "run the configured cycle", the same thing the
     // cron does; a body with any field set is a deliberate one-off query
     // and overrides the configuration rather than adding to it.
     const isAdHoc = Object.values(params).some((v) => v !== undefined);
     const queries = isAdHoc ? [params] : this.criteria.collection.queries;
-    return executeCollect(
-      this.db,
-      () => this.collector,
-      queries,
-      () => new Date(),
-      this.criteria.collection.queryIntervalMs,
-      this.criteria.collection,
+    const outcome = await runExclusive(this.runLock, "collect", () =>
+      executeCollect(
+        this.db,
+        () => this.collector,
+        queries,
+        () => new Date(),
+        this.criteria.collection.queryIntervalMs,
+        this.criteria.collection,
+      ),
     );
+    if (!outcome.ok) {
+      throw new ConflictException("collect is already running");
+    }
+    return outcome.result;
   }
 
-  dedup() {
-    return executeDedup(this.db);
+  /** Same guard as `collect` — see ADR-024. */
+  async dedup() {
+    const outcome = await runExclusive(this.runLock, "dedup", () =>
+      Promise.resolve(executeDedup(this.db)),
+    );
+    if (!outcome.ok) {
+      throw new ConflictException("dedup is already running");
+    }
+    return outcome.result;
   }
 
   /**
@@ -129,19 +152,32 @@ export class RunsService {
    * nightly cron does, callable early. This is the intended capability
    * ("Hermes can ask for a check now"), not a footgun — documented in the
    * M9 ADR, not hidden here.
+   *
+   * Guarded (ADR-024) against the concrete incident that motivated it: a
+   * manual `POST /runs/deliver` landing while the scheduled cycle's own
+   * multi-hour run was still scoring — two runs racing the same
+   * `findUnnotified()` candidate pool can score the same postings twice and
+   * send two overlapping digests to Telegram before either marks anything
+   * notified.
    */
   async deliver() {
     const built = buildScorer(this.db, this.criteria, this.profile);
     if (!built.ok) {
       throw new BadRequestException(`Misconfigured scorer: ${built.error}`);
     }
-    return executeDeliver(
-      this.db,
-      built.scorer,
-      this.notifier,
-      this.criteria,
-      this.profile,
+    const outcome = await runExclusive(this.runLock, "scoreAndDeliver", () =>
+      executeDeliver(
+        this.db,
+        built.scorer,
+        this.notifier,
+        this.criteria,
+        this.profile,
+      ),
     );
+    if (!outcome.ok) {
+      throw new ConflictException("scoreAndDeliver is already running");
+    }
+    return outcome.result;
   }
 }
 

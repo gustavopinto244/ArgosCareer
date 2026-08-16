@@ -16,6 +16,7 @@ import { PostingsController } from "./postings.controller";
 import { PostingsService } from "./postings.service";
 import { RunsController } from "./runs.controller";
 import { RunsService } from "./runs.service";
+import { runLockProvider } from "../../scheduling/infrastructure/run-lock.provider";
 
 /**
  * M9: the HTTP surface Hermes (a different machine, `CLAUDE.md` §10)
@@ -28,6 +29,11 @@ import { RunsService } from "./runs.service";
  * GupyCollector()`/`new TelegramNotifier()` inline, specifically so tests
  * can override them and the stage re-execution paths never make a real
  * network call in the suite.
+ *
+ * `runLockProvider` (ADR-024) is imported from `scheduling/infrastructure`
+ * rather than duplicated here — it and `SchedulingModule`'s copy resolve
+ * `RUN_LOCK` to the same exported singleton, so `RunsService`'s REST/MCP
+ * stage triggers and `SchedulerService`'s cron ticks guard each other.
  */
 @Module({
   controllers: [
@@ -46,6 +52,7 @@ import { RunsService } from "./runs.service";
     RunsService,
     MarketService,
     PostingsService,
+    runLockProvider,
     { provide: APP_GUARD, useClass: ApiKeyGuard },
   ],
 })

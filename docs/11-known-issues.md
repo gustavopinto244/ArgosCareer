@@ -113,20 +113,30 @@ attempted while the numbers are extrapolations from a handful of postings.
 
 ## A2 — The scheduler has no overlap guard
 
-**Status:** open · **Found:** 2026-08-16, sweeping after #49
+**Status:** fixed by ADR-024 · **Found:** 2026-08-16, sweeping after #49
 
-`SchedulerService` registers both cron jobs with
-`onTick: () => void this.run…Cycle()` and nothing tracks whether the previous
-tick is still running. Two cycles of the same kind can execute concurrently,
-against the same SQLite handle, each having opened its own run row.
+`SchedulerService` registered both cron jobs with
+`onTick: () => void this.run…Cycle()` and nothing tracked whether the
+previous tick was still running. This stopped being theoretical the same
+day: `POST /runs/deliver` was called manually to test a build while the
+scheduled cycle's own multi-hour run (ADR-022) was in flight, and only a
+direct database check established the two had not actually collided.
 
-Harmless while `scoreAndDeliver` finishes in seconds and fires every 24 h.
-Not harmless at the runtime measured in A1, and the collection cycle fires
-every 4 h regardless.
-
-**Resolving it** means a per-kind in-flight flag, and deciding what a skipped
-tick should record — silently skipping is its own kind of silent degradation,
-which is what `docs/08` exists to prevent.
+> **Resolution.** `RunLock` (`scheduling/domain/run-lock.ts`), one
+> in-memory, per-kind lock shared by `SchedulerService` and `RunsService`
+> via the same DI token — sufficient because both live in one process
+> (`app.module.ts`). A locked-out REST/MCP call gets 409; a locked-out cron
+> tick logs and skips, no alert (an expected outcome, not a failure).
+> Mutation-checked at both layers — the core `tryAcquire` guard, disabled,
+> fails 6 tests including two real concurrent-HTTP-request integration
+> tests, not just the pure unit tests. Full reasoning in
+> [ADR-024](adr/024-scheduler-overlap-guard.md).
+>
+> **Explicitly not covered:** a separate process (e.g. the CLI invoked by
+> hand via `docker exec`) racing the running server. An in-memory lock
+> cannot see across process boundaries; ADR-024 states this as a deliberate
+> limitation, not solved speculatively for a risk that has not been
+> observed.
 
 ---
 
@@ -253,18 +263,32 @@ is not written before the response is seen.
 
 ---
 
-## C1 — One production run row is permanently open
+## C1 — Production run rows are permanently open
 
-**Status:** open · **Found:** 2026-08-16
+**Status:** open · **Found:** 2026-08-16, grown by one more the same day
 
 Run `01M04JFMRPWY4660K4SBV97QBW` (`scoreAndDeliver`, started
 2026-08-16T06:00:00Z) has `finishedAt: null` and `outcome: null`, because the
 throw that killed it predates the fix in #49.
 
-The fix stops new rows from being orphaned; it does not close this one.
-While it exists, `GET /health` reports `lastSuccessfulRun.scoreAndDeliver` as
-2026-08-15, and the row is indistinguishable from a run still in progress.
+A second row joined it the same day: `01M055DMPHHE2RV05YK97Q5TA5`
+(`scoreAndDeliver`, started ~11:30 UTC), the 6-hour backlog-draining run,
+deliberately killed by a container restart once the maxAgeDays/cutover work
+(#52/#53) made most of what it would have scored not worth scoring. #49's
+fix only closes a row on a _throw inside the same process_; a hard restart
+(the only way to cancel an in-flight run — no graceful drain exists) doesn't
+give that code a chance to run at all. Killing a run this way always leaves
+an open row behind, by construction, not as a bug.
 
-**Resolving it** is a one-off `UPDATE` marking it `failed`. Left undone on
+While either exists, `GET /health` reports `lastSuccessfulRun.scoreAndDeliver`
+as whatever the last row that actually finished was, and the open rows are
+indistinguishable from a run genuinely still in progress.
+
+**Resolving it** is a one-off `UPDATE` marking both `failed`. Left undone on
 purpose: it is a manual write to the production database, and it should be a
-deliberate act rather than a side effect of a deploy.
+deliberate act rather than a side effect of a deploy. Note that ADR-024 (A2)
+does not touch this: it stops two runs from executing at once, which is a
+different failure than a single run's process being killed mid-flight — a
+restart will orphan a row exactly like this again, any time one is used to
+cancel an in-flight run. Graceful cancellation (a way to actually stop a run
+without killing the process) would be the real fix; not attempted here.
