@@ -100,8 +100,16 @@ Three properties are part of the decision, not incidental to it:
 2. **The first requirement of each posting is issued alone**, before the
    fan-out. ADR-013's cacheable prefix is only worth anything if something
    populates it first; launching a cold prefix eight ways at once means eight
-   misses, trading the cost lever away to buy the latency one. One warming call
-   costs a few seconds per posting and keeps both.
+   misses, trading the cost lever away to buy the latency one.
+
+   Measurement afterwards showed the prefix is shared across _postings_, not
+   just within one — it is `PROFILE_EVIDENCE`, which does not vary by posting
+   — so in a continuous run only the very first posting genuinely needs
+   warming. The per-posting warming call is kept anyway: once the prefix is
+   hot it is itself a cache hit and costs little, and it is what makes the
+   first posting of an idle night behave like the rest. Dropping it would
+   optimise away a cheap guarantee to save a cached call.
+
 3. **A failure stops further work.** The sequential loop returned on the first
    failed requirement; concurrency must not silently turn that into "ask all 25
    anyway". Calls already in flight settle, no new ones are issued, and nothing
@@ -117,17 +125,42 @@ what it produces.
 
 ## Consequences
 
-**The nightly window becomes plausible again.** At concurrency 8 the expected
-per-posting time drops from ~214 s toward ~30 s, and the backlog from ~18 h
-toward roughly 2–3 h. Stated as an expectation, not a measurement: the real
-number depends on provider latency under concurrency, which is exactly the
-variable this changes. It must be measured on the first real run, not assumed
-because it is written here.
+**Stage B is 14.4× faster.** Measured, not projected — the same posting, the
+same 25 requirements, the same prompts, cache-busted so both arms really call
+the model, varying only how many calls are in flight:
 
-**Cache hit rate will fall somewhat, and cost will rise somewhat.** The warming
-call protects the common prefix, but calls within a batch still race each other
-for anything cached beyond it. Going from 71% cached to, say, 50% moves the
-backlog from ~$0.80 to perhaps ~$1.20. That is not a number worth defending.
+| Concurrency | Time   | Calls | Cache | Cost     |
+| ----------- | ------ | ----- | ----- | -------- |
+| 1           | 146.9s | 25    | 68%   | $0.00208 |
+| 8           | 10.2s  | 25    | 89%   | $0.00142 |
+
+**Cost went down, not up, and the earlier paragraph predicting the opposite
+was wrong.** Two reasons, and the second is a caveat on this table:
+
+The prediction assumed the cacheable prefix is per posting. It is not — Stage
+B's prefix is `PROFILE_EVIDENCE`, which is constant across every Stage B call
+in a run, for every posting. Warming is a once-per-run cost, not once per
+posting, so concurrency has far less cache to lose than this ADR first
+assumed.
+
+The caveat: the concurrency-8 arm ran immediately after the concurrency-1 arm,
+against a provider cache the first arm had already warmed. Its 89% is a
+warm-cache figure. A genuinely cold concurrent run measured 12% cache, so the
+honest reading is that **steady state during a continuous backlog run looks
+like the warm number** (calls are back to back, the prefix never goes cold)
+while the first posting of an idle night looks like the cold one.
+
+**The backlog is ~4–6 h, not the ~18 h it was, but the bottleneck moved
+rather than disappeared — it is Stage A now.** Stage A is one call per
+posting and cannot be split the way
+Stage B was; it emits the entire requirement list as JSON, which is the
+largest completion in the pipeline. Back-solving the measurements puts it at
+roughly 40–67 s per posting against ~10 s for all of Stage B. One cold
+end-to-end posting measured 53.9 s.
+
+These are wide error bars on a handful of postings and they must be replaced
+by the first real run's numbers, not treated as established. What is
+established is the 14.4× on the stage this ADR is about.
 
 **Concurrency is now a failure surface.** Rate limiting (HTTP 429) becomes
 reachable in a way it was not sequentially. `OpenRouterClient` currently
