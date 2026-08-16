@@ -145,6 +145,15 @@ break on a layout change — but a browser is a tool, not a transgression.
 never forged to imitate a browser — exponential backoff, explicit timeout. A
 discreet collector is a collector that keeps working.
 
+**One named exception: Indeed, via `python-jobspy` (ADR-028).** The
+library's Indeed scraper hardcodes a User-Agent impersonating Indeed's own
+mobile app — verified in its source, not configurable — and queries
+`apis.indeed.com`, whose `robots.txt` disallows everything. Both violate the
+rule above. Accepted knowingly, scoped to this one library's Indeed path
+only — it licenses nothing else, for any other source. Full reasoning,
+including why this is decided differently from Glassdoor's identical
+`robots.txt` fact (ADR-020, no exception), in ADR-028.
+
 ## 7. Architecture
 
 ```
