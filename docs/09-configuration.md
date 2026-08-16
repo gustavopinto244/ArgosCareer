@@ -29,6 +29,7 @@ SCORER_ADAPTER=           # stub | api
 LLM_API_KEY=              # required when SCORER_ADAPTER=api (OpenRouter, ADR-012)
 LLM_BASE_URL=             # default https://openrouter.ai/api/v1
 LLM_MODEL=                # OpenRouter model slug, e.g. deepseek/deepseek-v4-flash-0731
+JOOBLE_API_KEY=           # optional — free key; without it the Jooble source stays off
 N8N_WEBHOOK_URL=          # required when an n8n-backed source is enabled
 N8N_WEBHOOK_TOKEN=        # shared secret for that webhook
 DATABASE_PATH=            # default ./data/argos.db
