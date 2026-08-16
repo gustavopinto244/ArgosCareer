@@ -105,13 +105,19 @@ rest: 1.0 GB used, 6.1 GB available, 4 GB swap untouched. Already running
 `atlas-manager` (Node/systemd), Nginx, cloudflared, and two Docker containers
 (portfolio 5.4 MiB, task-manager 45.3 MiB).
 
-Budget for ArgosCareer: **~150 MB at rest, ~250 MB at peak.**
+**There is no fixed memory budget** (ADR-020). The old ~150 MB cap existed for
+one reason: a local model was going to run on this box, and paging during
+inference would have destroyed latency and could have taken the machine with
+it. `OllamaScorer` was retired in ADR-016 and `ApiScorer` calls a hosted model
+over HTTP, so the failure mode the cap defended against no longer exists.
 
-**Measured for real, M8, 2026-08-15: 29.3 MiB at rest**, well under budget —
-`ApiScorer` makes HTTP calls to a hosted model and holds nothing large
-in-process. Swap is an OOM safety net, not planning headroom — paging during
-inference destroys latency, which is exactly the failure mode a local model
-would have risked (ADR-016).
+**Measured for real, 2026-08-15: 54.8 MiB at rest** — the whole container,
+after M10. What replaces the cap is the constraint that was always the real
+one: Atlas is shared. `atlas-manager`, Nginx, cloudflared, portfolio and
+task-manager run beside this, and 6.1 GB is what the four of them leave free.
+Spend it where it buys something — a headless browser for a source that has no
+API is now a legitimate call, not a budget violation — and check `docker stats`
+after, rather than trusting a number written before the workload existed.
 
 ## 6. Job sources
 
@@ -127,6 +133,11 @@ repository. Before trusting the adapter, `npm run fixture:gupy` (M3) must hit th
 real API, record the response to `test/fixtures/gupy-raw.json` (gitignored) and
 print the keys of the first item. Until then, write the Zod schema tolerantly:
 `.passthrough()`, optional fields.
+
+**A headless browser is allowed** where a source has no usable API (ADR-020).
+It was never forbidden by name; the ~150 MB budget forbade it in practice, and
+that budget is gone. Reach for HTTP first — it is faster, cheaper and does not
+break on a layout change — but a browser is a tool, not a transgression.
 
 **Polite collector behavior**, required of every adapter: respect `robots.txt`,
 ~1.5 s between requests, an honest `User-Agent` that identifies what it is —
