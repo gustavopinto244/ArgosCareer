@@ -18,28 +18,38 @@
 # string literally -- "estagiario" does not find "Pessoa Estagiaria".
 collection:
   queries:
-    - jobName: estágio
+    - source: gupy
+      jobName: estágio
       city: Rio de Janeiro
-    - jobName: estágio
+    - source: gupy
+      jobName: estágio
       isRemoteWork: true
-    - jobName: estagiário
+    - source: gupy
+      jobName: estagiário
       city: Rio de Janeiro
-    - jobName: estagiário
+    - source: gupy
+      jobName: estagiário
       isRemoteWork: true
-    - jobName: estagiária
+    - source: gupy
+      jobName: estagiária
       city: Rio de Janeiro
-    - jobName: estagiária
+    - source: gupy
+      jobName: estagiária
       isRemoteWork: true
     # Niteroi and Sao Goncalo are already accepted by the location rule, but
     # nothing was asking the source for them -- being allowed through the
     # filter is useless if the query never brings them back.
-    - jobName: estágio
+    - source: gupy
+      jobName: estágio
       city: Niterói
-    - jobName: estagiário
+    - source: gupy
+      jobName: estagiário
       city: Niterói
-    - jobName: estágio
+    - source: gupy
+      jobName: estágio
       city: São Gonçalo
-    - jobName: estagiário
+    - source: gupy
+      jobName: estagiário
       city: São Gonçalo
     # Tech terms, measured with `npm run probe:terms` before being added --
     # the number that decided each one is how many postings survive the
@@ -62,10 +72,25 @@ collection:
     # results nationwide, against 380 for a bare "estagio"), so constraining
     # geography here would mostly return nothing. The pre-filter handles the
     # location axis for them.
-    - jobName: estágio desenvolvimento
-    - jobName: estagiário desenvolvimento
-    - jobName: estágio backend
-    - jobName: estágio software
+    - source: gupy
+      jobName: estágio desenvolvimento
+    - source: gupy
+      jobName: estagiário desenvolvimento
+    - source: gupy
+      jobName: estágio backend
+    - source: gupy
+      jobName: estágio software
+    # --- CIEE (ADR-021) ---------------------------------------------------
+    # ONE query, deliberately. CIEE ignores every filter parameter, so its
+    # collector fetches the whole board (~58 requests) and filters in memory.
+    # A second CIEE query would mean a second full sweep for nothing.
+    #
+    # No `city` either: geography is left to the pre-filter, which already
+    # holds the metro list. Storing the nationwide superior-level intake
+    # costs SQLite rows and nothing else -- the pre-filter still gates what
+    # reaches Stage A, so the paid work is unchanged -- and it gives M10's
+    # market analysis a national picture instead of a Rio-shaped one.
+    - source: ciee
   # Pause between queries. The collector's own ~1.5s interval only spaces out
   # pages within one query (CLAUDE.md 6).
   queryIntervalMs: 1500
@@ -164,6 +189,10 @@ tracks:
     - full-stack
     - programação
     - programador
+    # Vocabulario do CIEE, nao da Gupy: a categoria de tecnologia deles chama
+    # "Informatica", e sem esta entrada as 6 vagas de TI do CIEE que passam o
+    # pre-filtro classificavam como `unknown` e pontuavam 0.4 de alinhamento.
+    - informática
   security:
     - segurança
     - security

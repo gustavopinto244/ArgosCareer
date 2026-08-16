@@ -32,6 +32,7 @@ revisited on its merits instead of re-argued from memory.
 | [018](adr/018-collection-queries-as-configuration.md)           | Ask the source a narrow question, and treat a cycle as one run          | Accepted | 2026-08-15 |
 | [019](adr/019-collect-by-publication-recency.md)                | Collect by publication recency, with a wider first run                  | Accepted | 2026-08-15 |
 | [020](adr/020-lift-the-memory-budget-allow-a-browser.md)        | Lift the memory budget, allow a headless browser                        | Accepted | 2026-08-16 |
+| [021](adr/021-enable-ciee-and-tighten-location-leniency.md)     | Enable CIEE, and tighten the location leniency rule                     | Accepted | 2026-08-16 |
 
 ## When an ADR is required
 

@@ -8,7 +8,7 @@ const NOW = new Date("2026-08-14T03:00:00Z");
 function baseCriteria(overrides: Partial<Criteria> = {}): Criteria {
   return {
     collection: {
-      queries: [{}],
+      queries: [{ source: "gupy" }],
       queryIntervalMs: 0,
       recencyDays: 1,
       backfillDays: 7,
@@ -209,12 +209,31 @@ describe("applyPreFilter — location and workMode", () => {
     expect(outcome.reason).toBe("location_not_allowed");
   });
 
-  it("does not reject an unknown workMode, even with a disallowed known city — cannot rule out remote", () => {
+  it("rejects an unknown workMode when the city is known and disallowed (ADR-011 Amendment 3)", () => {
+    // This asserted the opposite until 2026-08-16. The symmetric rule was
+    // written when Gupy was the only source and usually stated workMode;
+    // CIEE never states it, so every São Paulo posting passed on the theory
+    // that it "cannot be ruled out as remote" — 1,700 of them, measured.
+    // Absence of evidence about how the work happens does not outweigh
+    // positive evidence about where it happens.
     const outcome = applyPreFilter(
       posting({
         location: { kind: "known", city: "São Paulo" },
         workMode: "unknown",
       }),
+      baseCriteria(),
+      [],
+      NOW,
+    );
+    expect(outcome.passed).toBe(false);
+    expect(outcome.reason).toBe("location_not_allowed");
+  });
+
+  it("still passes an unknown LOCATION — that leniency is unchanged", () => {
+    // The asymmetry is the point: an unknown place cannot be ruled out as
+    // being in the target region, so it still passes.
+    const outcome = applyPreFilter(
+      posting({ location: { kind: "unknown" }, workMode: "unknown" }),
       baseCriteria(),
       [],
       NOW,
