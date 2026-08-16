@@ -27,6 +27,8 @@ import {
   CollectionResult,
   CollectorPort,
 } from "../../../src/posting/domain/ports/collector.port";
+import { RunLock } from "../../../src/scheduling/domain/run-lock";
+import { RUN_LOCK } from "../../../src/scheduling/infrastructure/run-lock.provider";
 
 const API_KEY = "test-api-key-for-suite";
 
@@ -332,5 +334,93 @@ describe("POST /runs/deliver", () => {
 
     expect(res.status).toBe(400);
     expect(fakeNotifier.sent).toHaveLength(0);
+  });
+});
+
+describe("overlap guard (ADR-024)", () => {
+  it("dedup: rejects with 409 while a dedup run is already marked in flight", async () => {
+    const runLock = app.get<RunLock>(RUN_LOCK);
+    runLock.tryAcquire("dedup");
+
+    try {
+      const res = await auth(request(app.getHttpServer()).post("/runs/dedup"));
+      expect(res.status).toBe(409);
+    } finally {
+      runLock.release("dedup");
+    }
+
+    // Freed afterward — a locked-out call is rejected, not left stuck.
+    const res = await auth(request(app.getHttpServer()).post("/runs/dedup"));
+    expect(res.status).toBe(201);
+  });
+
+  it("collect: a second call while the first is still running is rejected, not queued or corrupted", async () => {
+    // Holds the collector call open until the test releases it, so a
+    // concurrently-fired second request can observe the lock actually held
+    // by a real in-flight run rather than racing a call that resolves
+    // before the assertion runs.
+    let releaseFirst!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    fakeCollector.collect = async (criteria: unknown) => {
+      fakeCollector.calls.push(criteria);
+      await gate;
+      return { source: "fake", postings: [], collectedAt: new Date() };
+    };
+
+    // supertest's `Test` does not actually send until something calls
+    // `.then()` on it — holding the bare chain in a variable sends nothing.
+    // `.then((res) => res)` starts the request without blocking here.
+    const first = auth(
+      request(app.getHttpServer()).post("/runs/collect").send({}),
+    ).then((res) => res);
+    // Yield to the event loop so `first`'s handler has actually acquired
+    // the lock before `second` fires — both requests are real HTTP calls
+    // against the same running app, not two calls into the same function.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const second = await auth(
+      request(app.getHttpServer()).post("/runs/collect").send({}),
+    );
+    expect(second.status).toBe(409);
+
+    releaseFirst();
+    const firstResult = await first;
+    expect(firstResult.status).toBe(201);
+
+    // Not stuck afterward.
+    const third = await auth(
+      request(app.getHttpServer()).post("/runs/collect").send({}),
+    );
+    expect(third.status).toBe(201);
+  });
+
+  it("deliver: a second call while the first is still sending is rejected — the incident this exists for", async () => {
+    let releaseFirst!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    fakeNotifier.notify = async (digest: Digest) => {
+      fakeNotifier.sent.push(digest);
+      await gate;
+      return { ok: true };
+    };
+
+    const first = auth(request(app.getHttpServer()).post("/runs/deliver")).then(
+      (res) => res,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const second = await auth(
+      request(app.getHttpServer()).post("/runs/deliver"),
+    );
+    expect(second.status).toBe(409);
+    // The second call never composed or sent a second digest.
+    expect(fakeNotifier.sent).toHaveLength(1);
+
+    releaseFirst();
+    const firstResult = await first;
+    expect(firstResult.status).toBe(201);
   });
 });
