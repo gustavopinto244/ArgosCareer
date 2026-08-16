@@ -14,6 +14,10 @@ milestone a topic rather than a commitment. This page defines completion.
   implementing them (`03-technical-decisions.md`).
 - Milestones are sequential. M6 is the exception worth protecting: it is a
   vertical slice, and slices that get postponed become slices that never happen.
+- **A deferral is not a defect.** What a milestone chose not to build belongs
+  here, under that milestone. Something that is actually broken belongs in
+  `11-known-issues.md`, which is ordered by when it was found rather than by
+  what was planned.
 
 ## M0 — Bootstrap ✅
 
