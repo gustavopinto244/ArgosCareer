@@ -77,7 +77,7 @@ prefilter:
   blockedCompanies:
   minKeywordAdherence:
 scoring:
-  weights: # 65 / 20 / 15
+  weights: # 35 / 20 / 45 (ADR-026; originally 65 / 20 / 15)
   thresholds: # apply 70, review 45
   minExtractedRequirements: # lowConfidence trigger
   maxScoreRetries: # ADR-006

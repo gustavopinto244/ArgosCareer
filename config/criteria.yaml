@@ -301,11 +301,21 @@ trackWeights:
 
 # Stage C's formula (docs/04-scoring-model.md). Provisional until M7
 # calibration — every number here is a starting hypothesis, not a result.
+#
+# Recalibrated 2026-08-16 (ADR-005 Amendment 1, ADR-026), from 65/20/15.
+# Requested directly after the first real digest: two genuine dev postings
+# with real gaps (missing Angular, Java/Spring, or C#/Go) scored only 63 --
+# review, not apply -- because mandatoryCoverage dominated the formula at
+# 65%, leaving trackAlignment's 15% unable to reflect "the right kind of
+# role" strongly enough. Track fit now counts for nearly as much as meeting
+# the posting's own stated requirements. See ADR-026 for the full trade-off:
+# an on-track posting meeting almost none of its requirements now scores
+# ~45 on track alone (was ~15), close to the review threshold.
 scoring:
   weights:
-    mandatory: 65
+    mandatory: 35
     desirable: 20
-    trackAlignment: 15
+    trackAlignment: 45
   thresholds:
     apply: 70
     review: 45

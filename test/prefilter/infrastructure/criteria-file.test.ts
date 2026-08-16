@@ -17,4 +17,16 @@ describe("config/criteria.yaml", () => {
     const criteria = loadCriteria(filePath);
     expect(criteria.trackWeights.dev).toBe(criteria.trackWeights.security);
   });
+
+  it("weighs trackAlignment above mandatoryCoverage (ADR-026)", () => {
+    // A guard against silently reverting the 2026-08-16 recalibration —
+    // requested directly, after mandatoryCoverage's 65% share left
+    // trackAlignment's 15% unable to keep a real, partially-matched dev
+    // posting out of `review`. Asserts the relationship the ADR is actually
+    // about, not the exact numbers, so a further deliberate recalibration
+    // doesn't have to touch this test as long as the relationship holds.
+    const filePath = join(process.cwd(), "config", "criteria.yaml");
+    const { weights } = loadCriteria(filePath).scoring;
+    expect(weights.trackAlignment).toBeGreaterThan(weights.mandatory);
+  });
 });

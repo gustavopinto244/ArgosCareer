@@ -42,8 +42,9 @@ place for a misreading:
 
 - A **requirement's** `weight` is categorical. It says how much a requirement
   matters to the employer: `blocking`, `mandatory` or `desirable`.
-- The **score** weights are the numbers 65, 20 and 15. They say how much each
-  coverage term contributes to the total.
+- The **score** weights are the numbers 35, 20 and 45 (ADR-026; originally
+  65, 20 and 15). They say how much each coverage term contributes to the
+  total.
 
 They never appear in the same formula. When ambiguity is possible, write
 "requirement weight" or "score weight" rather than relying on context.
