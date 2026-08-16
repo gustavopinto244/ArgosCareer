@@ -44,6 +44,7 @@ scoring:
     review: 45
   minExtractedRequirements: 1
   blockingCapScore: 35
+  unknownTrackCapScore: 50
 `;
 
 function writeCriteria(contents: string): string {

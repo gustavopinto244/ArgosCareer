@@ -16,6 +16,7 @@ const baseConfig: ScoringConfig = {
   trackWeights: { dev: 1.0, security: 1.0, automation: 0.7, unknown: 0.4 },
   minExtractedRequirements: 3,
   blockingCapScore: 35,
+  unknownTrackCapScore: 50,
 };
 
 function requirement(
@@ -136,6 +137,11 @@ describe("computeScore — blocking requirements", () => {
   });
 });
 
+// `["dev"]`, not `[]` — these tests isolate the mandatory/threshold math via
+// `trackAlignment: 0`, so which track is passed makes no difference to the
+// score, but an empty (unknown) track would now trip `unknownTrackCapScore`
+// (ADR-025) and cap 70/69 down to 50, breaking the boundary these tests
+// actually check. `unknownTrackCapScore` has its own describe block below.
 describe("computeScore — verdict boundaries", () => {
   it("is 'apply' at exactly the apply threshold (70)", () => {
     const config: ScoringConfig = {
@@ -144,7 +150,7 @@ describe("computeScore — verdict boundaries", () => {
       minExtractedRequirements: 1,
     };
     const matches = [createMatch(requirement("mandatory"), "met", "e")];
-    const outcome = computeScore(matches, [], config);
+    const outcome = computeScore(matches, ["dev"], config);
     expect(outcome.score).toBe(70);
     expect(outcome.verdict).toBe("apply");
   });
@@ -156,7 +162,7 @@ describe("computeScore — verdict boundaries", () => {
       minExtractedRequirements: 1,
     };
     const matches = [createMatch(requirement("mandatory"), "met", "e")];
-    const outcome = computeScore(matches, [], config);
+    const outcome = computeScore(matches, ["dev"], config);
     expect(outcome.score).toBe(69);
     expect(outcome.verdict).toBe("review");
   });
@@ -168,7 +174,7 @@ describe("computeScore — verdict boundaries", () => {
       minExtractedRequirements: 1,
     };
     const matches = [createMatch(requirement("mandatory"), "met", "e")];
-    const outcome = computeScore(matches, [], config);
+    const outcome = computeScore(matches, ["dev"], config);
     expect(outcome.score).toBe(45);
     expect(outcome.verdict).toBe("review");
   });
@@ -180,9 +186,65 @@ describe("computeScore — verdict boundaries", () => {
       minExtractedRequirements: 1,
     };
     const matches = [createMatch(requirement("mandatory"), "met", "e")];
-    const outcome = computeScore(matches, [], config);
+    const outcome = computeScore(matches, ["dev"], config);
     expect(outcome.score).toBe(44);
     expect(outcome.verdict).toBe("discard");
+  });
+});
+
+describe("computeScore — unknownTrackCapScore (ADR-025)", () => {
+  it("caps the score when the posting matches no track — the real HR-internship case", () => {
+    // The exact shape of the 2026-08-16 incident: a generic posting whose
+    // few requirements are trivially satisfied, so both coverages hit 1.0.
+    const matches = [
+      createMatch(requirement("mandatory"), "met", "e"),
+      createMatch(requirement("desirable"), "met", "e"),
+    ];
+    const outcome = computeScore(matches, [], baseConfig);
+    // Uncapped this would be 65 + 20 + 15*0.4 = 91 — computed once to prove
+    // the cap is actually doing something, not just coincidentally at 50.
+    const uncapped =
+      baseConfig.weights.mandatory +
+      baseConfig.weights.desirable +
+      baseConfig.weights.trackAlignment * baseConfig.trackWeights.unknown;
+    expect(uncapped).toBeGreaterThan(baseConfig.unknownTrackCapScore);
+    expect(outcome.score).toBe(baseConfig.unknownTrackCapScore);
+    expect(outcome.verdict).toBe("review");
+  });
+
+  it("does not raise a score already below the cap — a cap, not a floor", () => {
+    const matches = [createMatch(requirement("mandatory"), "not_met", null)];
+    const outcome = computeScore(matches, [], baseConfig);
+    expect(outcome.score).toBeLessThan(baseConfig.unknownTrackCapScore);
+  });
+
+  it("does not apply when the posting matches a real track", () => {
+    const matches = [
+      createMatch(requirement("mandatory"), "met", "e"),
+      createMatch(requirement("desirable"), "met", "e"),
+    ];
+    // minExtractedRequirements overridden to 1 — baseConfig's 3 would flag
+    // lowConfidence against this test's 2 requirements and cap the verdict
+    // at review regardless of score, which is a different rule than the one
+    // this test checks.
+    const outcome = computeScore(matches, ["dev"], {
+      ...baseConfig,
+      minExtractedRequirements: 1,
+    });
+    // dev's full trackAlignment (1.0) pushes this well past the unknown cap.
+    expect(outcome.score).toBeGreaterThan(baseConfig.unknownTrackCapScore);
+    expect(outcome.verdict).toBe("apply");
+  });
+
+  it("stacks with blockingCapScore — whichever cap is lower wins", () => {
+    const matches = [
+      createMatch(requirement("blocking"), "not_met", null),
+      createMatch(requirement("mandatory"), "met", "e"),
+    ];
+    const config: ScoringConfig = { ...baseConfig, blockingCapScore: 20 };
+    const outcome = computeScore(matches, [], config);
+    expect(outcome.score).toBeLessThanOrEqual(20);
+    expect(outcome.blockingFailure).not.toBeNull();
   });
 });
 

@@ -56,6 +56,7 @@ scoring:
   thresholds: { apply: 70, review: 45 }
   minExtractedRequirements: 1
   blockingCapScore: 35
+  unknownTrackCapScore: 50
 schedule:
   collection: { intervalHours: 6 }
   scoreAndDeliver: { time: "02:30", timezone: "America/Sao_Paulo" }

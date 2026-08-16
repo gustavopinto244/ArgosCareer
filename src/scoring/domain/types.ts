@@ -81,6 +81,11 @@ export interface ScoringConfig {
   readonly minExtractedRequirements: number;
   /** Score ceiling when a blocking requirement fails — 35 (docs/04). */
   readonly blockingCapScore: number;
+  /** Score ceiling when the posting matches no configured track — ADR-025.
+   * Distinct from `blockingCapScore`: this caps a *classification* outcome
+   * (the posting is not the kind of role being searched for), not a
+   * *requirement* failure, and the two stack via `Math.min` when both apply. */
+  readonly unknownTrackCapScore: number;
 }
 
 export interface ScoreBreakdown {
