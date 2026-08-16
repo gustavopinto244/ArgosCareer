@@ -146,20 +146,62 @@ normalize(s) = s
   |> collapse whitespace
 ```
 
-Catches the common case: the same posting re-collected on consecutive days, or
-appearing on two sources.
+Catches the common case: the same posting re-collected on consecutive days.
+It would also catch the same posting appearing on two sources — but see
+**Source topology** below for why that turns out to be rare, and when it
+will stop being.
 
-**Layer 2 — textual similarity** between postings from the same company within
-the same time window. Catches what layer 1 cannot: "Estágio em Back-end" and
-"Estagiário Backend (Rio de Janeiro)" from the same company are the same job with
-different fingerprints.
+**Layer 2 — textual similarity** between postings from the same company,
+within the same time window, **whose locations do not contradict each other**
+(ADR-010 Amendment 1). Catches what layer 1 cannot: "Estágio em Back-end" and
+"Estagiário Backend (Rio de Janeiro)" from the same company are the same job
+with different fingerprints.
+
+The location check is not decoration. Without it, a company hiring the same
+role in two cities had one of the two silently discarded — 267 of 406 flagged
+duplicates, measured, including a "Pessoa Desenvolvedora Backend Python" in
+Rio flagged against a canonical posting that stated no city at all.
 
 A posting already seen is **never reprocessed and never re-notified** — this is
 both a cost control (stage A and B are the expensive stages) and a usability
 requirement (criterion 2 in `01-vision-and-scope.md`).
 
-Detail deferred to M4, where it will get its own ADR alongside the schema that
-implements it.
+Reasoning and thresholds: ADR-010 and its amendment.
+
+### Source topology — how much overlap to expect, and why
+
+**How much two sources duplicate each other is predictable from what kind of
+business they are.** Worth reasoning about before building cross-source dedup
+for a pair that will never need it.
+
+| Kind                            | How a posting gets there                                             | Overlap with other kinds                                     |
+| ------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------ |
+| **ATS** (Gupy)                  | The employer publishes on its own careers page, which the ATS powers | Low — the posting lives at the employer                      |
+| **Agency** (CIEE)               | The employer delegates hiring; candidates apply _through_ the agency | Low — a vacancy takes one route or the other, not both       |
+| **Aggregator** (Jooble, Adzuna) | Scraped or fed from other boards, including the two above            | **High by construction** — its whole product is republishing |
+
+Measured on the real corpus, 2026-08-16, with 386 distinct Gupy employers and
+1,552 distinct CIEE employers: **zero** companies in common. The only name
+appearing on both was `Confidencial`, which is a placeholder rather than an
+employer.
+
+That is the expected result, not a surprise — an ATS and an agency divide the
+market rather than competing for the same advert. It is recorded here because
+the opposite was assumed for a while, and because it decides real work:
+
+- **Gupy + CIEE:** cross-source dedup solves a problem that does not exist.
+  Not deferred — dropped.
+- **Any aggregator:** cross-source dedup becomes necessary the moment one is
+  added, because republishing is what an aggregator _is_. Build it then, with
+  real pairs to verify against.
+
+**A warning for whoever measures this next.** The first attempt at matching
+company names across sources produced 88 "similar" pairs, every one of them
+false — `FARM` (the fashion brand, on Gupy) matching `FARMACIA`, `FARMACO`,
+`ABEFARMA` and `BOXIFARMA` on CIEE. Substring matching on short tokens, the
+same failure ADR-011 Amendments 1 and 2 document for the title rules and the
+track classifier. Match company names on whole words, and exclude placeholders
+before counting anything.
 
 ## Pre-filter
 
@@ -185,12 +227,23 @@ ADR-011.
 pre-filter over whatever is actually in the database. Run twice, against two
 different real collection strategies, both against the live API:
 
-| Collection query                         | Active postings scanned | Cut       | Dominant rejection reason                                                                                                     |
-| ---------------------------------------- | ----------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `jobName=estágio`, no city (nationwide)  | 171                     | **97.1%** | `location_not_allowed` (117/166 — 70% of all rejections)                                                                      |
-| `jobName=estágio`, `city=Rio de Janeiro` | 76                      | **84.2%** | `insufficient_keyword_adherence` (49/64 — most Rio internships are not tech-track at all: law, finance, environmental, sales) |
+| Date       | Collection strategy                      | Scanned | Cut       | Dominant rejection                       |
+| ---------- | ---------------------------------------- | ------- | --------- | ---------------------------------------- |
+| 2026-08-14 | `jobName=estágio`, nationwide            | 171     | **97.1%** | `location_not_allowed` (117/166)         |
+| 2026-08-14 | `jobName=estágio`, `city=Rio de Janeiro` | 76      | **84.2%** | `insufficient_keyword_adherence` (49/64) |
+| 2026-08-15 | 14 targeted Gupy queries (ADR-018)       | 491     | **74.5%** | `title_missing_required_term` (199/366)  |
+| 2026-08-16 | Gupy + CIEE, after the dedup repair      | 2,637   | **88.2%** | `location_not_allowed` (1,971/2,327)     |
 
-Both numbers are real and both replace the ~70% guess this section carried
+**The number is not a quality score, and chasing it down is not the goal.**
+It rose again on 2026-08-16 because CIEE is swept nationwide on purpose
+(ADR-021): its API honours no filter, so geography is left to the pre-filter,
+and the corpus deliberately carries a national picture for M10's market
+analysis. A higher cut over a much larger and better-aimed intake is a better
+outcome than a lower cut over a thin one — which is why this table records the
+strategy beside the percentage, and why a bare percentage from one row should
+never be quoted on its own.
+
+The first two rows are real and both replace the ~70% guess this section carried
 through M0–M4 — the guess was low either way, and the gap between the two real
 numbers is itself the finding worth acting on: **most of the "cut" the
 pre-filter performs is location, and location can be filtered server-side
