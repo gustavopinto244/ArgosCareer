@@ -10,16 +10,35 @@
  * That page sits behind Cloudflare's bot challenge, so it has to be opened
  * in a normal browser — automated requests to it get `Just a moment...`.
  *
- * The API endpoint itself is NOT challenged, which is the fact that makes
- * this source worth building at all. Probed 2026-08-16:
+ * Probed 2026-08-16, before a key existed:
  *
  *   POST /api/about                  -> 403, <title>Just a moment...</title>,
  *                                       cf-mitigated: challenge   (bot block)
  *   POST /api/<invalid-key>          -> 403, <title>Error 403</title>,
- *                                       no Cloudflare markers     (auth)
+ *                                       no Cloudflare markers     (auth?)
  *
- * The second is Jooble's own application rejecting a bad key, not the edge
- * rejecting a bot. A valid key should therefore get through from here.
+ * That second line was read as Jooble's own application rejecting a bad key
+ * rather than the edge rejecting a bot, and the conclusion drawn from it was
+ * that a valid key should therefore get through. **That conclusion does not
+ * hold.** Re-probed the same day with a real registered key:
+ *
+ *   POST /api/<real-key>             -> 403, 4631 bytes
+ *   POST /api/<all-zeros-key>        -> 403, 4631 bytes
+ *   GET  /api/                       -> 403
+ *
+ * The real key and an obviously invalid one produce byte-identical responses,
+ * from this machine and from Atlas, with the honest User-Agent and with
+ * curl's default. A response that does not vary with the key is not the
+ * application evaluating the key — nothing behind that 403 has looked at it.
+ * The absence of `cf-mitigated` distinguishes less than it appeared to.
+ *
+ * So the shape of the block is still unknown, and this script cannot capture
+ * a fixture until it is. `docs/11-known-issues.md` tracks it; the next step
+ * is opening https://jooble.org/api/about in a logged-in browser to confirm
+ * the key is active and to read the request format that page actually
+ * documents. Forging a browser User-Agent to get past this is not on the
+ * table (CLAUDE.md §6).
+ *
  * `robots.txt` disallows `/employer/api` and says nothing about `/api`.
  *
  * The response shape is deliberately NOT assumed anywhere in this script.
@@ -68,6 +87,13 @@ async function main(): Promise<void> {
   if (!response.ok) {
     console.error(`Jooble responded ${response.status} ${response.statusText}`);
     console.error(text.slice(0, 400));
+    if (response.status === 403) {
+      console.error(
+        "\nA 403 here says nothing about your key: an invalid key returns the\n" +
+          "same 4631-byte page. See the probe table at the top of this file and\n" +
+          "docs/11-known-issues.md before assuming the key is wrong.",
+      );
+    }
     process.exitCode = 1;
     return;
   }

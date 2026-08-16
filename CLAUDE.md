@@ -19,6 +19,7 @@ Deeper material lives in `docs/`. This file is the map.
 | `docs/08-observability.md`       | Adding a log line, a counter or an alert                     |
 | `docs/09-configuration.md`       | Adding a setting, a secret or a criterion                    |
 | `docs/10-milestones.md`          | Starting or finishing a milestone                            |
+| `docs/11-known-issues.md`        | Something is broken, or you are picking up known breakage    |
 
 ---
 
