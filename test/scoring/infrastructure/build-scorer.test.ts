@@ -125,6 +125,25 @@ describe("buildScorer", () => {
     }
   });
 
+  it("exposes getUsage for the api adapter (docs/audit AC-015)", () => {
+    process.env.SCORER_ADAPTER = "api";
+    process.env.LLM_API_KEY = "sk-or-v1-test";
+    process.env.LLM_MODEL = "deepseek/deepseek-v4-flash-0731";
+    const result = buildScorer(db, criteria(), profile());
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.getUsage).toBeTypeOf("function");
+      // No calls made yet — a fresh client's totals are all zero.
+      expect(result.getUsage?.()).toMatchObject({ calls: 0, attempts: 0 });
+    }
+  });
+
+  it("does not expose getUsage for the stub adapter — nothing to report", () => {
+    const result = buildScorer(db, criteria(), profile());
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.getUsage).toBeUndefined();
+  });
+
   it("fails with a named reason for an unknown adapter", () => {
     process.env.SCORER_ADAPTER = "magic";
     const result = buildScorer(db, criteria(), profile());

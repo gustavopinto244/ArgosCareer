@@ -1017,6 +1017,81 @@ describe("executeDeliver", () => {
     expect(run?.deliveredCount).toBe(1);
   });
 
+  it("persists OpenRouter usage onto the run row when getUsage is provided (docs/audit AC-015)", async () => {
+    const collector = stubCollector({
+      source: "gupy",
+      collectedAt: new Date(),
+      postings: [
+        {
+          source: "gupy",
+          sourceId: "1",
+          payload: gupyPayload(1, "Estágio em Backend"),
+        },
+      ],
+    });
+    await executeCollect(db, () => collector, [{}], undefined, 0);
+
+    const criteria = deliverCriteria();
+    const scorer = new StubScorer(criteria);
+    const { notifier } = recordingNotifier();
+    const getUsage = () => ({
+      calls: 3,
+      promptTokens: 100,
+      completionTokens: 50,
+      cachedPromptTokens: 10,
+      costUsd: 0.0042,
+      attempts: 4,
+      attemptsByOutcome: {
+        success: 3,
+        httpError: 1,
+        timeout: 0,
+        networkError: 0,
+        invalidEnvelope: 0,
+        invalidOutput: 0,
+      },
+      attemptsWithoutUsage: 1,
+    });
+
+    const outcome = await executeDeliver(
+      db,
+      scorer,
+      notifier,
+      criteria,
+      deliverProfile(),
+      getUsage,
+    );
+
+    const run = new RunsRepository(db).findById(outcome.runId);
+    expect(run?.llmAttempts).toBe(4);
+    expect(run?.llmCostUsd).toBeCloseTo(0.0042);
+    expect(run?.llmAttemptsWithoutUsage).toBe(1);
+  });
+
+  it("leaves llm usage columns at 0 when no getUsage is provided (the stub-adapter path)", async () => {
+    const collector = stubCollector({
+      source: "gupy",
+      collectedAt: new Date(),
+      postings: [],
+    });
+    await executeCollect(db, () => collector, [{}], undefined, 0);
+
+    const criteria = deliverCriteria();
+    const scorer = new StubScorer(criteria);
+    const { notifier } = recordingNotifier();
+
+    const outcome = await executeDeliver(
+      db,
+      scorer,
+      notifier,
+      criteria,
+      deliverProfile(),
+    );
+
+    const run = new RunsRepository(db).findById(outcome.runId);
+    expect(run?.llmAttempts).toBe(0);
+    expect(run?.llmCostUsd).toBe(0);
+  });
+
   it("closes the run as failed when the scorer throws, instead of leaving it open forever", async () => {
     const collector = stubCollector({
       source: "gupy",

@@ -179,6 +179,7 @@ export class RunsService {
         this.notifier,
         this.criteria,
         this.profile,
+        built.getUsage,
       ),
     );
     if (!outcome.ok) {

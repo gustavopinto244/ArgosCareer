@@ -31,6 +31,7 @@ import {
 } from "../persistence/infrastructure/db";
 import { PostingsRepository } from "../persistence/infrastructure/postings-repository";
 import {
+  RunCounts,
   RunsRepository,
   parseFailedSources,
 } from "../persistence/infrastructure/runs-repository";
@@ -43,6 +44,7 @@ import { deriveProfileKeywords } from "../profile/domain/profile-keywords";
 import { hashProfile } from "../profile/domain/profile-hash";
 import { ScorerPort } from "../scoring/domain/ports/scorer.port";
 import { buildScorer } from "../scoring/infrastructure/build-scorer";
+import { UsageTotals } from "../scoring/infrastructure/openrouter-client";
 import { NotifierPort } from "../delivery/domain/ports/notifier.port";
 import { composeDigest, ScoredPosting } from "../delivery/domain/digest";
 import {
@@ -463,11 +465,30 @@ export async function executeDeliver(
   notifier: NotifierPort,
   criteria: Criteria,
   profile: Profile,
+  /** Present only when `scorer` is backed by `OpenRouterClient` — read once
+   * after scoring completes and persisted onto this run's row so "what did
+   * tonight's run cost" is answerable from `runs` itself, not only from a
+   * separately-run calibration script (docs/audit AC-015). */
+  getUsage?: () => UsageTotals,
   now: () => Date = () => new Date(),
 ): Promise<DeliverOutcome> {
   const postingsRepo = new PostingsRepository(db);
   const runsRepo = new RunsRepository(db);
   const runId = runsRepo.start("scoreAndDeliver", now());
+
+  // Read fresh right before each `finish()` call below — the client's
+  // running totals as of that moment, best-effort even when scoring never
+  // completed (the catch branch calls this too, reflecting whatever usage
+  // accrued before the failure).
+  function usageCounts(): Partial<RunCounts> {
+    const usage = getUsage?.();
+    if (!usage) return {};
+    return {
+      llmAttempts: usage.attempts,
+      llmCostUsd: usage.costUsd,
+      llmAttemptsWithoutUsage: usage.attemptsWithoutUsage,
+    };
+  }
   const startedAt = now();
 
   // Counters live outside the try so the catch can record how far the run
@@ -491,6 +512,7 @@ export async function executeDeliver(
       filteredCount,
       scoredCount,
       deliveredCount: 0,
+      ...usageCounts(),
     });
     throw cause;
   }
@@ -557,6 +579,7 @@ export async function executeDeliver(
         filteredCount,
         scoredCount,
         deliveredCount: 0,
+        ...usageCounts(),
       });
       return {
         runId,
@@ -577,6 +600,7 @@ export async function executeDeliver(
       filteredCount,
       scoredCount,
       deliveredCount: sent.length,
+      ...usageCounts(),
     });
 
     return {
@@ -764,11 +788,18 @@ async function deliverCommand(): Promise<void> {
     process.exitCode = 1;
     return;
   }
-  const { scorer } = built;
+  const { scorer, getUsage } = built;
 
   const notifier = new TelegramNotifier(loadTelegramConfig());
 
-  const outcome = await executeDeliver(db, scorer, notifier, criteria, profile);
+  const outcome = await executeDeliver(
+    db,
+    scorer,
+    notifier,
+    criteria,
+    profile,
+    getUsage,
+  );
 
   if (outcome.error) {
     console.error(`deliver (run ${outcome.runId}) failed: ${outcome.error}`);

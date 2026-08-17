@@ -30,6 +30,14 @@ export interface RunCounts {
    * serialized to JSON text, read back with `parseTruncatedSources`
    * (docs/audit AC-013). */
   readonly truncatedSources?: readonly string[];
+  /** `scoreAndDeliver` runs only, from `OpenRouterClient.getUsage()` read
+   * once after scoring completes — every attempt that reached the network,
+   * regardless of outcome (docs/audit AC-015). */
+  readonly llmAttempts?: number;
+  readonly llmCostUsd?: number;
+  /** Of `llmAttempts`, how many never got a usable `usage` block back — a
+   * nonzero value here means `llmCostUsd` is a floor, not the real total. */
+  readonly llmAttemptsWithoutUsage?: number;
 }
 
 /** Both `failedSources` and `truncatedSources` are raw JSON text (schema.ts's
