@@ -213,3 +213,52 @@ export const runs = sqliteTable("runs", {
     .notNull()
     .default(0),
 });
+
+/**
+ * One append-only row per (run, posting, stage) decision — the run↔posting
+ * traceability docs/audit/AUDIT_REPORT.md AC-027 asks for, built to also
+ * carry AC-019's prefilter-reason persistence rather than as two separate
+ * mechanisms: a prefilter rejection is exactly one more "stage decision" a
+ * posting has, the same shape as a score verdict or a delivery outcome.
+ *
+ * Deliberately not a mutable per-posting column set: `postings` already
+ * changes on every re-collection (ADR-007), and a prefilter/score decision
+ * is a function of *this run's* criteria/profile, not a permanent property
+ * of the posting. Appending a new row when criteria changes preserves the
+ * previous decision for comparison (REMEDIATION_PLAN.md AC-019's own
+ * requirement) instead of overwriting it.
+ *
+ * No foreign keys to `runs`/`postings` (SQLite would allow them, but
+ * neither table is ever deleted — ADR-007, docs/05 — so there is nothing a
+ * constraint would protect against here that append-only + indexes don't
+ * already give for the query patterns this exists to serve).
+ */
+export const postingEvents = sqliteTable(
+  "posting_events",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    // "prefilter" | "score" | "delivery" — open string, not an enum, same
+    // reasoning `runs.kind` already uses: the set of stages that report
+    // here grows over time and SQLite has no real enum to constrain it.
+    stage: text("stage").notNull(),
+    // Stage-dependent: "passed"/"rejected" for prefilter, a Verdict or
+    // "failed" for score, "delivered" for delivery.
+    outcome: text("outcome").notNull(),
+    // The specific reason, when there is one to give — a
+    // PreFilterRejectionReason, a ScoreFailureReason, null on an
+    // unqualified pass/success.
+    reason: text("reason"),
+    // Only set on "prefilter" events (docs/prefilter/domain/criteria-hash.ts)
+    // — identifies which criteria version produced this decision, so a
+    // later criteria change is visible as "a new decision", not a
+    // contradiction of the old one.
+    criteriaHash: text("criteria_hash"),
+    occurredAt: integer("occurred_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("posting_events_run_id_idx").on(table.runId),
+    index("posting_events_fingerprint_idx").on(table.fingerprint),
+  ],
+);

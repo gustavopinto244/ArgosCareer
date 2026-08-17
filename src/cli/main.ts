@@ -14,6 +14,7 @@
  */
 import { parseArgs } from "node:util";
 import { CollectorPort } from "../posting/domain/ports/collector.port";
+import { Posting } from "../posting/domain/posting";
 import { collectorFor } from "../posting/infrastructure/collector-registry";
 import {
   Normalizer,
@@ -35,9 +36,11 @@ import {
   RunsRepository,
   parseFailedSources,
 } from "../persistence/infrastructure/runs-repository";
+import { PostingEventsRepository } from "../persistence/infrastructure/posting-events-repository";
 import { applyPreFilter } from "../prefilter/domain/pre-filter";
 import { Criteria } from "../prefilter/domain/criteria";
 import { loadCriteria } from "../prefilter/infrastructure/criteria-loader";
+import { hashCriteria } from "../prefilter/domain/criteria-hash";
 import { Profile } from "../profile/domain/profile";
 import { loadProfile } from "../profile/infrastructure/profile-loader";
 import { deriveProfileKeywords } from "../profile/domain/profile-keywords";
@@ -474,6 +477,7 @@ export async function executeDeliver(
 ): Promise<DeliverOutcome> {
   const postingsRepo = new PostingsRepository(db);
   const runsRepo = new RunsRepository(db);
+  const postingEventsRepo = new PostingEventsRepository(db);
   const runId = runsRepo.start("scoreAndDeliver", now());
 
   // Read fresh right before each `finish()` call below — the client's
@@ -542,18 +546,46 @@ export async function executeDeliver(
 
     const profileKeywords = deriveProfileKeywords(profile);
     const profileHash = hashProfile(profile);
+    const criteriaHash = hashCriteria(criteria);
 
-    const filtered = postingsRepo
-      .findUnnotified()
-      .filter(
-        (posting) =>
-          applyPreFilter(posting, criteria, profileKeywords, startedAt).passed,
+    // Every candidate gets a recorded prefilter decision, not only the ones
+    // that pass — this is the direct fix for docs/audit AC-019: "why isn't
+    // this posting in the digest" used to be answerable only by re-running
+    // the pure function by hand, with no trace of what a past run actually
+    // decided or why.
+    const filtered: Posting[] = [];
+    for (const posting of postingsRepo.findUnnotified()) {
+      const result = applyPreFilter(
+        posting,
+        criteria,
+        profileKeywords,
+        startedAt,
       );
+      postingEventsRepo.record({
+        runId,
+        fingerprint: posting.fingerprint,
+        stage: "prefilter",
+        outcome: result.passed ? "passed" : "rejected",
+        reason: result.reason,
+        criteriaHash,
+        occurredAt: startedAt,
+      });
+      if (result.passed) filtered.push(posting);
+    }
     filteredCount = filtered.length;
 
     const scoredEntries: ScoredPosting[] = [];
     for (const posting of filtered) {
       const result = await scorer.score(posting, profileHash);
+      const scoredAt = now();
+      postingEventsRepo.record({
+        runId,
+        fingerprint: posting.fingerprint,
+        stage: "score",
+        outcome: result.ok ? result.verdict : "failed",
+        reason: result.ok ? null : result.reason,
+        occurredAt: scoredAt,
+      });
       if (result.ok) scoredEntries.push({ posting, outcome: result });
       scoredCount = scoredEntries.length;
     }
@@ -594,6 +626,13 @@ export async function executeDeliver(
     const sent = [...digest.recommended, ...digest.review];
     for (const entry of sent) {
       postingsRepo.markNotified(entry.posting.fingerprint, deliveredAt);
+      postingEventsRepo.record({
+        runId,
+        fingerprint: entry.posting.fingerprint,
+        stage: "delivery",
+        outcome: "delivered",
+        occurredAt: deliveredAt,
+      });
     }
 
     runsRepo.finish(runId, deliveredAt, "success", {

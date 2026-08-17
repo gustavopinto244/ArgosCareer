@@ -18,6 +18,7 @@ import {
   runMigrations,
 } from "../../src/persistence/infrastructure/db";
 import { PostingsRepository } from "../../src/persistence/infrastructure/postings-repository";
+import { PostingEventsRepository } from "../../src/persistence/infrastructure/posting-events-repository";
 import {
   RunsRepository,
   parseFailedSources,
@@ -1239,6 +1240,87 @@ describe("executeDeliver", () => {
     expect(outcome.scored).toBe(0);
     expect(outcome.delivered).toBe(0);
     expect(digests[0]?.review).toHaveLength(0);
+  });
+
+  it("records a rejected prefilter event, with reason, for a posting the pre-filter drops (docs/audit AC-019)", async () => {
+    const collector = stubCollector({
+      source: "gupy",
+      collectedAt: new Date(),
+      postings: [
+        {
+          source: "gupy",
+          sourceId: "1",
+          payload: gupyPayload(1, "Analista Pleno de Backend"),
+        },
+      ],
+    });
+    await executeCollect(db, () => collector, [{}], undefined, 0);
+
+    const criteria = deliverCriteria();
+    const scorer = new StubScorer(criteria);
+    const { notifier } = recordingNotifier();
+
+    const outcome = await executeDeliver(
+      db,
+      scorer,
+      notifier,
+      criteria,
+      deliverProfile(),
+    );
+
+    const events = new PostingEventsRepository(db).findByRun(outcome.runId);
+    const prefilterEvents = events.filter((e) => e.stage === "prefilter");
+    expect(prefilterEvents).toHaveLength(1);
+    expect(prefilterEvents[0]?.outcome).toBe("rejected");
+    expect(prefilterEvents[0]?.reason).toBe("title_missing_required_term");
+    expect(prefilterEvents[0]?.criteriaHash).toBeTruthy();
+  });
+
+  it("records passed prefilter, score and delivery events for a posting that reaches the digest (docs/audit AC-019/AC-027)", async () => {
+    const collector = stubCollector({
+      source: "gupy",
+      collectedAt: new Date(),
+      postings: [
+        {
+          source: "gupy",
+          sourceId: "1",
+          payload: gupyPayload(1, "Estágio em Backend"),
+        },
+      ],
+    });
+    await executeCollect(db, () => collector, [{}], undefined, 0);
+
+    const criteria = deliverCriteria();
+    const scorer = new StubScorer(criteria);
+    const { notifier } = recordingNotifier();
+
+    const outcome = await executeDeliver(
+      db,
+      scorer,
+      notifier,
+      criteria,
+      deliverProfile(),
+    );
+
+    const events = new PostingEventsRepository(db).findByRun(outcome.runId);
+    const stages = events.map((e) => e.stage).sort();
+    expect(stages).toEqual(["delivery", "prefilter", "score"]);
+
+    const prefilterEvent = events.find((e) => e.stage === "prefilter");
+    expect(prefilterEvent?.outcome).toBe("passed");
+    expect(prefilterEvent?.reason).toBeNull();
+
+    const scoreEvent = events.find((e) => e.stage === "score");
+    expect(scoreEvent?.outcome).toBeTruthy();
+
+    const deliveryEvent = events.find((e) => e.stage === "delivery");
+    expect(deliveryEvent?.outcome).toBe("delivered");
+
+    const [posting] = new PostingsRepository(db).findActive();
+    const history = new PostingEventsRepository(db).findByFingerprint(
+      posting!.fingerprint,
+    );
+    expect(history.length).toBeGreaterThanOrEqual(3);
   });
 
   it("reports collected and deduplicated counts from collect/dedup runs since the last delivery", async () => {

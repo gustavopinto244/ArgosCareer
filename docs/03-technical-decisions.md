@@ -45,6 +45,7 @@ revisited on its merits instead of re-argued from memory.
 | [031](adr/031-solides-collector.md)                                   | Add Sólides Vagas as a source, via its own undocumented public API         | Accepted | 2026-08-17 |
 | [032](adr/032-catho-collector-headless-browser.md)                    | Add Catho as a source, via a real headless browser                         | Accepted | 2026-08-17 |
 | [033](adr/033-catho-checkpoint-state-machine.md)                      | A durable, five-state checkpoint for the Catho collector                   | Accepted | 2026-08-17 |
+| [034](adr/034-posting-events-append-only-log.md)                      | One append-only `posting_events` table for prefilter, score and delivery   | Accepted | 2026-08-17 |
 
 ## When an ADR is required
 
