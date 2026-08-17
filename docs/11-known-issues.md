@@ -365,6 +365,53 @@ records both probes and the correction.
 
 ---
 
+## B5 — Three hot-path inefficiencies, measured against a corpus that hasn't grown into them yet
+
+**Status:** open, deliberately not actioned · **Found:** 2026-08-17, a
+post-remediation audit (docs/audit AC-032)
+
+Three separate spots do more work than they need to, none yet a real cost
+at this project's current corpus size:
+
+- **Stage B re-reads and re-renders on every requirement.**
+  `buildStageBPrompt` (`prompts.ts`) calls `loadTemplate` — a synchronous
+  `readFileSync` — and rebuilds the full profile evidence catalog
+  (`buildEvidenceCatalog`/`formatEvidenceCatalog`) from scratch, once per
+  requirement. A 25-requirement posting does this 25 times for output
+  that would be identical within one `match()` call, if not for
+  `evaluatedAt` being captured fresh per requirement rather than once for
+  the whole call (`stage-b-matcher.ts`'s own comment explains why: two
+  provenance checks within _one_ requirement's prompt must agree on "what
+  time is it," not that every requirement in a posting needs to).
+- **Layer-2 dedup is O(n²) in the worst company group.**
+  `dedupSimilarPostings` (`dedup-similar-postings.ts`) compares each
+  candidate against every earlier posting already `seen` in its company
+  group via `.find()` — fine at this project's per-company posting
+  counts, not fine for a single employer with thousands of listings.
+- **Upsert and notification are per-item**, not batched — a
+  select-then-write-then-select per posting, a mark-notified call per
+  posting delivered.
+
+**Deliberately not fixed.** The audit's own recommendation for this
+finding is "measure real profiles before optimizing," not "optimize" —
+advice this project is taking literally rather than treating as a
+formality. A1/A3 (above) already track the actual bottleneck this
+project has real numbers for (Stage A/B's LLM round-trip latency at
+backlog scale) and are still waiting on a real cold-cache measurement of
+their own. Speculatively fixing these three without that data — especially
+the Stage B one, which would mean deciding whether `evaluatedAt` can
+safely move to once-per-call, a real behavior question ADR-013's own
+prompt-caching design already reasons carefully about — is exactly the
+premature optimization the audit is warning against, not what it is
+asking for.
+
+**Revisit when:** A1/A3 get their real backlog-scale measurement, or the
+corpus visibly grows into one of these specifically (a single employer
+posting hundreds of listings would make the dedup one worth measuring on
+its own, independent of A1/A3).
+
+---
+
 ## C1 — Production run rows are permanently open
 
 **Status:** fixed (the two known rows), the underlying gap stays open ·
