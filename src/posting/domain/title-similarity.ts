@@ -72,7 +72,15 @@ export function computeTitleSimilarity(a: string, b: string): number {
   const significantA = significantTokens(a).sort().join(" ");
   const significantB = significantTokens(b).sort().join(" ");
 
-  if (significantA === "" && significantB === "") return 1;
+  // Both titles are entirely boilerplate/stopwords once stripped -- there is
+  // no discriminating signal left to compare, which is the opposite of
+  // evidence that the two postings are the same (docs/audit AC-011). The
+  // real case that found this: "Estágio" and "Trainee" both reduce to "",
+  // previously scored 1 (identical) and merged by dedupSimilarPostings even
+  // though they are unrelated roles. "No signal" must never look like
+  // "confirmed match" for a destructive merge -- 0 is below every real
+  // threshold, so this pair is always kept apart instead.
+  if (significantA === "" && significantB === "") return 0;
 
   const bigramsA = bigrams(significantA);
   const bigramsB = bigrams(significantB);
@@ -91,6 +99,8 @@ export function computeTitleSimilarity(a: string, b: string): number {
     }
   }
 
+  // Never 0 here: that would require both bigram arrays empty, which only
+  // happens when both significant strings are "" -- already returned above.
   const denominator = bigramsA.length + bigramsB.length;
-  return denominator === 0 ? 1 : (2 * intersectionSize) / denominator;
+  return (2 * intersectionSize) / denominator;
 }
