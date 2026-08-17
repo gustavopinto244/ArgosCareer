@@ -104,6 +104,20 @@ describe("RunsRepository", () => {
     expect(row?.schemaRejectedCount).toBe(3);
   });
 
+  it("leaves receivedCount/schemaRejectedCount null, not a false 0, when finish never supplies them (docs/audit PR-014)", () => {
+    // Reversing this column's original .notNull().default(0): a run that
+    // never sets these -- every external-ingest run today -- used to read
+    // back as "0 received," indistinguishable from a source that genuinely
+    // returned nothing.
+    const runId = repository.start("collect", new Date());
+    repository.finish(runId, new Date(), "success", { collectedCount: 2 });
+
+    const row = repository.findById(runId);
+    expect(row?.collectedCount).toBe(2);
+    expect(row?.receivedCount).toBeNull();
+    expect(row?.schemaRejectedCount).toBeNull();
+  });
+
   it("serializes truncatedSources to JSON, read back via parseTruncatedSources (docs/audit AC-013)", () => {
     const runId = repository.start("collect", new Date());
     repository.finish(runId, new Date(), "success", {

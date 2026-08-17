@@ -82,13 +82,16 @@ export interface CollectOutcome {
    * thing downstream (no `Posting` to score), so they share one counter. */
   readonly unnormalizable: number;
   /** Total raw items every collector reported receiving this run, summed
-   * across queries — `undefined` contributes 0, so a collector that
-   * cannot report it does not make the total look smaller than the truth,
-   * only less complete (AC-012). */
-  readonly received: number;
+   * across queries. `null` when at least one query's collector could not
+   * report it — reversing this field's original "undefined contributes 0"
+   * convention (AC-012), which made an incomplete run's total indistinguishable
+   * from a complete one that happened to sum to the same number
+   * (docs/audit PR-014). */
+  readonly received: number | null;
   /** Of `received`, how many failed a collector's own item schema before
-   * `postings` was ever built (AC-012). */
-  readonly schemaRejected: number;
+   * `postings` was ever built. Same `null`-means-unreconcilable convention
+   * as `received` (AC-012, docs/audit PR-014). */
+  readonly schemaRejected: number | null;
   /** Source(s) that stopped paginating this run because they hit their own
    * cap while more results were plausibly available (AC-013) — a "success"
    * outcome that still left something uncollected. */
@@ -217,8 +220,15 @@ export async function executeCollect(
   let failures = 0;
   let tooOld = 0;
   let unnormalizable = 0;
-  let received = 0;
-  let schemaRejected = 0;
+  // `null` means at least one query this run could not report a
+  // reconcilable count (docs/audit PR-014) — reversing this same
+  // variable's prior "undefined contributes 0" convention, which made an
+  // incomplete run's total look exactly like a complete one that happened
+  // to add up the same way. Once null, stays null: one unreconcilable
+  // query taints the whole run's total, since a partial sum mislabeled as
+  // complete is worse than an honest "unknown."
+  let received: number | null = 0;
+  let schemaRejected: number | null = 0;
   let firstError: string | undefined;
   // Which source(s) actually failed this run (docs/11-known-issues.md B2) —
   // a Set because the same source can appear in several queries
@@ -263,8 +273,14 @@ export async function executeCollect(
 
       const result = await collector.collect(query);
       collected += result.postings.length;
-      received += result.receivedCount ?? 0;
-      schemaRejected += result.schemaRejectedCount ?? 0;
+      received =
+        result.receivedCount === undefined || received === null
+          ? null
+          : received + result.receivedCount;
+      schemaRejected =
+        result.schemaRejectedCount === undefined || schemaRejected === null
+          ? null
+          : schemaRejected + result.schemaRejectedCount;
       if (result.truncated) truncatedSources.add(source);
 
       if (result.error) {
