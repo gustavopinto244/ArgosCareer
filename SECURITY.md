@@ -78,6 +78,13 @@ then into a Telegram message. Two consequences the implementation must respect:
   every `met`/`partial` evidence quote against before it ever reaches
   `createMatch`. A repository audit (docs/audit AC-008) found this claim
   stated here but not actually checked in code until it was added.
+  **What this does not guarantee** (docs/audit PR-005, ADR-037): a genuine,
+  verbatim quote can still be attached to the wrong requirement — a prompt
+  injection cannot invent evidence, but it can still steer the model toward
+  real evidence that does not actually support the requirement it is being
+  used for. Both prompts now delimit untrusted content and instruct the model
+  not to treat it as instructions, which raises the bar; it is a mitigation,
+  not a proof, and closing this fully is open work (ADR-037's Consequences).
 - **Posting text is escaped before delivery.** It reaches Telegram as data, not
   as markup.
 

@@ -90,3 +90,70 @@ describe("isKnownProfileEvidence (docs/audit AC-008)", () => {
     expect(isKnownProfileEvidence("Anything at all.", p)).toBe(false);
   });
 });
+
+describe("isKnownProfileEvidence — academic and declared-field evidence (docs/audit PR-001)", () => {
+  // The regression this guards against: `buildStageBPrompt` renders four
+  // kinds of quotable line (docs/04's [Academic enrollment], [English
+  // level], [Availability], [Compensation], plus each competency's own
+  // evidence), but before AC-008's evidence-provenance check unified its
+  // source with the prompt's, it indexed competency evidence only. A model
+  // that correctly quoted one of the other three back verbatim failed
+  // provenance and was coerced to `not_met` -- a false negative on exactly
+  // the requirements ("cursando a partir do 3º período", an English level,
+  // an availability window) M7's calibration found most common.
+  const TODAY = new Date("2026-08-15"); // 2026-03 start -> period 2 (docs/audit AC-018 semester math)
+
+  it("accepts a verbatim quote of the derived academic-enrollment line", () => {
+    const p = profile();
+    expect(
+      isKnownProfileEvidence(
+        "Cursando o 2º período de Sistemas de Informação na Universidade Exemplo, com conclusão prevista para 2029.2.",
+        p,
+        TODAY,
+      ),
+    ).toBe(true);
+  });
+
+  it("accepts the academic-enrollment quote with its '- [Academic enrollment] ' tag attached", () => {
+    const p = profile();
+    expect(
+      isKnownProfileEvidence(
+        "- [Academic enrollment] Cursando o 2º período de Sistemas de Informação na Universidade Exemplo, com conclusão prevista para 2029.2.",
+        p,
+        TODAY,
+      ),
+    ).toBe(true);
+  });
+
+  it("accepts a verbatim quote of the declared English level", () => {
+    const p = profile();
+    expect(
+      isKnownProfileEvidence("Nível de inglês: intermediate.", p, TODAY),
+    ).toBe(true);
+  });
+
+  it("accepts a verbatim quote of the declared availability", () => {
+    const p = profile();
+    expect(
+      isKnownProfileEvidence(
+        "Disponibilidade de até 30 horas semanais.",
+        p,
+        TODAY,
+      ),
+    ).toBe(true);
+  });
+
+  it("accepts a verbatim quote of the declared minimum stipend", () => {
+    const p = profile();
+    expect(
+      isKnownProfileEvidence("Bolsa-auxílio mínima aceita: R$ 1500.", p, TODAY),
+    ).toBe(true);
+  });
+
+  it("still rejects a declared-field-shaped quote that does not match the actual value", () => {
+    const p = profile();
+    expect(isKnownProfileEvidence("Nível de inglês: fluent.", p, TODAY)).toBe(
+      false,
+    );
+  });
+});

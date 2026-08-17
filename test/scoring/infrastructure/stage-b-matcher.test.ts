@@ -93,7 +93,7 @@ describe("StageBMatcher.match — cache", () => {
       matchesRepo.find(
         "fp1",
         "hash1",
-        "b-v2",
+        "b-v3",
         "unknown",
         hashRequirements([requirement()]),
       ),
@@ -104,7 +104,7 @@ describe("StageBMatcher.match — cache", () => {
     matchesRepo.upsert(
       "fp1",
       "hash1",
-      "b-v2",
+      "b-v3",
       "unknown",
       hashRequirements([requirement()]),
       [{ requirement: requirement(), status: "not_met", evidence: null }],
@@ -371,7 +371,7 @@ describe("StageBMatcher.match — evidence provenance (docs/audit AC-008)", () =
     const cached = matchesRepo.find(
       "fp1",
       "hash1",
-      "b-v2",
+      "b-v3",
       "unknown",
       hashRequirements([requirement()]),
     );
@@ -399,7 +399,7 @@ describe("StageBMatcher.match — failure, never throws", () => {
       attempts: 3,
     });
     expect(
-      matchesRepo.find("fp1", "hash1", "b-v2", "unknown", "any-hash"),
+      matchesRepo.find("fp1", "hash1", "b-v3", "unknown", "any-hash"),
     ).toBeNull();
   });
 
@@ -420,7 +420,7 @@ describe("StageBMatcher.match — failure, never throws", () => {
 
     expect(result.ok).toBe(false);
     expect(
-      matchesRepo.find("fp1", "hash1", "b-v2", "unknown", "any-hash"),
+      matchesRepo.find("fp1", "hash1", "b-v3", "unknown", "any-hash"),
     ).toBeNull();
   });
 });
