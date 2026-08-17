@@ -55,8 +55,22 @@ function rowToPosting(row: PostingRow): Posting {
  * Implemented as an explicit select-then-branch inside a transaction rather
  * than `ON CONFLICT DO UPDATE`, so which columns update on a re-sighting
  * (everything except `firstSeenAt`) stays readable instead of implicit in a
- * SQL `SET` clause. Safe without extra locking: this repository is used by a
- * single sequential batch process, not concurrent writers.
+ * SQL `SET` clause.
+ *
+ * Safe under concurrent writers, including a second OS process (docs/audit
+ * AC-020 re-examined this and confirmed it, rather than assuming it): the
+ * select and the branch it drives are inside one `db.transaction()`, and
+ * SQLite serializes write transactions at the database-file level — a
+ * second connection's write transaction blocks until the first commits (up
+ * to `better-sqlite3`'s 5s default `busy_timeout`), it never interleaves
+ * with it. What this does **not** cover is a race spanning *multiple*
+ * transactions — `executeDeliver`'s `findUnnotified` → score → notify →
+ * `markNotified` sequence is not one atomic unit, so two full delivery runs
+ * overlapping across processes can still both read the same unnotified
+ * postings before either marks them. That is `RunLock`'s job
+ * (`run-lock.ts`), not this repository's, and `RunLock`'s own known,
+ * accepted limitation (in-process only, ADR-024) is what actually leaves
+ * that specific race open — not anything in this method.
  */
 export class PostingsRepository {
   constructor(private readonly db: Db) {}

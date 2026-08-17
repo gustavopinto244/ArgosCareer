@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted
+Accepted — amended 2026-08-17, see
+[Amendment 1](#amendment-1--2026-08-17-re-examined-against-docsaudit-ac-020-decision-unchanged)
 
 ## Date
 
@@ -127,3 +128,41 @@ the process dies mid-run, whatever it was doing dies with it — there is no
 "in-flight run" left to protect against once the process holding the lock no
 longer exists. The run row it left open (`docs/11-known-issues.md` C1) is a
 separate, already-known problem this ADR does not claim to fix.
+
+## Amendment 1 — 2026-08-17: re-examined against docs/audit AC-020, decision unchanged
+
+A repository audit (`docs/audit/AUDIT_REPORT.md` AC-020, MEDIUM, confidence
+LIKELY not CONFIRMED) raised the cross-process gap this ADR already names
+above as a "Hard" consequence, plus a second claim: that
+`PostingsRepository.upsert`'s select-then-branch "assumes a sequential
+writer" and races under concurrent access.
+
+**The second claim does not hold up.** `upsert` wraps its select and the
+write it drives in one `db.transaction()` — a real SQLite `BEGIN`/`COMMIT`,
+not an application-level convention — and SQLite serializes write
+transactions at the database-file level regardless of how many connections
+or processes are attached. A second connection's write transaction blocks
+until the first commits; it does not interleave, and empirically,
+`better-sqlite3` defaults `busy_timeout` to 5000ms, so a second writer waits
+before failing rather than failing immediately. Verified with a real test —
+two genuine connections to the same file, one holding an open write
+transaction, the other's `upsert` call — not simulated
+(`test/persistence/postings-repository-concurrency.test.ts`). The comment
+this method carried ("safe because this repository is used by a single
+sequential batch process") was accurate about the outcome but wrong about
+the reason, and has been corrected to explain the real one.
+
+**The first claim — the cross-process `RunLock` gap — still holds, and the
+decision not to fix it still stands.** Nothing AC-020 raised is new
+information against the reasoning already given: no observed incident, a
+single-operator personal project, and real added complexity (a `run_locks`
+table, lease/expiry semantics for a crashed holder) for a risk that remains
+hypothetical. The distinction the corrected `upsert` comment now draws
+matters here: a _single_ upsert cannot race across processes (SQLite's
+transaction already prevents it), but a _multi-step pipeline_ like
+`executeDeliver` — read unnotified, score over the network, notify, then
+mark notified — is not one transaction, and no single-statement guarantee
+covers a second process starting the same pipeline mid-flight. That gap is
+real and is exactly what a persisted lock would close. It remains
+deliberately unclosed, per this ADR's original Considered Options section,
+until it is an observed problem.
