@@ -26,13 +26,15 @@ function renderLocation(posting: ScoredPosting["posting"]): string {
 }
 
 /**
- * The per-posting entry (docs/02-architecture.md). Only the lines derivable
- * from stage C are rendered — Requisitos, Pontos fortes, Lacunas, Currículo
- * recomendado and Sugestão all depend on stage A/B matches and the variant
- * recommender, none of which exist until M7 (`StubScorer` never populates
- * them). Adding those lines here would be printing fields that are always
- * empty; they will be added when M7's `ScoreOutcome` actually carries the
- * data.
+ * The per-posting entry (docs/02-architecture.md). `outcome` is
+ * `ScoreOutcome & Recommendation` (`digest.ts`), so `recommendedVariant`/
+ * `highlights`/`missingTerms`/`criticalGaps` are rendered directly from what
+ * `ApiScorer` already computed — Question 3 of `01-vision-and-scope.md`
+ * ("how should I present my profile here?") was being paid for and
+ * discarded before this (docs/audit AC-026). `StubScorer` populates
+ * `EMPTY_RECOMMENDATION`, so every optional line below is conditional and
+ * simply does not appear for a stubbed run, rather than printing an empty
+ * label.
  *
  * The original posting link is mandatory (docs/02): when a source provided
  * none, the entry says so explicitly rather than omitting the line, since a
@@ -57,6 +59,22 @@ export function renderPostingEntry(entry: ScoredPosting): string {
   if (outcome.lowConfidence) {
     lines.push(
       "⚠ Confiança baixa — poucos requisitos verificáveis extraídos da vaga",
+    );
+  }
+  if (outcome.recommendedVariant) {
+    lines.push(`Currículo recomendado: ${outcome.recommendedVariant}`);
+  }
+  if (outcome.highlights.length > 0) {
+    lines.push(`Pontos fortes: ${outcome.highlights.join("; ")}`);
+  }
+  if (outcome.missingTerms.length > 0) {
+    lines.push(
+      `Termos ausentes no currículo: ${outcome.missingTerms.join(", ")}`,
+    );
+  }
+  if (outcome.criticalGaps.length > 0) {
+    lines.push(
+      `Lacunas: ${outcome.criticalGaps.map((r) => r.text).join("; ")}`,
     );
   }
   return lines.join("\n");

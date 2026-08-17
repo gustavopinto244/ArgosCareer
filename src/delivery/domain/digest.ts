@@ -1,23 +1,42 @@
 import { Posting } from "../../posting/domain/posting";
+import { Recommendation } from "../../scoring/domain/recommendation";
 import { ScoreOutcome } from "../../scoring/domain/types";
 
 /**
  * A scored posting is what every digest section is built from. `apply` and
  * `review` sections both hold the same shape — what differs is the verdict
  * inside `outcome`, and the caller (composeDigest) is what buckets them.
+ *
+ * `outcome` is `ScoreOutcome & Recommendation`, not `ScoreOutcome` alone
+ * (docs/audit AC-026): every `ScoredPosting` is built from a `ScoreResult`
+ * with `ok: true`, which `ScorerPort` already types as exactly that
+ * intersection — `ApiScorer.score` spreads both `computeScore`'s and
+ * `computeRecommendation`'s results into one object. The narrower type here
+ * used to hide `recommendedVariant`/`highlights`/`missingTerms` from
+ * anything reading `entry.outcome`, even though the fields were present on
+ * the actual value at runtime the whole time — `render-digest.ts` simply
+ * had no type-safe way to reach them.
  */
 export interface ScoredPosting {
   readonly posting: Posting;
-  readonly outcome: ScoreOutcome;
+  readonly outcome: ScoreOutcome & Recommendation;
 }
 
 /**
  * A posting held back for not yet being reachable at your academic period.
  * `opensAtLabel` is a pre-formatted calendar term ("2027.1"), not the raw
- * period index — nothing extracts a period requirement from posting text
- * until M7 gives stage A a description to read, so this list is expected to
- * be empty throughout M6. The section still exists and renders, because the
- * digest format is fixed now rather than retrofitted once M7 lands.
+ * period index.
+ *
+ * Still always empty post-M7 (docs/audit AC-026) — not because nothing can
+ * read the requirement text anymore (Stage A does extract a "cursando a
+ * partir do Nº período" requirement, and Stage B matches it, same as any
+ * other), but because nothing turns that specific requirement into a
+ * *structured* minimum period this system could compare against
+ * `computeAcademicPeriod` and use to compute an "opens at" date. Today a
+ * period requirement the candidate does not yet meet is scored like any
+ * other unmet requirement (often `blocking`, capping the score) — the
+ * *separate*, non-punitive "opens for you in 2027.1" section this comment
+ * describes was never built. `executeDeliver` always passes `[]` here.
  */
 export interface PeriodBlockedEntry {
   readonly posting: Posting;
