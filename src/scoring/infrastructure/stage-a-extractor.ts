@@ -122,6 +122,7 @@ export class StageAExtractor {
       ExtractionOutputSchema,
       this.ask,
       prompt,
+      { operationLabel: `stage-a:${posting.fingerprint}` },
     );
 
     if (!result.ok) {

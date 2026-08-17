@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CircuitBreaker, CircuitBreakerOpenError } from "./circuit-breaker";
 
 /**
  * Honest identification per OpenRouter's convention (the same etiquette
@@ -60,23 +61,157 @@ const ChatCompletionResponseSchema = z
  * malformed body, or an unexpected shape were all invisible to
  * `getUsage()` — the provider may have processed and billed a request
  * this client never counted as an attempt at all.
+ *
+ * Split from a single `httpError` bucket into the taxonomy AC-016 asks for
+ * (`docs/audit/AUDIT_REPORT.md`): each category implies a different retry
+ * policy one layer up (`llm-output.ts`) — `rateLimited`/`serverError`/
+ * `providerError` are worth backing off and retrying, `authError`/
+ * `configError` are not (retrying a bad API key or a malformed request
+ * forever wastes budget on something no amount of waiting fixes).
  */
 export type AttemptOutcome =
   | "success"
-  | "httpError"
   | "timeout"
   | "networkError"
+  | "rateLimited"
+  | "serverError"
+  | "providerError"
+  | "authError"
+  | "configError"
   | "invalidEnvelope"
-  | "invalidOutput";
+  | "invalidOutput"
+  /** Fallback for a non-2xx status this classifier has no more specific
+   * bucket for (e.g. an unexpected 3xx). Kept rather than folded into one
+   * of the categories above so an unanticipated status is still visible as
+   * its own thing instead of silently miscounted. */
+  | "httpError";
 
 const ZERO_OUTCOMES: Readonly<Record<AttemptOutcome, number>> = {
   success: 0,
-  httpError: 0,
   timeout: 0,
   networkError: 0,
+  rateLimited: 0,
+  serverError: 0,
+  providerError: 0,
+  authError: 0,
+  configError: 0,
   invalidEnvelope: 0,
   invalidOutput: 0,
+  httpError: 0,
 };
+
+/**
+ * Everything `complete()` can throw, tagged with the category above plus
+ * whatever the retry layer needs to act on it: a parsed, clamped
+ * `Retry-After` when the provider sent a trustworthy one, and the raw HTTP
+ * status for logging. `parseModelOutputWithRetries` (`llm-output.ts`) is
+ * this class's one real consumer.
+ */
+export class LlmTransportError extends Error {
+  readonly category: FailureCategory;
+  readonly retryAfterMs: number | undefined;
+  readonly status: number | undefined;
+
+  constructor(
+    message: string,
+    category: FailureCategory,
+    options?: {
+      cause?: unknown;
+      retryAfterMs?: number | undefined;
+      status?: number;
+    },
+  ) {
+    super(
+      message,
+      options?.cause !== undefined ? { cause: options.cause } : undefined,
+    );
+    this.name = "LlmTransportError";
+    this.category = category;
+    this.retryAfterMs = options?.retryAfterMs;
+    this.status = options?.status;
+  }
+}
+
+/**
+ * `circuitOpen` is not a network attempt (`CircuitBreaker.beforeCall`
+ * refuses the call before `fetch` is ever reached) so it is not a member of
+ * `AttemptOutcome`, which `getUsage()` documents as strictly "reached the
+ * network." It is still a failure category the retry layer needs to
+ * classify, hence its own union rather than reusing `AttemptOutcome`.
+ */
+export type FailureCategory =
+  Exclude<AttemptOutcome, "success"> | "circuitOpen";
+
+/**
+ * Which categories are worth retrying at all. `authError` and `configError`
+ * are the two AC-016 names explicitly as permanent — no `Retry-After`,
+ * no backoff, no amount of waiting turns a bad API key or a malformed
+ * request into a valid one.
+ */
+const TRANSIENT_CATEGORIES: ReadonlySet<FailureCategory> =
+  new Set<FailureCategory>([
+    "timeout",
+    "networkError",
+    "rateLimited",
+    "serverError",
+    "providerError",
+    "invalidEnvelope",
+    "invalidOutput",
+    "httpError",
+    "circuitOpen",
+  ]);
+
+export function isTransientFailure(category: FailureCategory): boolean {
+  return TRANSIENT_CATEGORIES.has(category);
+}
+
+/**
+ * 401/403 (bad or revoked credentials) and 429 get their own category each;
+ * 502/503/504 are OpenRouter's own documented vocabulary for "the upstream
+ * model provider is unavailable," distinct enough from a generic 500 to be
+ * worth its own bucket; everything else non-2xx falls to `configError`
+ * (permanent — a 4xx is almost always a malformed or unsupported request,
+ * not something retrying fixes) or `serverError` (transient, the safe
+ * default for an unclassified 5xx).
+ */
+function classifyHttpStatus(
+  status: number,
+): Exclude<AttemptOutcome, "success"> {
+  if (status === 401 || status === 403) return "authError";
+  if (status === 429) return "rateLimited";
+  if (status === 502 || status === 503 || status === 504)
+    return "providerError";
+  if (status >= 500) return "serverError";
+  if (status >= 400) return "configError";
+  return "httpError";
+}
+
+/** Clamp so an untrustworthy or huge `Retry-After` cannot stall a nightly
+ * batch run for a single posting — "quando confiável" (AC-016) means bounded,
+ * not blindly obeyed. */
+const MAX_RETRY_AFTER_MS = 30_000;
+
+/**
+ * `Retry-After` is either a delta in seconds or an HTTP-date (RFC 9110
+ * §10.2.3). Returns `undefined` — not zero — for anything that fails to
+ * parse as either, so the caller falls back to its own computed backoff
+ * instead of treating "couldn't parse" as "retry immediately."
+ */
+function parseRetryAfterMs(header: string | null): number | undefined {
+  if (!header) return undefined;
+
+  const seconds = Number(header);
+  if (Number.isFinite(seconds)) {
+    return seconds >= 0
+      ? Math.min(seconds * 1000, MAX_RETRY_AFTER_MS)
+      : undefined;
+  }
+
+  const dateMs = Date.parse(header);
+  if (Number.isNaN(dateMs)) return undefined;
+  const deltaMs = dateMs - Date.now();
+  return Math.min(Math.max(deltaMs, 0), MAX_RETRY_AFTER_MS);
+}
 
 /** Running totals across every call this client has made. */
 export interface UsageTotals {
@@ -98,6 +233,12 @@ export interface UsageTotals {
    * that simply omitted `usage` (OpenRouter's own field is optional). A
    * `costUsd` of 0 with a nonzero count here means "unknown," not "free." */
   readonly attemptsWithoutUsage: number;
+  /** Calls the circuit breaker (docs/audit AC-016) refused outright, before
+   * `fetch` was ever reached — not part of `attempts`, which is documented
+   * above as strictly "reached the network." A run where this climbs while
+   * `attempts` stays flat means the provider was down long enough to trip
+   * the breaker, not that requests are merely failing individually. */
+  readonly blockedByCircuit: number;
 }
 
 type FetchLike = typeof fetch;
@@ -110,19 +251,26 @@ export interface OpenRouterClientOptions {
    * (docs/07-testing-strategy.md). Defaults to the global fetch. */
   fetchImpl?: FetchLike;
   timeoutMs?: number;
+  /** Injected for tests, so a breaker trip can be asserted without waiting
+   * out a real cooldown (docs/audit AC-016). Defaults to one shared instance
+   * per client, protecting every call this client makes — across Stage A
+   * and Stage B alike, since `build-scorer.ts` constructs exactly one
+   * `OpenRouterClient` per run and both stages call through it. */
+  circuitBreaker?: CircuitBreaker;
 }
 
 /**
  * A single chat-completion call against OpenRouter's OpenAI-compatible
  * endpoint (ADR-012). One attempt, no retry — retries live one layer up, in
- * `parseModelOutputWithRetries`, which treats a rejected call the same as a
- * malformed response and folds it into the same bounded attempt budget.
+ * `parseModelOutputWithRetries`, which classifies the typed
+ * `LlmTransportError` this method throws and decides whether, and how long,
+ * to wait before trying again (docs/audit AC-016; ADR-035).
  *
- * Throws on any failure (non-2xx, malformed body, empty `choices`) rather
- * than returning a result type: this class has exactly one caller
- * (`AskModel`), and that caller already wraps every invocation in a
- * try/catch (`llm-output.ts`) — a second failure-as-value layer here would
- * just be forwarded, not handled.
+ * Throws on any failure (non-2xx, malformed body, empty `choices`, or the
+ * circuit breaker refusing the call) rather than returning a result type:
+ * this class has exactly one caller (`AskModel`), and that caller already
+ * wraps every invocation in a try/catch (`llm-output.ts`) — a second
+ * failure-as-value layer here would just be forwarded, not handled.
  */
 export class OpenRouterClient {
   private readonly apiKey: string;
@@ -130,6 +278,7 @@ export class OpenRouterClient {
   private readonly baseUrl: string;
   private readonly fetchImpl: FetchLike;
   private readonly timeoutMs: number;
+  private readonly circuitBreaker: CircuitBreaker;
 
   private calls = 0;
   private promptTokens = 0;
@@ -141,6 +290,7 @@ export class OpenRouterClient {
     ...ZERO_OUTCOMES,
   };
   private attemptsWithoutUsage = 0;
+  private blockedByCircuit = 0;
 
   constructor(options: OpenRouterClientOptions) {
     this.apiKey = options.apiKey;
@@ -148,6 +298,7 @@ export class OpenRouterClient {
     this.baseUrl = options.baseUrl ?? DEFAULT_BASE_URL;
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.circuitBreaker = options.circuitBreaker ?? new CircuitBreaker();
   }
 
   /**
@@ -169,10 +320,28 @@ export class OpenRouterClient {
       attempts: this.attempts,
       attemptsByOutcome: { ...this.attemptsByOutcome },
       attemptsWithoutUsage: this.attemptsWithoutUsage,
+      blockedByCircuit: this.blockedByCircuit,
     };
   }
 
   async complete(prompt: string): Promise<string> {
+    try {
+      this.circuitBreaker.beforeCall();
+    } catch (cause) {
+      // Refused before `fetch` is ever reached -- not an "attempt" by this
+      // class's own definition of the word, so it is tracked separately
+      // rather than inflating `attemptsByOutcome`.
+      this.blockedByCircuit += 1;
+      throw new LlmTransportError(
+        (cause as CircuitBreakerOpenError).message,
+        "circuitOpen",
+        {
+          cause,
+          retryAfterMs: (cause as CircuitBreakerOpenError).retryAfterMs,
+        },
+      );
+    }
+
     // Counted before the network call, not after a successful one — this is
     // the direct fix for AC-015: every attempt that reaches the network is
     // now visible, regardless of how it ends.
@@ -198,24 +367,32 @@ export class OpenRouterClient {
       });
     } catch (cause) {
       // Our own abort (timeout) vs. anything else (DNS, connection reset,
-      // TLS) — both are "no response," but distinguishing them is exactly
-      // what a retry/backoff policy one layer up needs (AC-016 is the
-      // matching finding for using it; this only records it).
-      this.attemptsByOutcome[
-        controller.signal.aborted ? "timeout" : "networkError"
-      ] += 1;
+      // TLS) — both are "no response," but distinguishing them is what the
+      // retry/backoff policy one layer up needs (docs/audit AC-016).
+      const category = controller.signal.aborted ? "timeout" : "networkError";
+      this.attemptsByOutcome[category] += 1;
       this.attemptsWithoutUsage += 1;
-      throw cause;
+      this.circuitBreaker.onFailure(true);
+      throw new LlmTransportError((cause as Error).message, category, {
+        cause,
+      });
     } finally {
       clearTimeout(timer);
     }
 
     if (!response.ok) {
       const body = await response.text().catch(() => "");
-      this.attemptsByOutcome.httpError += 1;
+      const category = classifyHttpStatus(response.status);
+      this.attemptsByOutcome[category] += 1;
       this.attemptsWithoutUsage += 1;
-      throw new Error(
+      const retryAfterMs = parseRetryAfterMs(
+        response.headers.get("retry-after"),
+      );
+      this.circuitBreaker.onFailure(isTransientFailure(category));
+      throw new LlmTransportError(
         `OpenRouter responded ${response.status}: ${body}`.trim(),
+        category,
+        { status: response.status, retryAfterMs },
       );
     }
 
@@ -225,7 +402,12 @@ export class OpenRouterClient {
     } catch (cause) {
       this.attemptsByOutcome.invalidEnvelope += 1;
       this.attemptsWithoutUsage += 1;
-      throw new Error("Malformed OpenRouter response body", { cause });
+      this.circuitBreaker.onFailure(true);
+      throw new LlmTransportError(
+        "Malformed OpenRouter response body",
+        "invalidEnvelope",
+        { cause },
+      );
     }
 
     const parsed = ChatCompletionResponseSchema.safeParse(json);
@@ -249,11 +431,16 @@ export class OpenRouterClient {
     const firstChoice = parsed.success ? parsed.data.choices[0] : undefined;
     if (!firstChoice) {
       this.attemptsByOutcome.invalidOutput += 1;
-      throw new Error("Unexpected OpenRouter response shape");
+      this.circuitBreaker.onFailure(true);
+      throw new LlmTransportError(
+        "Unexpected OpenRouter response shape",
+        "invalidOutput",
+      );
     }
 
     this.calls += 1;
     this.attemptsByOutcome.success += 1;
+    this.circuitBreaker.onSuccess();
 
     return firstChoice.message.content;
   }

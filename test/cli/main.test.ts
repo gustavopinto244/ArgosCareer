@@ -1203,13 +1203,19 @@ describe("executeDeliver", () => {
       attempts: 4,
       attemptsByOutcome: {
         success: 3,
-        httpError: 1,
         timeout: 0,
         networkError: 0,
+        rateLimited: 0,
+        serverError: 1,
+        providerError: 0,
+        authError: 0,
+        configError: 0,
         invalidEnvelope: 0,
         invalidOutput: 0,
+        httpError: 0,
       },
       attemptsWithoutUsage: 1,
+      blockedByCircuit: 0,
     });
 
     const outcome = await executeDeliver(

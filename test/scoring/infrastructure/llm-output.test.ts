@@ -87,9 +87,11 @@ describe("parseModelOutputWithRetries — success", () => {
 });
 
 describe("parseModelOutputWithRetries — exhausted retries, never throws", () => {
-  it("returns ok:false after maxAttempts on truncated JSON that never parses", async () => {
+  it("returns ok:false after maxRepairAttempts on truncated JSON that never parses", async () => {
     const ask = vi.fn(async () => '{"status": "met"');
-    const result = await parseModelOutputWithRetries(Schema, ask, "prompt", 3);
+    const result = await parseModelOutputWithRetries(Schema, ask, "prompt", {
+      maxRepairAttempts: 3,
+    });
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -100,38 +102,61 @@ describe("parseModelOutputWithRetries — exhausted retries, never throws", () =
     expect(ask).toHaveBeenCalledTimes(3);
   });
 
-  it("returns ok:false after maxAttempts when the model repeats the same invalid enum", async () => {
+  it("returns ok:false after maxRepairAttempts when the model repeats the same invalid enum", async () => {
     const ask = vi.fn(async () => '{"status":"maybe"}');
-    const result = await parseModelOutputWithRetries(Schema, ask, "prompt", 3);
+    const result = await parseModelOutputWithRetries(Schema, ask, "prompt", {
+      maxRepairAttempts: 3,
+    });
 
     expect(result.ok).toBe(false);
     expect(ask).toHaveBeenCalledTimes(3);
   });
 
-  it("treats a rejected ask() call as a failed attempt rather than throwing", async () => {
-    const ask = vi
-      .fn()
-      .mockRejectedValueOnce(new Error("network unreachable"))
-      .mockResolvedValueOnce('{"status":"met"}');
+  it("treats a rejected ask() call as a failed attempt rather than throwing, and retries it", async () => {
+    vi.useFakeTimers();
+    try {
+      const ask = vi
+        .fn()
+        .mockRejectedValueOnce(new Error("network unreachable"))
+        .mockResolvedValueOnce('{"status":"met"}');
 
-    const result = await parseModelOutputWithRetries(Schema, ask, "prompt");
+      const promise = parseModelOutputWithRetries(Schema, ask, "prompt");
+      await vi.runAllTimersAsync();
+      const result = await promise;
 
-    expect(result.ok).toBe(true);
-    expect(ask).toHaveBeenCalledTimes(2);
+      expect(result.ok).toBe(true);
+      expect(ask).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it("exhausts attempts and returns ok:false when ask() always rejects", async () => {
-    const ask = vi.fn().mockRejectedValue(new Error("timeout"));
-    const result = await parseModelOutputWithRetries(Schema, ask, "prompt", 2);
+  it("exhausts the transport budget and returns ok:false when ask() always rejects", async () => {
+    vi.useFakeTimers();
+    try {
+      const ask = vi.fn().mockRejectedValue(new Error("timeout"));
+      const promise = parseModelOutputWithRetries(Schema, ask, "prompt", {
+        maxTransportAttempts: 2,
+      });
+      await vi.runAllTimersAsync();
+      const result = await promise;
 
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.lastError).toContain("timeout");
-    expect(ask).toHaveBeenCalledTimes(2);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.reason).toBe("transport_failed");
+        expect(result.lastError).toContain("timeout");
+      }
+      expect(ask).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it("respects a custom maxAttempts", async () => {
+  it("respects a custom maxRepairAttempts", async () => {
     const ask = vi.fn(async () => "not json");
-    const result = await parseModelOutputWithRetries(Schema, ask, "prompt", 1);
+    const result = await parseModelOutputWithRetries(Schema, ask, "prompt", {
+      maxRepairAttempts: 1,
+    });
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.attempts).toBe(1);
