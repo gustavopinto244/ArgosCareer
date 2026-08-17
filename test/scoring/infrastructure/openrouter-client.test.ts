@@ -14,6 +14,7 @@ const ZERO_OUTCOMES = {
   providerError: 0,
   authError: 0,
   configError: 0,
+  requestError: 0,
   invalidEnvelope: 0,
   invalidOutput: 0,
   httpError: 0,
@@ -64,9 +65,11 @@ describe("OpenRouterClient.complete — success", () => {
     const body = JSON.parse(init.body as string) as {
       model: string;
       messages: { role: string; content: string }[];
+      max_tokens: number;
     };
     expect(body.model).toBe("test/model");
     expect(body.messages).toEqual([{ role: "user", content: "say hi" }]);
+    expect(body.max_tokens).toBe(2_048);
   });
 
   it("respects a custom baseUrl", async () => {
@@ -87,13 +90,16 @@ describe("OpenRouterClient.complete — success", () => {
 });
 
 describe("OpenRouterClient.complete — failure, throws with a clear message", () => {
-  it("throws with the status and body on a non-2xx response", async () => {
+  it("throws with the status but never echoes a provider response body", async () => {
     const fetchImpl = vi.fn(
       async () => new Response("insufficient credits", { status: 402 }),
     );
-    await expect(client(fetchImpl).complete("prompt")).rejects.toThrow(
-      /402.*insufficient credits/s,
-    );
+    const error = await client(fetchImpl)
+      .complete("prompt")
+      .catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(LlmTransportError);
+    expect((error as Error).message).toContain("402");
+    expect((error as Error).message).not.toContain("insufficient credits");
   });
 
   it("throws an LlmTransportError carrying the failure category, not just a message (docs/audit AC-016)", async () => {
@@ -161,6 +167,64 @@ describe("OpenRouterClient.complete — failure, throws with a clear message", (
 
     await expect(c.complete("prompt")).rejects.toThrow(/aborted/i);
   });
+
+  it("times out while reading a success body that stalls after headers", async () => {
+    const fetchImpl = vi.fn(async () =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode('{"choices":['));
+            },
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+    const c = new OpenRouterClient({
+      apiKey: "k",
+      model: "m",
+      fetchImpl,
+      timeoutMs: 5,
+    });
+
+    const error = await c.complete("prompt").catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(LlmTransportError);
+    expect((error as LlmTransportError).category).toBe("timeout");
+    expect(c.getUsage().attemptsByOutcome.timeout).toBe(1);
+  });
+
+  it("rejects an oversized response body before parsing it", async () => {
+    const fetchImpl = vi.fn(
+      async () => new Response("123456", { status: 200 }),
+    );
+    const c = new OpenRouterClient({
+      apiKey: "k",
+      model: "m",
+      fetchImpl,
+      maxResponseBytes: 5,
+    });
+
+    const error = await c.complete("prompt").catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(LlmTransportError);
+    expect((error as LlmTransportError).category).toBe("invalidEnvelope");
+  });
+
+  it.each([
+    [{ timeoutMs: 0 }, /timeoutMs/],
+    [{ maxCompletionTokens: 0 }, /maxCompletionTokens/],
+    [{ maxResponseBytes: 0 }, /maxResponseBytes/],
+  ] as const)("rejects invalid client bounds", (bounds, error) => {
+    expect(
+      () =>
+        new OpenRouterClient({
+          apiKey: "k",
+          model: "m",
+          fetchImpl: vi.fn(),
+          ...bounds,
+        }),
+    ).toThrow(error);
+  });
 });
 
 describe("OpenRouterClient.getUsage — attempt accounting (docs/audit AC-015)", () => {
@@ -192,8 +256,8 @@ describe("OpenRouterClient.getUsage — attempt accounting (docs/audit AC-015)",
     const usage = c.getUsage();
     expect(usage.calls).toBe(0);
     expect(usage.attempts).toBe(1);
-    // 402 is not auth (401/403) or rate-limiting (429) -- it falls to the
-    // permanent "malformed/unsupported request" bucket (docs/audit AC-016).
+    // Insufficient account credit is run-wide: every remaining posting would
+    // fail identically, so it belongs to the batch-fatal configuration bucket.
     expect(usage.attemptsByOutcome.configError).toBe(1);
     expect(usage.attemptsWithoutUsage).toBe(1);
   });
@@ -295,6 +359,25 @@ describe("OpenRouterClient.getUsage — attempt accounting (docs/audit AC-015)",
     expect(usage.costUsd).toBe(0);
   });
 
+  it("does not let malformed negative usage decrement accounting totals", async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({
+        choices: [{ message: { content: "x" } }],
+        usage: { prompt_tokens: -10, completion_tokens: -5, cost: -1 },
+      }),
+    );
+    const c = client(fetchImpl);
+    await expect(c.complete("prompt")).rejects.toThrow(/unexpected/i);
+
+    const usage = c.getUsage();
+    expect(usage.calls).toBe(0);
+    expect(usage.promptTokens).toBe(0);
+    expect(usage.completionTokens).toBe(0);
+    expect(usage.costUsd).toBe(0);
+    expect(usage.attemptsWithoutUsage).toBe(1);
+    expect(usage.attemptsByOutcome.invalidOutput).toBe(1);
+  });
+
   it("accumulates attempts and outcomes across multiple calls on the same client", async () => {
     let call = 0;
     const fetchImpl = vi.fn(async () => {
@@ -329,9 +412,10 @@ describe("OpenRouterClient.complete — HTTP status taxonomy (docs/audit AC-016)
     [403, "authError"],
     [408, "timeout"],
     [429, "rateLimited"],
-    [400, "configError"],
+    [400, "requestError"],
+    [402, "configError"],
     [404, "configError"],
-    [422, "configError"],
+    [422, "requestError"],
     [500, "serverError"],
     [507, "serverError"],
     [502, "providerError"],

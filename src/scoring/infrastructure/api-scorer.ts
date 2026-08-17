@@ -29,7 +29,11 @@ export class ApiScorer implements ScorerPort {
     private readonly postingsRepo: PostingsRepository,
   ) {}
 
-  async score(posting: Posting, profileHash: string): Promise<ScoreResult> {
+  async score(
+    posting: Posting,
+    profileHash: string,
+    evaluatedAt: Date = new Date(),
+  ): Promise<ScoreResult> {
     const tracks = classifyTrack(
       posting.title,
       this.criteria.tracks,
@@ -59,6 +63,7 @@ export class ApiScorer implements ScorerPort {
       extraction.requirements,
       this.profile,
       profileHash,
+      () => evaluatedAt,
     );
     if (!matching.ok) {
       return {
@@ -83,6 +88,9 @@ export class ApiScorer implements ScorerPort {
       ...outcome,
       ...recommendation,
       inputTruncated: extraction.inputTruncated,
+      stageACacheHit: extraction.cacheHit,
+      stageBCacheHit: matching.cacheHit,
+      evidenceRejectedCount: matching.evidenceRejectedCount,
     };
   }
 }

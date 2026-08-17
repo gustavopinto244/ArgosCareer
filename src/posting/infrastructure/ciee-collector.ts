@@ -167,6 +167,7 @@ export class CieeCollector implements CollectorPort {
     const postings: RawPosting[] = [];
     let scanned = 0;
     let schemaRejectedCount = 0;
+    let businessRejectedCount = 0;
     let truncated = false;
     let page = 0;
 
@@ -185,6 +186,7 @@ export class CieeCollector implements CollectorPort {
             collectedAt,
             receivedCount: scanned,
             schemaRejectedCount,
+            businessRejectedCount,
             error: {
               message: `CIEE responded ${response.status} ${response.statusText}`,
             },
@@ -201,6 +203,7 @@ export class CieeCollector implements CollectorPort {
             collectedAt,
             receivedCount: scanned,
             schemaRejectedCount,
+            businessRejectedCount,
             error: { message: "Malformed CIEE response body", cause },
           };
         }
@@ -213,6 +216,7 @@ export class CieeCollector implements CollectorPort {
             collectedAt,
             receivedCount: scanned,
             schemaRejectedCount,
+            businessRejectedCount,
             error: {
               message: "Unexpected CIEE response shape",
               cause: envelope.error,
@@ -231,6 +235,7 @@ export class CieeCollector implements CollectorPort {
         // needed to reach the cap are scanned/kept from this page, even
         // though the full page was already downloaded.
         const remaining = maxResults - scanned;
+        if (items.length > remaining) truncated = true;
         const itemsToProcess =
           items.length > remaining ? items.slice(0, remaining) : items;
 
@@ -245,7 +250,10 @@ export class CieeCollector implements CollectorPort {
           // Not a schema rejection — CIEE's own education-level/area filter,
           // an intentional, already-controlled drop, counted separately from
           // AC-012's "silent schema drift" concern.
-          if (!keep(vaga.data, criteria)) continue;
+          if (!keep(vaga.data, criteria)) {
+            businessRejectedCount += 1;
+            continue;
+          }
           postings.push({
             source: SOURCE,
             sourceId: String(vaga.data.codigoVaga),
@@ -269,6 +277,7 @@ export class CieeCollector implements CollectorPort {
         collectedAt,
         receivedCount: scanned,
         schemaRejectedCount,
+        businessRejectedCount,
         error: { message: `CIEE request failed: ${detail}`, cause },
       };
     }
@@ -279,6 +288,7 @@ export class CieeCollector implements CollectorPort {
       collectedAt,
       receivedCount: scanned,
       schemaRejectedCount,
+      businessRejectedCount,
       truncated,
     };
   }

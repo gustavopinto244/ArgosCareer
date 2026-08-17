@@ -94,7 +94,7 @@ describe("StageBMatcher.match — cache", () => {
       matchesRepo.find(
         "fp1",
         "hash1",
-        "b-v3",
+        "b-v4",
         "unknown",
         hashRequirements([requirement()]),
       ),
@@ -105,7 +105,7 @@ describe("StageBMatcher.match — cache", () => {
     matchesRepo.upsert(
       "fp1",
       "hash1",
-      "b-v3",
+      "b-v4",
       "unknown",
       hashRequirements([requirement()]),
       [{ requirement: requirement(), status: "not_met", evidence: null }],
@@ -137,7 +137,7 @@ describe("StageBMatcher.match — cache", () => {
     matchesRepo.upsert(
       "fp1",
       "hash1",
-      "b-v3",
+      "b-v4",
       "unknown",
       hashRequirements([requirement()]),
       [], // zero matches for a one-requirement key -- a count mismatch.
@@ -161,6 +161,36 @@ describe("StageBMatcher.match — cache", () => {
     // mismatched cache row.
     expect(ask).toHaveBeenCalledTimes(1);
     expect(result.ok).toBe(true);
+  });
+
+  it("does not trust a cached match whose evidence is no longer applicable", async () => {
+    matchesRepo.upsert(
+      "fp1",
+      "hash1",
+      "b-v4",
+      "unknown",
+      hashRequirements([requirement()]),
+      [
+        {
+          requirement: requirement(),
+          status: "met",
+          evidence: "Fabricated but structurally valid evidence.",
+        },
+      ],
+      NOW,
+    );
+    const ask = vi.fn(async () => '{"status":"not_met","evidence":null}');
+
+    const result = await new StageBMatcher(ask, matchesRepo).match(
+      "fp1",
+      [requirement()],
+      profile(),
+      "hash1",
+      () => NOW,
+    );
+
+    expect(ask).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ ok: true, cacheHit: false });
   });
 
   it("treats a different profileHash as a cache miss (ADR-007)", async () => {
@@ -200,7 +230,10 @@ describe("StageBMatcher.match — cache", () => {
 
     const result = await matcher.match(
       "fp1",
-      [requirement({ text: "A" }), requirement({ text: "B" })],
+      [
+        requirement({ text: "Node.js experience A" }),
+        requirement({ text: "B" }),
+      ],
       profile(),
       "hash1",
       () => NOW,
@@ -226,7 +259,12 @@ describe("StageBMatcher.match — cache", () => {
     );
 
     expect(ask).not.toHaveBeenCalled();
-    expect(result).toEqual({ ok: true, matches: [] });
+    expect(result).toEqual({
+      ok: true,
+      matches: [],
+      cacheHit: false,
+      evidenceRejectedCount: 0,
+    });
   });
 
   it("does not reuse a cached match produced by a different model (docs/audit AC-007)", async () => {
@@ -282,6 +320,69 @@ describe("StageBMatcher.match — cache", () => {
     );
     expect(ask).toHaveBeenCalledTimes(2);
   });
+
+  it("resumes from per-requirement checkpoints after a partial provider failure", async () => {
+    const requirements = [
+      requirement({ text: "Node.js experience" }),
+      requirement({ text: "English intermediate" }),
+    ];
+    const firstAsk = vi
+      .fn()
+      .mockResolvedValueOnce(
+        '{"status":"met","evidence":"Built atlas-manager\'s HTTP layer in Node.js."}',
+      )
+      .mockRejectedValueOnce(
+        new LlmTransportError("request too large", "requestError", {
+          status: 413,
+        }),
+      );
+    const firstMatcher = new StageBMatcher(firstAsk, matchesRepo, undefined, 1);
+
+    const failed = await firstMatcher.match(
+      "fp1",
+      requirements,
+      profile(),
+      "hash1",
+      () => NOW,
+    );
+    expect(failed).toMatchObject({ ok: false, permanent: false });
+    expect(firstAsk).toHaveBeenCalledTimes(2);
+
+    const resumedAsk = vi.fn(async () =>
+      Promise.resolve('{"status":"not_met","evidence":null}'),
+    );
+    const resumedMatcher = new StageBMatcher(
+      resumedAsk,
+      matchesRepo,
+      undefined,
+      1,
+    );
+    const resumed = await resumedMatcher.match(
+      "fp1",
+      requirements,
+      profile(),
+      "hash1",
+      () => NOW,
+    );
+
+    expect(resumedAsk).toHaveBeenCalledTimes(1);
+    expect(resumed).toMatchObject({
+      ok: true,
+      cacheHit: false,
+      matches: [{ status: "met" }, { status: "not_met" }],
+    });
+
+    const wholeCacheAsk = vi.fn();
+    const cached = await new StageBMatcher(wholeCacheAsk, matchesRepo).match(
+      "fp1",
+      requirements,
+      profile(),
+      "hash1",
+      () => NOW,
+    );
+    expect(wholeCacheAsk).not.toHaveBeenCalled();
+    expect(cached).toMatchObject({ ok: true, cacheHit: true });
+  });
 });
 
 describe("StageBMatcher.match — ADR-005: evidence:null forces not_met", () => {
@@ -301,6 +402,7 @@ describe("StageBMatcher.match — ADR-005: evidence:null forces not_met", () => 
     if (result.ok) {
       expect(result.matches[0]?.status).toBe("not_met");
       expect(result.matches[0]?.evidence).toBeNull();
+      expect(result.evidenceRejectedCount).toBe(0);
     }
   });
 
@@ -347,6 +449,7 @@ describe("StageBMatcher.match — evidence provenance (docs/audit AC-008)", () =
     if (result.ok) {
       expect(result.matches[0]?.status).toBe("not_met");
       expect(result.matches[0]?.evidence).toBeNull();
+      expect(result.evidenceRejectedCount).toBe(1);
     }
   });
 
@@ -409,7 +512,7 @@ describe("StageBMatcher.match — evidence provenance (docs/audit AC-008)", () =
     const cached = matchesRepo.find(
       "fp1",
       "hash1",
-      "b-v3",
+      "b-v4",
       "unknown",
       hashRequirements([requirement()]),
     );
@@ -438,7 +541,7 @@ describe("StageBMatcher.match — failure, never throws", () => {
       permanent: false,
     });
     expect(
-      matchesRepo.find("fp1", "hash1", "b-v3", "unknown", "any-hash"),
+      matchesRepo.find("fp1", "hash1", "b-v4", "unknown", "any-hash"),
     ).toBeNull();
   });
 
@@ -459,7 +562,7 @@ describe("StageBMatcher.match — failure, never throws", () => {
 
     expect(result.ok).toBe(false);
     expect(
-      matchesRepo.find("fp1", "hash1", "b-v3", "unknown", "any-hash"),
+      matchesRepo.find("fp1", "hash1", "b-v4", "unknown", "any-hash"),
     ).toBeNull();
   });
 

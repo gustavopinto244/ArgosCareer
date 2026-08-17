@@ -141,7 +141,9 @@ describe("splitForTelegram", () => {
 
 describe("TelegramNotifier — success", () => {
   it("sends one request for a digest that fits in one message", async () => {
-    const fetchImpl = vi.fn(async () => jsonResponse({ ok: true }));
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({ ok: true, result: { message_id: 101 } }),
+    );
     const notifier = new TelegramNotifier(CONFIG, fetchImpl);
 
     const result = await notifier.notify(emptyDigest());
@@ -151,7 +153,9 @@ describe("TelegramNotifier — success", () => {
   });
 
   it("posts to the sendMessage endpoint with the configured chat id and bot token", async () => {
-    const fetchImpl = vi.fn(async () => jsonResponse({ ok: true }));
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({ ok: true, result: { message_id: 101 } }),
+    );
     const notifier = new TelegramNotifier(CONFIG, fetchImpl);
 
     await notifier.notify(emptyDigest());
@@ -170,7 +174,9 @@ describe("TelegramNotifier — success", () => {
   });
 
   it("sends one request per chunk for a digest large enough to need several", async () => {
-    const fetchImpl = vi.fn(async () => jsonResponse({ ok: true }));
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({ ok: true, result: { message_id: 101 } }),
+    );
     const notifier = new TelegramNotifier(CONFIG, fetchImpl, NO_PACING);
 
     const result = await notifier.notify(
@@ -186,7 +192,9 @@ describe("TelegramNotifier — pacing between chunks (docs/11 B3)", () => {
   it("waits pacingMs before sending each chunk after the first", async () => {
     vi.useFakeTimers();
     try {
-      const fetchImpl = vi.fn(async () => jsonResponse({ ok: true }));
+      const fetchImpl = vi.fn(async () =>
+        jsonResponse({ ok: true, result: { message_id: 101 } }),
+      );
       const notifier = new TelegramNotifier(CONFIG, fetchImpl, {
         pacingMs: 1_100,
       });
@@ -217,7 +225,9 @@ describe("TelegramNotifier — pacing between chunks (docs/11 B3)", () => {
   it("does not wait before the very first chunk", async () => {
     vi.useFakeTimers();
     try {
-      const fetchImpl = vi.fn(async () => jsonResponse({ ok: true }));
+      const fetchImpl = vi.fn(async () =>
+        jsonResponse({ ok: true, result: { message_id: 101 } }),
+      );
       const notifier = new TelegramNotifier(CONFIG, fetchImpl, {
         pacingMs: 60_000,
       });
@@ -241,7 +251,9 @@ describe("TelegramNotifier — 429 retry, honoring retry_after (docs/11 B3)", ()
       const fetchImpl = vi
         .fn()
         .mockResolvedValueOnce(rateLimited(5))
-        .mockResolvedValueOnce(jsonResponse({ ok: true }));
+        .mockResolvedValueOnce(
+          jsonResponse({ ok: true, result: { message_id: 101 } }),
+        );
       const notifier = new TelegramNotifier(CONFIG, fetchImpl, NO_PACING);
 
       const promise = notifier.notify(emptyDigest());
@@ -294,7 +306,9 @@ describe("TelegramNotifier — 429 retry, honoring retry_after (docs/11 B3)", ()
       const fetchImpl = vi
         .fn()
         .mockResolvedValueOnce(rateLimited(undefined))
-        .mockResolvedValueOnce(jsonResponse({ ok: true }));
+        .mockResolvedValueOnce(
+          jsonResponse({ ok: true, result: { message_id: 101 } }),
+        );
       const notifier = new TelegramNotifier(CONFIG, fetchImpl, NO_PACING);
 
       const promise = notifier.notify(emptyDigest());
@@ -314,7 +328,9 @@ describe("TelegramNotifier — 429 retry, honoring retry_after (docs/11 B3)", ()
       const fetchImpl = vi
         .fn()
         .mockResolvedValueOnce(rateLimited(3_600)) // an hour, stated
-        .mockResolvedValueOnce(jsonResponse({ ok: true }));
+        .mockResolvedValueOnce(
+          jsonResponse({ ok: true, result: { message_id: 101 } }),
+        );
       const notifier = new TelegramNotifier(CONFIG, fetchImpl, {
         ...NO_PACING,
         retryAfterCapMs: 10_000,
@@ -347,7 +363,7 @@ describe("TelegramNotifier — failure, never throws", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error.message).toContain("403");
-      expect(result.error.message).toContain("bot was blocked");
+      expect(result.error.message).not.toContain("bot was blocked");
     }
   });
 
@@ -366,10 +382,59 @@ describe("TelegramNotifier — failure, never throws", () => {
     }
   });
 
+  it("treats a 2xx response without message_id as an uncertain failure", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ ok: true, result: {} }));
+    const notifier = new TelegramNotifier(CONFIG, fetchImpl);
+
+    const result = await notifier.notify(emptyDigest());
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toContain("message_id");
+  });
+
+  it("bounds a Telegram acknowledgement body", async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({
+        ok: true,
+        result: { message_id: 101 },
+        padding: "x".repeat(2_000),
+      }),
+    );
+    const notifier = new TelegramNotifier(CONFIG, fetchImpl, {
+      maxResponseBytes: 256,
+    });
+
+    const result = await notifier.notify(emptyDigest());
+
+    expect(result.ok).toBe(false);
+    if (!result.ok)
+      expect(result.error.message).toBe("Telegram request failed");
+  });
+
+  it("times out while reading a stalled 2xx acknowledgement body", async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"ok":true'));
+      },
+    });
+    const fetchImpl = vi.fn(async () => new Response(stream, { status: 200 }));
+    const notifier = new TelegramNotifier(CONFIG, fetchImpl, {
+      timeoutMs: 20,
+    });
+
+    const result = await notifier.notify(emptyDigest());
+
+    expect(result.ok).toBe(false);
+    if (!result.ok)
+      expect(result.error.message).toBe("Telegram request failed");
+  });
+
   it("stops sending further chunks once one chunk fails", async () => {
     const fetchImpl = vi
       .fn()
-      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: true, result: { message_id: 101 } }),
+      )
       .mockResolvedValueOnce(new Response("Server Error", { status: 500 }));
     const notifier = new TelegramNotifier(CONFIG, fetchImpl, NO_PACING);
 
@@ -422,7 +487,9 @@ describe("TelegramNotifier — failure, never throws", () => {
 
 describe("TelegramNotifier.sendText — M8 alerts", () => {
   it("posts plain text to the same sendMessage endpoint", async () => {
-    const fetchImpl = vi.fn(async () => jsonResponse({ ok: true }));
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({ ok: true, result: { message_id: 101 } }),
+    );
     const notifier = new TelegramNotifier(CONFIG, fetchImpl);
 
     const result = await notifier.sendText("gupy: 2 consecutive runs failed.");

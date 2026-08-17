@@ -23,7 +23,13 @@
  * Optional environment:
  *   STATE_PATH (default /data/catho-state.json, same as collect.ts)
  */
-import { loadState, requeueQuarantined, saveStateAtomic } from "./state";
+import {
+  acquireLock,
+  loadState,
+  releaseLock,
+  requeueQuarantined,
+  saveStateAtomic,
+} from "./state";
 
 const DEFAULT_STATE_PATH = "/data/catho-state.json";
 
@@ -43,19 +49,30 @@ function main(): void {
   }
 
   const statePath = env("STATE_PATH", DEFAULT_STATE_PATH);
-  const state = loadState(statePath);
-
-  const result = requeueQuarantined(state, requeueAll ? undefined : ids);
-
-  if (result.requeued.length === 0) {
-    console.log("nothing requeued -- no matching quarantined entries");
+  const lockPath = `${statePath}.lock`;
+  const lock = acquireLock(lockPath);
+  if (!lock.acquired || !lock.token) {
+    console.error(`cannot requeue while collector owns state: ${lock.reason}`);
+    process.exitCode = 1;
     return;
   }
 
-  saveStateAtomic(statePath, result.state);
-  console.log(
-    `requeued ${result.requeued.length} entry(ies): ${result.requeued.join(", ")}`,
-  );
+  try {
+    const state = loadState(statePath);
+    const result = requeueQuarantined(state, requeueAll ? undefined : ids);
+
+    if (result.requeued.length === 0) {
+      console.log("nothing requeued -- no matching quarantined entries");
+      return;
+    }
+
+    saveStateAtomic(statePath, result.state);
+    console.log(
+      `requeued ${result.requeued.length} entry(ies): ${result.requeued.join(", ")}`,
+    );
+  } finally {
+    releaseLock(lockPath, lock.token);
+  }
 }
 
 main();

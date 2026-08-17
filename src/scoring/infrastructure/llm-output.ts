@@ -1,6 +1,10 @@
 import { Logger } from "@nestjs/common";
 import { z } from "zod";
-import { isTransientFailure, LlmTransportError } from "./openrouter-client";
+import {
+  isBatchFatalFailure,
+  isTransientFailure,
+  LlmTransportError,
+} from "./openrouter-client";
 
 /** Calls a model with a prompt and returns its raw text response. */
 export type AskModel = (prompt: string) => Promise<string>;
@@ -22,6 +26,8 @@ export type LlmParseResult<T> =
         "invalid_output" | "transport_failed" | "permanent_error";
       readonly attempts: number;
       readonly lastError: string;
+      /** Whether the failure proves the rest of this run is also doomed. */
+      readonly batchFatal: boolean;
     };
 
 const logger = new Logger("LlmOutput");
@@ -156,6 +162,7 @@ export async function parseModelOutputWithRetries<T>(
           reason: "permanent_error",
           attempts: totalAttempts,
           lastError,
+          batchFatal: isBatchFatalFailure(category),
         };
       }
 
@@ -169,6 +176,7 @@ export async function parseModelOutputWithRetries<T>(
           reason: "transport_failed",
           attempts: totalAttempts,
           lastError,
+          batchFatal: false,
         };
       }
 
@@ -202,6 +210,7 @@ export async function parseModelOutputWithRetries<T>(
           reason: "invalid_output",
           attempts: totalAttempts,
           lastError,
+          batchFatal: false,
         };
       }
       prompt = buildRetryPrompt(initialPrompt, lastError);
@@ -233,6 +242,7 @@ export async function parseModelOutputWithRetries<T>(
         reason: "invalid_output",
         attempts: totalAttempts,
         lastError,
+        batchFatal: false,
       };
     }
     prompt = buildRetryPrompt(initialPrompt, lastError);

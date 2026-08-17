@@ -5,6 +5,10 @@ export type RequirementWeight = "blocking" | "mandatory" | "desirable";
 
 export type MatchStatus = "met" | "partial" | "not_met";
 
+export const MAX_REQUIREMENT_TEXT_CHARS = 500;
+export const MAX_REQUIREMENT_CATEGORY_CHARS = 100;
+export const MAX_MATCH_EVIDENCE_CHARS = 2_000;
+
 export interface Requirement {
   readonly text: string;
   readonly category: string;
@@ -37,17 +41,27 @@ export interface Requirement {
  * integrity one.
  */
 export const RequirementSchema = z.object({
-  text: z.string().min(1),
-  category: z.string().min(1),
+  text: z.string().min(1).max(MAX_REQUIREMENT_TEXT_CHARS),
+  category: z.string().min(1).max(MAX_REQUIREMENT_CATEGORY_CHARS),
   weight: z.enum(["blocking", "mandatory", "desirable"]),
   verifiable: z.boolean().optional(),
 });
 
-export const MatchSchema = z.object({
-  requirement: RequirementSchema,
-  status: z.enum(["met", "partial", "not_met"]),
-  evidence: z.string().nullable(),
-});
+export const MatchSchema = z
+  .object({
+    requirement: RequirementSchema,
+    status: z.enum(["met", "partial", "not_met"]),
+    evidence: z.string().min(1).max(MAX_MATCH_EVIDENCE_CHARS).nullable(),
+  })
+  .superRefine((match, context) => {
+    if (match.evidence === null && match.status !== "not_met") {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["status"],
+        message: "evidence: null requires status: not_met",
+      });
+    }
+  });
 
 /** ADR-015: absent means verifiable, so legacy cached requirements keep
  * counting exactly as they did before the field existed. */

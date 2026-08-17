@@ -1,4 +1,6 @@
+import { createHash, randomUUID } from "node:crypto";
 import { Digest } from "../domain/digest";
+import { DeliveryCheckpointPort } from "../domain/ports/delivery-checkpoint.port";
 import { NotifierPort, NotifyResult } from "../domain/ports/notifier.port";
 import { renderDigestText } from "../domain/render-digest";
 import { TelegramConfig } from "./telegram-config";
@@ -31,12 +33,19 @@ const DEFAULT_RETRY_AFTER_MS = 5_000;
  * indefinitely, blocking every later scheduled run behind it. Same
  * AbortController pattern `GupyCollector`/`OpenRouterClient` already use. */
 const DEFAULT_TIMEOUT_MS = 20_000;
+/** Telegram responses are tiny. Bounding them prevents a broken or hostile
+ * upstream from turning acknowledgement parsing into unbounded memory use. */
+export const DEFAULT_TELEGRAM_MAX_RESPONSE_BYTES = 64 * 1024;
 
 export interface TelegramNotifierOptions {
   readonly pacingMs?: number;
   readonly maxRetries?: number;
   readonly retryAfterCapMs?: number;
   readonly timeoutMs?: number;
+  readonly maxResponseBytes?: number;
+  readonly deliveryStore?: DeliveryCheckpointPort;
+  readonly deliveryLeaseMs?: number;
+  readonly now?: () => Date;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -49,9 +58,9 @@ function sleep(ms: number): Promise<void> {
  * (`retry_after` in seconds). Null on anything unparseable — the caller
  * falls back to `DEFAULT_RETRY_AFTER_MS` rather than guessing.
  */
-async function parseRetryAfterMs(response: Response): Promise<number | null> {
+function parseRetryAfterMs(bodyText: string): number | null {
   try {
-    const body: unknown = await response.json();
+    const body: unknown = JSON.parse(bodyText);
     const seconds = (body as { parameters?: { retry_after?: unknown } } | null)
       ?.parameters?.retry_after;
     return typeof seconds === "number" && seconds >= 0 ? seconds * 1000 : null;
@@ -102,6 +111,23 @@ function pack(
   return chunks;
 }
 
+/** Last-resort split for one pathological entry with no useful separators.
+ * Iterating code points avoids cutting a UTF-16 surrogate pair in half. */
+function splitAtomicPart(part: string, limit: number): string[] {
+  if (part.length <= limit) return [part];
+  const chunks: string[] = [];
+  let current = "";
+  for (const symbol of part) {
+    if (current && current.length + symbol.length > limit) {
+      chunks.push(current);
+      current = "";
+    }
+    current += symbol;
+  }
+  if (current) chunks.push(current);
+  return chunks;
+}
+
 /**
  * Splits a rendered digest into `sendMessage`-sized chunks. Splits on
  * section boundaries first; a single section that alone exceeds the limit
@@ -112,14 +138,53 @@ export function splitForTelegram(
   text: string,
   limit: number = TELEGRAM_MESSAGE_LIMIT,
 ): string[] {
+  if (!Number.isInteger(limit) || limit < 2) {
+    throw new Error("Telegram message limit must be an integer >= 2");
+  }
   const sections = text.split(SECTION_SEPARATOR);
   const oversized = sections.some((section) => section.length > limit);
   if (!oversized) return pack(sections, SECTION_SEPARATOR, limit);
 
-  const finer = sections.flatMap((section) =>
-    section.length > limit ? section.split(ENTRY_SEPARATOR) : [section],
-  );
+  const finer = sections.flatMap((section) => {
+    const entries =
+      section.length > limit ? section.split(ENTRY_SEPARATOR) : [section];
+    return entries.flatMap((entry) => splitAtomicPart(entry, limit));
+  });
   return pack(finer, ENTRY_SEPARATOR, limit);
+}
+
+async function readBoundedBody(
+  response: Response,
+  maxBytes: number,
+  signal: AbortSignal,
+): Promise<string> {
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  let total = 0;
+  let text = "";
+  const aborted = new Promise<never>((_resolve, reject) => {
+    signal.addEventListener(
+      "abort",
+      () =>
+        reject(new DOMException("The operation was aborted.", "AbortError")),
+      { once: true },
+    );
+  });
+  try {
+    while (true) {
+      const { done, value } = await Promise.race([reader.read(), aborted]);
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        throw new Error(`Telegram response exceeds ${maxBytes} bytes`);
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    return text + decoder.decode();
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 /**
@@ -134,6 +199,10 @@ export class TelegramNotifier implements NotifierPort, TextNotifier {
   private readonly maxRetries: number;
   private readonly retryAfterCapMs: number;
   private readonly timeoutMs: number;
+  private readonly maxResponseBytes: number;
+  private readonly deliveryStore: DeliveryCheckpointPort | undefined;
+  private readonly deliveryLeaseMs: number;
+  private readonly now: () => Date;
 
   constructor(
     private readonly config: TelegramConfig,
@@ -145,10 +214,164 @@ export class TelegramNotifier implements NotifierPort, TextNotifier {
     this.retryAfterCapMs =
       options.retryAfterCapMs ?? DEFAULT_RETRY_AFTER_CAP_MS;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.maxResponseBytes =
+      options.maxResponseBytes ?? DEFAULT_TELEGRAM_MAX_RESPONSE_BYTES;
+    this.deliveryStore = options.deliveryStore;
+    this.deliveryLeaseMs = options.deliveryLeaseMs ?? 30 * 60_000;
+    this.now = options.now ?? (() => new Date());
+    for (const [name, value] of [
+      ["pacingMs", this.pacingMs],
+      ["maxRetries", this.maxRetries],
+      ["retryAfterCapMs", this.retryAfterCapMs],
+      ["timeoutMs", this.timeoutMs],
+      ["maxResponseBytes", this.maxResponseBytes],
+      ["deliveryLeaseMs", this.deliveryLeaseMs],
+    ] as const) {
+      if (!Number.isFinite(value) || value < 0) {
+        throw new Error(`Telegram ${name} must be a non-negative number`);
+      }
+    }
+    if (this.timeoutMs === 0 || this.maxResponseBytes === 0) {
+      throw new Error(
+        "Telegram timeoutMs and maxResponseBytes must be positive",
+      );
+    }
   }
 
   async notify(digest: Digest): Promise<NotifyResult> {
-    return this.sendChunks(splitForTelegram(renderDigestText(digest)));
+    const text = renderDigestText(digest);
+    const chunks = splitForTelegram(text);
+    if (!this.deliveryStore) return this.sendChunks(chunks);
+
+    const contentHash = createHash("sha256").update(text).digest("hex");
+    const channelKey = createHash("sha256")
+      .update(`telegram:${this.config.chatId}`)
+      .digest("hex");
+    let prepared;
+    try {
+      prepared = this.deliveryStore.prepare(
+        channelKey,
+        contentHash,
+        chunks,
+        this.now(),
+      );
+    } catch (cause) {
+      return {
+        ok: false,
+        error: {
+          message: "Could not prepare durable Telegram delivery",
+          cause,
+        },
+      };
+    }
+    if (prepared.chunks.every((chunk) => chunk.state === "confirmed")) {
+      // A process can crash after confirming the final chunk and before
+      // closing the operation. The transport work is already complete; make
+      // the persisted operation agree and clear any abandoned lease.
+      this.deliveryStore.complete(prepared.operationId, this.now());
+      return { ok: true };
+    }
+    if (
+      prepared.chunks.some(
+        (chunk) => chunk.state === "sending" || chunk.state === "uncertain",
+      )
+    ) {
+      return {
+        ok: false,
+        error: {
+          message:
+            `Telegram delivery ${prepared.operationId} has an uncertain chunk; ` +
+            "reconcile it before retrying",
+        },
+      };
+    }
+
+    const owner = randomUUID();
+    if (
+      !this.deliveryStore.claim(
+        prepared.operationId,
+        owner,
+        this.now(),
+        this.deliveryLeaseMs,
+      )
+    ) {
+      return {
+        ok: false,
+        error: {
+          message: `Telegram delivery ${prepared.operationId} is already owned by another worker`,
+        },
+      };
+    }
+
+    let sentThisAttempt = 0;
+    try {
+      for (const chunk of prepared.chunks) {
+        if (chunk.state === "confirmed") continue;
+        if (sentThisAttempt > 0) await sleep(this.pacingMs);
+        // Refresh the lease before every potentially slow network call. A
+        // large digest must not become claimable halfway through delivery.
+        if (
+          !this.deliveryStore.claim(
+            prepared.operationId,
+            owner,
+            this.now(),
+            this.deliveryLeaseMs,
+          )
+        ) {
+          return {
+            ok: false,
+            error: {
+              message: `Telegram delivery ${prepared.operationId} ownership was lost`,
+            },
+          };
+        }
+        this.deliveryStore.startChunk(
+          prepared.operationId,
+          chunk.index,
+          this.now(),
+        );
+        const result = await this.sendMessageDetailed(chunk.body);
+        if (!result.ok) {
+          if (result.uncertain) {
+            this.deliveryStore.markChunkUncertain(
+              prepared.operationId,
+              chunk.index,
+              result.error.message,
+              this.now(),
+            );
+          } else {
+            this.deliveryStore.failChunk(
+              prepared.operationId,
+              chunk.index,
+              result.error.message,
+              this.now(),
+            );
+          }
+          return {
+            ok: false,
+            error: {
+              message:
+                `Telegram delivery ${prepared.operationId} chunk ${chunk.index} failed: ` +
+                result.error.message,
+              ...(result.error.cause === undefined
+                ? {}
+                : { cause: result.error.cause }),
+            },
+          };
+        }
+        this.deliveryStore.confirmChunk(
+          prepared.operationId,
+          chunk.index,
+          result.messageId,
+          this.now(),
+        );
+        sentThisAttempt += 1;
+      }
+      this.deliveryStore.complete(prepared.operationId, this.now());
+      return { ok: true };
+    } finally {
+      this.deliveryStore.release(prepared.operationId, owner, this.now());
+    }
   }
 
   /**
@@ -178,10 +401,23 @@ export class TelegramNotifier implements NotifierPort, TextNotifier {
   }
 
   private async sendMessage(text: string): Promise<NotifyResult> {
+    const result = await this.sendMessageDetailed(text);
+    return result.ok ? { ok: true } : result;
+  }
+
+  private async sendMessageDetailed(text: string): Promise<
+    | { readonly ok: true; readonly messageId: number | null }
+    | {
+        readonly ok: false;
+        readonly error: { readonly message: string; readonly cause?: unknown };
+        readonly uncertain: boolean;
+      }
+  > {
     const url = `https://api.telegram.org/bot${this.config.botToken}/sendMessage`;
 
     for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
       let response: Response;
+      let bodyText = "";
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), this.timeoutMs);
       try {
@@ -191,10 +427,18 @@ export class TelegramNotifier implements NotifierPort, TextNotifier {
           body: JSON.stringify({ chat_id: this.config.chatId, text }),
           signal: controller.signal,
         });
+        if (response.ok || response.status === 429) {
+          bodyText = await readBoundedBody(
+            response,
+            this.maxResponseBytes,
+            controller.signal,
+          );
+        }
       } catch (cause) {
         return {
           ok: false,
           error: { message: "Telegram request failed", cause },
+          uncertain: true,
         };
       } finally {
         clearTimeout(timer);
@@ -202,7 +446,7 @@ export class TelegramNotifier implements NotifierPort, TextNotifier {
 
       if (response.status === 429) {
         const retryAfterMs =
-          (await parseRetryAfterMs(response.clone())) ?? DEFAULT_RETRY_AFTER_MS;
+          parseRetryAfterMs(bodyText) ?? DEFAULT_RETRY_AFTER_MS;
         if (attempt < this.maxRetries) {
           await sleep(Math.min(retryAfterMs, this.retryAfterCapMs));
           continue;
@@ -212,21 +456,63 @@ export class TelegramNotifier implements NotifierPort, TextNotifier {
           error: {
             message: `Telegram request failed: 429, exhausted ${this.maxRetries} retries`,
           },
+          uncertain: false,
         };
       }
 
       if (!response.ok) {
-        const body = await response.text().catch(() => "");
         return {
           ok: false,
           error: {
-            message:
-              `Telegram request failed: ${response.status} ${body}`.trim(),
+            // Do not echo a third-party body into logs/alerts. It is not
+            // needed to classify the failure and may contain user content.
+            message: `Telegram request failed: ${response.status}`,
           },
+          uncertain: response.status >= 500,
         };
       }
 
-      return { ok: true };
+      let body: unknown;
+      try {
+        body = JSON.parse(bodyText);
+      } catch (cause) {
+        return {
+          ok: false,
+          error: {
+            message: "Telegram returned an invalid success body",
+            cause,
+          },
+          uncertain: true,
+        };
+      }
+      if (
+        body === null ||
+        typeof body !== "object" ||
+        (body as { ok?: unknown }).ok !== true
+      ) {
+        return {
+          ok: false,
+          error: {
+            message: "Telegram returned ok:false in a success response",
+          },
+          uncertain: true,
+        };
+      }
+      const messageId = (body as { result?: { message_id?: unknown } }).result
+        ?.message_id;
+      if (!Number.isInteger(messageId)) {
+        return {
+          ok: false,
+          error: {
+            message: "Telegram success response omitted a valid message_id",
+          },
+          uncertain: true,
+        };
+      }
+      return {
+        ok: true,
+        messageId: messageId as number,
+      };
     }
 
     // Unreachable — the loop above always returns before exhausting its
@@ -235,6 +521,7 @@ export class TelegramNotifier implements NotifierPort, TextNotifier {
     return {
       ok: false,
       error: { message: "Telegram request failed: exhausted retries" },
+      uncertain: false,
     };
   }
 }

@@ -10,6 +10,8 @@ import {
   RunsRepository,
   parseAttemptedSources,
   parseFailedSources,
+  parseLlmOutcomeCounts,
+  parseSourceQueryStats,
   parseTruncatedSources,
 } from "../../src/persistence/infrastructure/runs-repository";
 
@@ -41,6 +43,18 @@ describe("RunsRepository", () => {
     const first = repository.start("collect", new Date());
     const second = repository.start("collect", new Date());
     expect(first).not.toBe(second);
+  });
+
+  it("attributes a run to a non-secret principal identifier", () => {
+    const runId = repository.start(
+      "collect",
+      new Date(),
+      "automation:0123456789ab",
+    );
+
+    expect(repository.findById(runId)?.triggeredBy).toBe(
+      "automation:0123456789ab",
+    );
   });
 
   it("finish records the outcome, finishedAt and per-stage counts", () => {
@@ -201,6 +215,58 @@ describe("RunsRepository", () => {
     const row = repository.findById(runId);
     expect(row).not.toBeNull();
     expect(parseAttemptedSources(row!)).toEqual([]);
+  });
+
+  it("persists reconcilable per-query funnels and parses them defensively", () => {
+    const runId = repository.start("collect", new Date());
+    repository.finish(runId, new Date(), "success", {
+      sourceQueryStats: [
+        {
+          source: "gupy",
+          queryIndex: 0,
+          received: 10,
+          schemaRejected: 1,
+          normalized: 8,
+          persistedNew: 3,
+        },
+      ],
+    });
+
+    const row = repository.findById(runId);
+    expect(row).not.toBeNull();
+    expect(parseSourceQueryStats(row!)).toEqual([
+      expect.objectContaining({ source: "gupy", persistedNew: 3 }),
+    ]);
+    expect(parseSourceQueryStats({ sourceQueryStats: "not json" })).toEqual([]);
+  });
+
+  it("persists LLM token and outcome accounting", () => {
+    const runId = repository.start("scoreAndDeliver", new Date());
+    repository.finish(runId, new Date(), "success", {
+      llmAttempts: 4,
+      llmAttemptsWithoutUsage: 1,
+      llmPromptTokens: 100,
+      llmCompletionTokens: 25,
+      llmCachedPromptTokens: 60,
+      llmBlockedByCircuit: 2,
+      llmOutcomeCounts: { success: 2, timeout: 1, authError: 1 },
+    });
+
+    const row = repository.findById(runId);
+    expect(row).toMatchObject({
+      llmAttempts: 4,
+      llmAttemptsWithoutUsage: 1,
+      llmPromptTokens: 100,
+      llmCompletionTokens: 25,
+      llmCachedPromptTokens: 60,
+      llmBlockedByCircuit: 2,
+    });
+    expect(parseLlmOutcomeCounts(row!)).toEqual({
+      success: 2,
+      timeout: 1,
+      authError: 1,
+    });
+    expect(parseLlmOutcomeCounts({ llmOutcomeCounts: "[]" })).toEqual({});
   });
 });
 

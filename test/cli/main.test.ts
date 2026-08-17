@@ -1493,6 +1493,7 @@ describe("executeDeliver", () => {
         providerError: 0,
         authError: 0,
         configError: 0,
+        requestError: 0,
         invalidEnvelope: 0,
         invalidOutput: 0,
         httpError: 0,
@@ -2043,6 +2044,9 @@ describe("executeDeliver", () => {
             highlights: [],
             missingTerms: [],
             inputTruncated: false,
+            stageACacheHit: false,
+            stageBCacheHit: false,
+            evidenceRejectedCount: 0,
           };
         },
       };

@@ -92,13 +92,50 @@ Principle 2 — every stage independently re-runnable — needs state, and this 
 where it lives. Designed in M4 alongside the schema; recorded here because it is
 what makes both principle 2 and the alerting below possible.
 
-Per run: `runId`, kind, started/finished timestamps, outcome, and per-stage
-counts — collected, rejected in normalization, deduplicated, filtered out,
-scored, failed to score, delivered.
+Per run: `runId`, kind, non-secret `triggeredBy` principal identifier,
+started/finished timestamps, outcome, and per-stage counts — collected,
+rejected in normalization, deduplicated, filtered out, scored, failed to score,
+delivered. Collection runs also retain `sourceQueryStats`, one funnel per
+source/query with received/schema/business rejection, normalization, age,
+new/already-seen, truncation and failure fields. A `null` upstream count means
+the source could not report it; it is never silently converted into zero.
+
+Scoring runs persist attempts, outcomes, prompt/completion/cached token totals,
+circuit-breaker refusals, provider-reported cost and attempts without usable
+usage. The last count is important: when nonzero, local cost is explicitly a
+floor rather than a reconciled provider bill. Posting-level append-only events
+carry source/sourceId even before normalization creates a fingerprint, plus
+small structured metadata emitted by each stage for its identities and counts.
 
 Those counters are not decoration. They are the input to every alert below, and
 the evidence behind the pre-filter cut numbers `02-architecture.md` measures
 (84-97%, city-dependent).
+
+## Durable Telegram delivery and reconciliation
+
+Digest delivery is checkpointed in `delivery_operations` and
+`delivery_chunks`, keyed by a hash of the destination and rendered content.
+Each chunk moves through `pending`, `sending`, `failed`, `uncertain` or
+`confirmed`; confirmed chunks store Telegram's `message_id` and are skipped on
+retry. A lease prevents two workers from owning the same operation, and an
+exact retry after completion performs no network call.
+
+A timeout, connection loss, invalid success acknowledgement or 5xx is
+`uncertain`: Telegram may have accepted the message even though ArgosCareer
+could not prove it. Automatic retry would risk a duplicate, so the operation
+stops for a human decision. Inspect the operation/chunk in SQLite or the error's
+operation id, verify the target chat, then run one of:
+
+```bash
+npm run cli -- reconcile-delivery <operation-id> <chunk-index> --resolution confirmed --message-id <id>
+npm run cli -- reconcile-delivery <operation-id> <chunk-index> --resolution retry
+```
+
+Use `confirmed` when the message is visible in Telegram; use `retry` only after
+accepting the duplicate risk. Definite failures such as a 403 remain retryable
+without this manual ambiguity step. This durability applies to digest
+`notify()` calls; short operational alerts sent through `sendText()` still use
+the direct, non-checkpointed path.
 
 ## Alerting
 

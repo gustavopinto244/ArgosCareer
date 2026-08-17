@@ -39,6 +39,12 @@ describe("normalizePostingContent (docs/audit PR-017)", () => {
     expect(result.description?.length).toBeLessThanOrEqual(10);
   });
 
+  it("bounds a pathological title and includes the bound in inputTruncated", () => {
+    const result = normalizePostingContent("x".repeat(600), "Curto.", 12_000);
+    expect(result.title).toHaveLength(500);
+    expect(result.inputTruncated).toBe(true);
+  });
+
   it("does not flag inputTruncated when the description fits", () => {
     const result = normalizePostingContent("Estágio", "Curto.", 12_000);
     expect(result.inputTruncated).toBe(false);

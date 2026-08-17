@@ -209,6 +209,42 @@ export const matches = sqliteTable(
   ],
 );
 
+/** Crash/retry checkpoint for each independently validated Stage B answer.
+ * The completed `matches` manifest remains the fast whole-set cache; these
+ * rows let a later run resume only missing requirements after a partial
+ * provider failure. */
+export const partialMatches = sqliteTable(
+  "partial_matches",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    fingerprint: text("fingerprint").notNull(),
+    profileHash: text("profile_hash").notNull(),
+    promptVersion: text("prompt_version").notNull(),
+    model: text("model").notNull(),
+    requirementsHash: text("requirements_hash").notNull(),
+    requirementIndex: integer("requirement_index").notNull(),
+    match: text("match").notNull(),
+    matchedAt: integer("matched_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("partial_matches_semantic_identity_unique").on(
+      table.fingerprint,
+      table.profileHash,
+      table.promptVersion,
+      table.model,
+      table.requirementsHash,
+      table.requirementIndex,
+    ),
+    index("partial_matches_lookup_idx").on(
+      table.fingerprint,
+      table.profileHash,
+      table.promptVersion,
+      table.model,
+      table.requirementsHash,
+    ),
+  ],
+);
+
 /**
  * One row per pipeline execution (docs/08-observability.md). `kind` names
  * the CLI stage that produced it ("collect", "dedup", and later
@@ -218,6 +254,10 @@ export const matches = sqliteTable(
 export const runs = sqliteTable("runs", {
   runId: text("run_id").primaryKey(),
   kind: text("kind").notNull(),
+  // Non-secret actor identifier (role/source plus a short key digest) for
+  // API-triggered runs; "internal" for scheduler/CLI. Enables attribution
+  // and per-principal abuse investigation without persisting credentials.
+  triggeredBy: text("triggered_by").notNull().default("internal"),
   startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
   finishedAt: integer("finished_at", { mode: "timestamp_ms" }),
   // 'success' | 'failed' — null while the run is still in progress.
@@ -276,6 +316,10 @@ export const runs = sqliteTable("runs", {
   // fail" — a source absent from both arrays was never attempted at all,
   // which is a different fact than it having quietly succeeded.
   attemptedSources: text("attempted_sources"),
+  // JSON array with one reconcilable funnel per source/query. Aggregate
+  // columns above remain for dashboards; this preserves where each drop
+  // happened instead of merging several queries into one ambiguous total.
+  sourceQueryStats: text("source_query_stats"),
   // scoreAndDeliver runs only, from OpenRouterClient.getUsage() (docs/audit
   // AC-015). llmAttempts counts every network attempt regardless of
   // outcome -- calls that never made it into scoredCount at all (a 429, a
@@ -288,6 +332,13 @@ export const runs = sqliteTable("runs", {
   llmAttemptsWithoutUsage: integer("llm_attempts_without_usage")
     .notNull()
     .default(0),
+  llmPromptTokens: integer("llm_prompt_tokens").notNull().default(0),
+  llmCompletionTokens: integer("llm_completion_tokens").notNull().default(0),
+  llmCachedPromptTokens: integer("llm_cached_prompt_tokens")
+    .notNull()
+    .default(0),
+  llmBlockedByCircuit: integer("llm_blocked_by_circuit").notNull().default(0),
+  llmOutcomeCounts: text("llm_outcome_counts"),
 });
 
 /**
@@ -314,7 +365,11 @@ export const postingEvents = sqliteTable(
   {
     id: text("id").primaryKey(),
     runId: text("run_id").notNull(),
-    fingerprint: text("fingerprint").notNull(),
+    // Nullable for raw/schema/normalizer rejections that never became a
+    // Posting and therefore never acquired a fingerprint.
+    fingerprint: text("fingerprint"),
+    source: text("source"),
+    sourceId: text("source_id"),
     // "prefilter" | "score" | "delivery" — open string, not an enum, same
     // reasoning `runs.kind` already uses: the set of stages that report
     // here grows over time and SQLite has no real enum to constrain it.
@@ -331,10 +386,63 @@ export const postingEvents = sqliteTable(
     // later criteria change is visible as "a new decision", not a
     // contradiction of the old one.
     criteriaHash: text("criteria_hash"),
+    // Versioned, non-sensitive structured identities for cache/model/input
+    // audit. Free JSON object so stages can add fields without a migration.
+    metadata: text("metadata"),
     occurredAt: integer("occurred_at", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => [
     index("posting_events_run_id_idx").on(table.runId),
     index("posting_events_fingerprint_idx").on(table.fingerprint),
+  ],
+);
+
+/** Durable Telegram delivery operation. Content identity, rather than runId,
+ * lets a retrying scoreAndDeliver run resume the exact same digest while a
+ * changed digest becomes a separate version. */
+export const deliveryOperations = sqliteTable(
+  "delivery_operations",
+  {
+    operationId: text("operation_id").primaryKey(),
+    channelKey: text("channel_key").notNull(),
+    contentHash: text("content_hash").notNull(),
+    status: text("status").notNull(),
+    claimedBy: text("claimed_by"),
+    claimExpiresAt: integer("claim_expires_at", { mode: "timestamp_ms" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    completedAt: integer("completed_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [
+    uniqueIndex("delivery_operations_channel_content_unique").on(
+      table.channelKey,
+      table.contentHash,
+    ),
+    index("delivery_operations_status_idx").on(table.status),
+  ],
+);
+
+/** One stable, ordered checkpoint per Telegram message. Confirmed chunks are
+ * immutable and skipped on resume. */
+export const deliveryChunks = sqliteTable(
+  "delivery_chunks",
+  {
+    id: text("id").primaryKey(),
+    operationId: text("operation_id").notNull(),
+    chunkIndex: integer("chunk_index").notNull(),
+    contentHash: text("content_hash").notNull(),
+    body: text("body").notNull(),
+    status: text("status").notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    telegramMessageId: integer("telegram_message_id"),
+    confirmedAt: integer("confirmed_at", { mode: "timestamp_ms" }),
+    lastError: text("last_error"),
+  },
+  (table) => [
+    uniqueIndex("delivery_chunks_operation_index_unique").on(
+      table.operationId,
+      table.chunkIndex,
+    ),
+    index("delivery_chunks_operation_idx").on(table.operationId),
   ],
 );

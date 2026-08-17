@@ -6,6 +6,10 @@ import { PostingsRepository } from "../infrastructure/postings-repository";
 export interface DedupConfig {
   readonly similarityThreshold: number;
   readonly windowDays: number;
+  /** Hard bound on comparisons per posting. Layer 2 is shadow-only, so
+   * dropping an old comparison is a loss of diagnostic signal, never a
+   * posting suppression. */
+  readonly maxComparisonsPerPosting?: number;
 }
 
 /**
@@ -50,6 +54,7 @@ function normalizeCompanyForGrouping(company: string): string {
 export const DEFAULT_DEDUP_CONFIG: DedupConfig = {
   similarityThreshold: 0.35,
   windowDays: 14,
+  maxComparisonsPerPosting: 500,
 };
 
 /**
@@ -82,6 +87,7 @@ export interface DedupOutcome {
   /** Every match layer 2 found this pass, logged rather than acted on. See
    * `ShadowDuplicateCandidate`. */
   readonly shadowCandidates: readonly ShadowDuplicateCandidate[];
+  readonly comparisonTruncatedCount: number;
 }
 
 function withinWindow(a: Date, b: Date, windowDays: number): boolean {
@@ -179,22 +185,41 @@ export function dedupSimilarPostings(
   }
 
   const shadowCandidates: ShadowDuplicateCandidate[] = [];
+  let comparisonTruncatedCount = 0;
+  const maxComparisons = Math.max(
+    1,
+    config.maxComparisonsPerPosting ??
+      DEFAULT_DEDUP_CONFIG.maxComparisonsPerPosting!,
+  );
 
   for (const group of byCompany.values()) {
     const sorted = [...group].sort(
       (a, b) => a.firstSeenAt.getTime() - b.firstSeenAt.getTime(),
     );
     const seen: Posting[] = [];
+    let windowStart = 0;
 
     for (const candidate of sorted) {
-      const canonical = seen.find(
+      while (
+        windowStart < seen.length &&
+        !withinWindow(
+          seen[windowStart]!.firstSeenAt,
+          candidate.firstSeenAt,
+          config.windowDays,
+        )
+      ) {
+        windowStart += 1;
+      }
+      const inWindowCount = seen.length - windowStart;
+      if (inWindowCount > maxComparisons) comparisonTruncatedCount += 1;
+      // Newest bounded slice: maximizes the chance of catching a repost
+      // near the candidate while guaranteeing O(n * maxComparisons).
+      const candidates = seen.slice(
+        Math.max(windowStart, seen.length - maxComparisons),
+      );
+      const canonical = candidates.find(
         (earlier) =>
           locationsAgree(earlier, candidate) &&
-          withinWindow(
-            earlier.firstSeenAt,
-            candidate.firstSeenAt,
-            config.windowDays,
-          ) &&
           computeTitleSimilarity(earlier.title, candidate.title) >=
             config.similarityThreshold,
       );
@@ -215,5 +240,10 @@ export function dedupSimilarPostings(
     }
   }
 
-  return { scanned: active.length, markedDuplicate: 0, shadowCandidates };
+  return {
+    scanned: active.length,
+    markedDuplicate: 0,
+    shadowCandidates,
+    comparisonTruncatedCount,
+  };
 }

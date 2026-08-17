@@ -40,6 +40,7 @@ import {
   parseTruncatedSources,
 } from "../persistence/infrastructure/runs-repository";
 import { PostingEventsRepository } from "../persistence/infrastructure/posting-events-repository";
+import { DeliveryOperationsRepository } from "../persistence/infrastructure/delivery-operations-repository";
 import { applyPreFilter } from "../prefilter/domain/pre-filter";
 import { Criteria } from "../prefilter/domain/criteria";
 import { loadCriteria } from "../prefilter/infrastructure/criteria-loader";
@@ -52,6 +53,10 @@ import { ScorerPort } from "../scoring/domain/ports/scorer.port";
 import { EMPTY_RECOMMENDATION } from "../scoring/domain/recommendation";
 import { scoreFailureOutcome } from "../scoring/domain/types";
 import { buildScorer } from "../scoring/infrastructure/build-scorer";
+import {
+  STAGE_A_PROMPT_VERSION,
+  STAGE_B_PROMPT_VERSION,
+} from "../scoring/infrastructure/prompts";
 import { UsageTotals } from "../scoring/infrastructure/openrouter-client";
 import { NotifierPort } from "../delivery/domain/ports/notifier.port";
 import { composeDigest, ScoredPosting } from "../delivery/domain/digest";
@@ -175,6 +180,7 @@ export async function executeCollect(
   now: () => Date = () => new Date(),
   queryIntervalMs: number = DEFAULT_QUERY_INTERVAL_MS,
   recency?: RecencyWindow,
+  triggeredBy: string = "internal",
 ): Promise<CollectOutcome> {
   const postingsRepo = new PostingsRepository(db);
   const runsRepo = new RunsRepository(db);
@@ -212,7 +218,7 @@ export async function executeCollect(
     return cutoff;
   }
 
-  const runId = runsRepo.start("collect", now());
+  const runId = runsRepo.start("collect", now(), triggeredBy);
 
   let collected = 0;
   let normalized = 0;
@@ -244,6 +250,7 @@ export async function executeCollect(
   // what makes `findLastSuccessfulSourceCollectAt` able to tell "this source
   // was queried and failed" apart from "this source was never queried".
   const attemptedSources = new Set<string>();
+  const sourceQueryStats: Readonly<Record<string, unknown>>[] = [];
 
   // Same bookkeeping guarantee `executeDeliver` documents: a throw between
   // `start` and `finish` must not leave the row open. Collectors cannot throw
@@ -269,10 +276,29 @@ export async function executeCollect(
         failures += 1;
         failedSources.add(source);
         firstError ??= `No collector registered for source "${source}"`;
+        sourceQueryStats.push({
+          queryIndex: index,
+          source,
+          received: null,
+          schemaRejected: null,
+          businessRejected: null,
+          normalized: 0,
+          normalizationRejected: 0,
+          tooOld: 0,
+          isNew: 0,
+          alreadySeen: 0,
+          truncated: false,
+          error: "collector_missing",
+        });
         continue;
       }
 
       const result = await collector.collect(query);
+      const beforeNormalized = normalized;
+      const beforeUnnormalizable = unnormalizable;
+      const beforeTooOld = tooOld;
+      const beforeNew = isNew;
+      const beforeAlreadySeen = alreadySeen;
       collected += result.postings.length;
       received =
         result.receivedCount === undefined || received === null
@@ -283,6 +309,17 @@ export async function executeCollect(
           ? null
           : schemaRejected + result.schemaRejectedCount;
       if (result.truncated) truncatedSources.add(source);
+      if ((result.schemaRejectedCount ?? 0) > 0) {
+        postingEventsRepo.record({
+          runId,
+          source,
+          stage: "collect",
+          outcome: "schema_rejected",
+          reason: `${result.schemaRejectedCount} raw item(s) rejected by collector schema`,
+          metadata: { count: result.schemaRejectedCount },
+          occurredAt: result.collectedAt,
+        });
+      }
 
       if (result.error) {
         failures += 1;
@@ -298,23 +335,28 @@ export async function executeCollect(
 
       const collectedAt = now();
       const cutoff = cutoffForSource(source);
+      const persistable: { readonly posting: Posting }[] = [];
       for (const raw of result.postings) {
         // Dispatch by the source the payload declares, not by which collector
         // was passed in — an unregistered source is a wiring bug, and saying
         // so beats dropping every posting and looking like an empty source.
         //
-        // Neither rejection below gets a posting_events row (docs/audit
-        // PR-021 asks for one) — `posting_events.fingerprint` is `NOT
-        // NULL`, and a fingerprint only exists once `normalize` has
-        // already turned a raw payload into a `Posting`. A raw item that
-        // never became one has nothing to key an event on; the run-level
-        // `unnormalizableCount` aggregate is what represents this case,
-        // same as before.
+        // Raw-stage events use source/sourceId and a nullable fingerprint;
+        // this preserves the rejection even when no Posting can be built.
         const normalize = normalizerFor(raw.source);
         if (!normalize) {
           firstError ??= `No normalizer registered for source "${raw.source}"`;
           failedSources.add(raw.source);
           unnormalizable += 1;
+          postingEventsRepo.record({
+            runId,
+            source: raw.source,
+            sourceId: raw.sourceId,
+            stage: "collect",
+            outcome: "normalizer_missing",
+            reason: `No normalizer registered for source "${raw.source}"`,
+            occurredAt: collectedAt,
+          });
           continue;
         }
         const posting = normalize(raw, collectedAt);
@@ -323,6 +365,14 @@ export async function executeCollect(
           // consequence as "no normalizer registered" above (no `Posting`
           // to score), previously uncounted here (AC-012).
           unnormalizable += 1;
+          postingEventsRepo.record({
+            runId,
+            source: raw.source,
+            sourceId: raw.sourceId,
+            stage: "collect",
+            outcome: "normalization_rejected",
+            occurredAt: collectedAt,
+          });
           continue;
         }
         // A posting the source never dated passes: absence of a date is not
@@ -342,6 +392,8 @@ export async function executeCollect(
           postingEventsRepo.record({
             runId,
             fingerprint: posting.fingerprint,
+            source: posting.source,
+            sourceId: posting.sourceId,
             stage: "collect",
             outcome: "too_old",
             reason: `publishedAt ${posting.publishedAt.toISOString()} before cutoff ${cutoff.toISOString()}`,
@@ -350,18 +402,41 @@ export async function executeCollect(
           continue;
         }
         normalized += 1;
-        const { wasNew } = postingsRepo.upsert(posting);
+        persistable.push({ posting });
+      }
+      const persisted = postingsRepo.upsertMany(
+        persistable.map(({ posting }) => posting),
+      );
+      persisted.forEach(({ wasNew }, index) => {
+        const posting = persistable[index]!.posting;
         if (wasNew) isNew += 1;
         else alreadySeen += 1;
         postingEventsRepo.record({
           runId,
           fingerprint: posting.fingerprint,
+          source: posting.source,
+          sourceId: posting.sourceId,
           stage: "collect",
           outcome: wasNew ? "new" : "already_seen",
           reason: null,
           occurredAt: collectedAt,
         });
-      }
+      });
+      sourceQueryStats.push({
+        queryIndex: index,
+        source,
+        received: result.receivedCount ?? null,
+        schemaRejected: result.schemaRejectedCount ?? null,
+        businessRejected: result.businessRejectedCount ?? null,
+        collectorReturned: result.postings.length,
+        normalized: normalized - beforeNormalized,
+        normalizationRejected: unnormalizable - beforeUnnormalizable,
+        tooOld: tooOld - beforeTooOld,
+        isNew: isNew - beforeNew,
+        alreadySeen: alreadySeen - beforeAlreadySeen,
+        truncated: result.truncated ?? false,
+        error: result.error?.message ?? null,
+      });
     }
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : String(cause);
@@ -378,6 +453,7 @@ export async function executeCollect(
       failedSources: [...failedSources],
       truncatedSources: [...truncatedSources],
       attemptedSources: [...attemptedSources],
+      sourceQueryStats,
     });
     throw cause;
   }
@@ -396,6 +472,7 @@ export async function executeCollect(
     failedSources: [...failedSources],
     truncatedSources: [...truncatedSources],
     attemptedSources: [...attemptedSources],
+    sourceQueryStats,
   });
 
   return {
@@ -469,10 +546,12 @@ export async function executeIngestExternal(
   postings: readonly ExternalRawPosting[],
   now: () => Date = () => new Date(),
   truncated: boolean = false,
+  triggeredBy: string = "internal",
 ): Promise<IngestExternalOutcome> {
   const postingsRepo = new PostingsRepository(db);
   const runsRepo = new RunsRepository(db);
-  const runId = runsRepo.start("collect", now());
+  const postingEventsRepo = new PostingEventsRepository(db);
+  const runId = runsRepo.start("collect", now(), triggeredBy);
 
   let normalized = 0;
   let unnormalizable = 0;
@@ -482,6 +561,10 @@ export async function executeIngestExternal(
 
   try {
     const collectedAt = now();
+    const persistable: {
+      readonly posting: Posting;
+      readonly sourceId: string;
+    }[] = [];
     for (const raw of postings) {
       const posting = normalize(
         { source, sourceId: raw.sourceId, payload: raw.payload },
@@ -489,20 +572,62 @@ export async function executeIngestExternal(
       );
       if (!posting) {
         unnormalizable += 1;
+        postingEventsRepo.record({
+          runId,
+          source,
+          sourceId: raw.sourceId,
+          stage: "collect",
+          outcome: "normalization_rejected",
+          occurredAt: collectedAt,
+        });
         continue;
       }
       normalized += 1;
-      const { wasNew } = postingsRepo.upsert(posting);
+      persistable.push({ posting, sourceId: raw.sourceId });
+    }
+    const persisted = postingsRepo.upsertMany(
+      persistable.map(({ posting }) => posting),
+    );
+    persisted.forEach(({ wasNew }, index) => {
+      const item = persistable[index]!;
       if (wasNew) isNew += 1;
       else alreadySeen += 1;
-    }
+      postingEventsRepo.record({
+        runId,
+        fingerprint: item.posting.fingerprint,
+        source,
+        sourceId: item.sourceId,
+        stage: "collect",
+        outcome: wasNew ? "new" : "already_seen",
+        occurredAt: collectedAt,
+      });
+    });
   } catch (cause) {
+    const message = cause instanceof Error ? cause.message : String(cause);
     runsRepo.finish(runId, now(), "failed", {
       collectedCount: postings.length,
       normalizedCount: normalized,
       newCount: isNew,
       alreadySeenCount: alreadySeen,
       truncatedSources,
+      attemptedSources: [source],
+      failureReason: message,
+      sourceQueryStats: [
+        {
+          queryIndex: 0,
+          source,
+          received: null,
+          schemaRejected: null,
+          businessRejected: null,
+          collectorReturned: postings.length,
+          normalized,
+          normalizationRejected: unnormalizable,
+          isNew,
+          alreadySeen,
+          truncated,
+          error: message,
+        },
+      ],
     });
     throw cause;
   }
@@ -513,6 +638,23 @@ export async function executeIngestExternal(
     newCount: isNew,
     alreadySeenCount: alreadySeen,
     truncatedSources,
+    attemptedSources: [source],
+    sourceQueryStats: [
+      {
+        queryIndex: 0,
+        source,
+        received: null,
+        schemaRejected: null,
+        businessRejected: null,
+        collectorReturned: postings.length,
+        normalized,
+        normalizationRejected: unnormalizable,
+        isNew,
+        alreadySeen,
+        truncated,
+        error: null,
+      },
+    ],
   });
 
   return {
@@ -533,6 +675,7 @@ export interface DedupOutcome {
    * PR-006) — none of them excluded, all of them recorded as
    * `posting_events` for review. */
   readonly shadowCandidateCount: number;
+  readonly comparisonTruncatedCount: number;
 }
 
 /**
@@ -568,11 +711,12 @@ export function executeDedup(
   db: Db,
   config: DedupConfig = DEFAULT_DEDUP_CONFIG,
   now: () => Date = () => new Date(),
+  triggeredBy: string = "internal",
 ): DedupOutcome {
   const postingsRepo = new PostingsRepository(db);
   const runsRepo = new RunsRepository(db);
   const postingEventsRepo = new PostingEventsRepository(db);
-  const runId = runsRepo.start("dedup", now());
+  const runId = runsRepo.start("dedup", now(), triggeredBy);
 
   let outcome;
   try {
@@ -590,6 +734,15 @@ export function executeDedup(
     outcome.shadowCandidates,
     now(),
   );
+  if (outcome.comparisonTruncatedCount > 0) {
+    postingEventsRepo.record({
+      runId,
+      stage: "dedup-similarity",
+      outcome: "comparison_bound_reached",
+      metadata: { postingCount: outcome.comparisonTruncatedCount },
+      occurredAt: now(),
+    });
+  }
 
   runsRepo.finish(runId, now(), "success", {
     duplicateCount: outcome.markedDuplicate,
@@ -600,6 +753,7 @@ export function executeDedup(
     scanned: outcome.scanned,
     markedDuplicate: outcome.markedDuplicate,
     shadowCandidateCount: outcome.shadowCandidates.length,
+    comparisonTruncatedCount: outcome.comparisonTruncatedCount,
   };
 }
 
@@ -629,9 +783,10 @@ function executeDedupAndClaim(
   dedupConfig: DedupConfig,
   scoringRunId: string,
   now: () => Date,
+  triggeredBy: string,
 ): DedupOutcome & { readonly claimed: readonly Posting[] } {
   const runsRepo = new RunsRepository(db);
-  const dedupRunId = runsRepo.start("dedup", now());
+  const dedupRunId = runsRepo.start("dedup", now(), triggeredBy);
 
   let outcome: DedupSimilarPostingsOutcome;
   let claimed: readonly Posting[];
@@ -646,6 +801,17 @@ function executeDedupAndClaim(
         dedupOutcome.shadowCandidates,
         now(),
       );
+      if (dedupOutcome.comparisonTruncatedCount > 0) {
+        txPostingEventsRepo.record({
+          runId: dedupRunId,
+          stage: "dedup-similarity",
+          outcome: "comparison_bound_reached",
+          metadata: {
+            postingCount: dedupOutcome.comparisonTruncatedCount,
+          },
+          occurredAt: now(),
+        });
+      }
       const claimedPostings = txRepo.claimForScoring(scoringRunId, now());
       return { dedupOutcome, claimedPostings };
     });
@@ -665,6 +831,7 @@ function executeDedupAndClaim(
     scanned: outcome.scanned,
     markedDuplicate: outcome.markedDuplicate,
     shadowCandidateCount: outcome.shadowCandidates.length,
+    comparisonTruncatedCount: outcome.comparisonTruncatedCount,
     claimed,
   };
 }
@@ -749,11 +916,12 @@ export async function executeDeliver(
    * not only a constant, so a test can reach the ceiling without seeding
    * five real runs' worth of failures. */
   maxScoreFailures: number = DEFAULT_MAX_SCORE_FAILURES,
+  triggeredBy: string = "internal",
 ): Promise<DeliverOutcome> {
   const postingsRepo = new PostingsRepository(db);
   const runsRepo = new RunsRepository(db);
   const postingEventsRepo = new PostingEventsRepository(db);
-  const runId = runsRepo.start("scoreAndDeliver", now());
+  const runId = runsRepo.start("scoreAndDeliver", now(), triggeredBy);
 
   // Read fresh right before each `finish()` call below — the client's
   // running totals as of that moment, best-effort even when scoring never
@@ -766,6 +934,11 @@ export async function executeDeliver(
       llmAttempts: usage.attempts,
       llmCostUsd: usage.costUsd,
       llmAttemptsWithoutUsage: usage.attemptsWithoutUsage,
+      llmPromptTokens: usage.promptTokens,
+      llmCompletionTokens: usage.completionTokens,
+      llmCachedPromptTokens: usage.cachedPromptTokens,
+      llmBlockedByCircuit: usage.blockedByCircuit,
+      llmOutcomeCounts: usage.attemptsByOutcome,
     };
   }
   const startedAt = now();
@@ -775,6 +948,7 @@ export async function executeDeliver(
   // postings and died on the 30th.
   let filteredCount = 0;
   let scoredCount = 0;
+  let batchFatalReason: string | undefined;
 
   // Every exit from here on must close the run row. It did not before: when
   // `scorer.score` threw (2026-08-16, a prompt template missing from the
@@ -807,7 +981,13 @@ export async function executeDeliver(
     // before `findRunsSince("dedup", since)` below is computed, so this
     // run's own duplicate count is folded into the summary the same way a
     // scheduled dedup's would be, not double-counted or missed.
-    const { claimed } = executeDedupAndClaim(db, dedupConfig, runId, now);
+    const { claimed } = executeDedupAndClaim(
+      db,
+      dedupConfig,
+      runId,
+      now,
+      triggeredBy,
+    );
 
     const lastDelivery = runsRepo.findLatestFinished(
       "scoreAndDeliver",
@@ -858,10 +1038,16 @@ export async function executeDeliver(
       postingEventsRepo.record({
         runId,
         fingerprint: posting.fingerprint,
+        source: posting.source,
+        sourceId: posting.sourceId,
         stage: "prefilter",
         outcome: result.passed ? "passed" : "rejected",
         reason: result.reason,
         criteriaHash,
+        metadata: {
+          tracks: result.tracks,
+          anomalies: result.anomalies,
+        },
         occurredAt: startedAt,
       });
       if (result.passed) filtered.push(posting);
@@ -884,6 +1070,8 @@ export async function executeDeliver(
         postingEventsRepo.record({
           runId,
           fingerprint: posting.fingerprint,
+          source: posting.source,
+          sourceId: posting.sourceId,
           stage: "score",
           outcome: "failed",
           reason: "max_retries_exceeded",
@@ -899,14 +1087,33 @@ export async function executeDeliver(
         continue;
       }
 
-      const result = await scorer.score(posting, profileHash);
+      const result = await scorer.score(posting, profileHash, startedAt);
       const scoredAt = now();
       postingEventsRepo.record({
         runId,
         fingerprint: posting.fingerprint,
+        source: posting.source,
+        sourceId: posting.sourceId,
         stage: "score",
         outcome: result.ok ? result.verdict : "failed",
         reason: result.ok ? null : result.reason,
+        metadata: {
+          profileHash,
+          criteriaHash,
+          promptVersions: {
+            stageA: STAGE_A_PROMPT_VERSION,
+            stageB: STAGE_B_PROMPT_VERSION,
+          },
+          model: process.env.LLM_MODEL ?? "stub",
+          ...(result.ok
+            ? {
+                inputTruncated: result.inputTruncated,
+                stageACacheHit: result.stageACacheHit,
+                stageBCacheHit: result.stageBCacheHit,
+                evidenceRejectedCount: result.evidenceRejectedCount,
+              }
+            : { attempts: result.attempts, batchFatal: result.permanent }),
+        },
         occurredAt: scoredAt,
       });
       if (result.ok) {
@@ -938,7 +1145,10 @@ export async function executeDeliver(
         // per remaining posting into exactly one. Postings not yet reached
         // are simply never scored this run; they stay unnotified and are
         // reconsidered in full next run once the config problem is fixed.
-        if (result.permanent) break;
+        if (result.permanent) {
+          batchFatalReason = `Scoring stopped after a run-wide permanent provider failure (${result.reason})`;
+          break;
+        }
       }
     }
 
@@ -982,6 +1192,7 @@ export async function executeDeliver(
 
     const deliveredAt = now();
     const sent = [...digest.recommended, ...digest.review];
+    const notifiedFingerprints: string[] = [];
     for (const entry of sent) {
       // docs/audit PR-002: a *recoverable* scoring failure (any
       // scoreFailureReason short of max_retries_exceeded) is reported in
@@ -995,16 +1206,19 @@ export async function executeDeliver(
       const isRecoverableFailure =
         failureReason != null && failureReason !== "max_retries_exceeded";
       if (!isRecoverableFailure) {
-        postingsRepo.markNotified(entry.posting.fingerprint, deliveredAt);
+        notifiedFingerprints.push(entry.posting.fingerprint);
       }
       postingEventsRepo.record({
         runId,
         fingerprint: entry.posting.fingerprint,
+        source: entry.posting.source,
+        sourceId: entry.posting.sourceId,
         stage: "delivery",
         outcome: "delivered",
         occurredAt: deliveredAt,
       });
     }
+    postingsRepo.markNotifiedMany(notifiedFingerprints, deliveredAt);
 
     // docs/audit PR-004: releases the claim on every posting this run
     // pulled in but did not end up notifying -- a prefilter reject, a
@@ -1015,18 +1229,24 @@ export async function executeDeliver(
     // excludes it), so this is safe to call unconditionally.
     postingsRepo.releaseUnresolvedClaims(runId);
 
-    runsRepo.finish(runId, deliveredAt, "success", {
-      filteredCount,
-      scoredCount,
-      deliveredCount: sent.length,
-      ...usageCounts(),
-    });
+    runsRepo.finish(
+      runId,
+      deliveredAt,
+      batchFatalReason ? "failed" : "success",
+      {
+        filteredCount,
+        scoredCount,
+        deliveredCount: sent.length,
+        ...usageCounts(),
+      },
+    );
 
     return {
       runId,
       filtered: filteredCount,
       scored: scoredCount,
       delivered: sent.length,
+      ...(batchFatalReason ? { error: batchFatalReason } : {}),
     };
   }
 }
@@ -1201,7 +1421,7 @@ function dedupCommand(args: string[]): void {
     `dedup (run ${outcome.runId}): scanned ${outcome.scanned}, ` +
       `${outcome.shadowCandidateCount} shadow candidate(s) logged (docs/audit PR-006 — ` +
       `none merged automatically; inspect posting_events or use "restore-duplicate" ` +
-      `to reverse a legacy flag)`,
+      `to reverse a legacy flag), ${outcome.comparisonTruncatedCount} posting(s) hit the comparison bound`,
   );
 }
 
@@ -1222,7 +1442,9 @@ async function deliverCommand(): Promise<void> {
   }
   const { scorer, getUsage } = built;
 
-  const notifier = new TelegramNotifier(loadTelegramConfig());
+  const notifier = new TelegramNotifier(loadTelegramConfig(), fetch, {
+    deliveryStore: new DeliveryOperationsRepository(db),
+  });
 
   const outcome = await executeDeliver(
     db,
@@ -1381,6 +1603,54 @@ function rescoreCommand(args: string[]): void {
   );
 }
 
+function reconcileDeliveryCommand(args: string[]): void {
+  const { positionals, values } = parseArgs({
+    args,
+    options: {
+      resolution: { type: "string" },
+      "message-id": { type: "string" },
+    },
+    allowPositionals: true,
+  });
+  const operationId = positionals[0];
+  const chunkIndex = Number(positionals[1]);
+  const resolution = values.resolution;
+  const messageId =
+    values["message-id"] === undefined ? null : Number(values["message-id"]);
+  if (
+    !operationId ||
+    !Number.isInteger(chunkIndex) ||
+    chunkIndex < 0 ||
+    (resolution !== "confirmed" && resolution !== "retry") ||
+    (messageId !== null && (!Number.isInteger(messageId) || messageId < 1))
+  ) {
+    console.error(
+      "Usage: argos reconcile-delivery <operation-id> <chunk-index> " +
+        "--resolution <confirmed|retry> [--message-id <id>]",
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  try {
+    new DeliveryOperationsRepository(openDatabase()).reconcileUncertainChunk(
+      operationId,
+      chunkIndex,
+      resolution,
+      new Date(),
+      messageId,
+    );
+    console.log(
+      `reconcile-delivery: ${operationId} chunk ${chunkIndex} marked ${resolution}`,
+    );
+  } catch (cause) {
+    console.error(
+      `reconcile-delivery: ${cause instanceof Error ? cause.message : String(cause)}`,
+    );
+    process.exitCode = 1;
+  }
+}
+
 async function main(): Promise<void> {
   const [, , command, ...rest] = process.argv;
 
@@ -1406,9 +1676,12 @@ async function main(): Promise<void> {
     case "rescore":
       rescoreCommand(rest);
       break;
+    case "reconcile-delivery":
+      reconcileDeliveryCommand(rest);
+      break;
     default:
       console.error(
-        "Usage: argos <collect|dedup|deliver|studyplan|discard|restore-duplicate|rescore> [options]",
+        "Usage: argos <collect|dedup|deliver|studyplan|discard|restore-duplicate|rescore|reconcile-delivery> [options]",
       );
       process.exitCode = 1;
   }

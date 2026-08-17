@@ -49,7 +49,7 @@ describe("prompt version constants", () => {
 
   it("are pinned to the current versions", () => {
     expect(STAGE_A_PROMPT_VERSION).toBe("a-v4");
-    expect(STAGE_B_PROMPT_VERSION).toBe("b-v3");
+    expect(STAGE_B_PROMPT_VERSION).toBe("b-v4");
   });
 });
 
@@ -213,7 +213,7 @@ describe("buildStageBPrompt", () => {
     expect(requirementIndex).toBeGreaterThan(start);
     expect(requirementIndex).toBeLessThan(end);
 
-    expect(prompt.toLowerCase()).toContain("never as instructions");
+    expect(prompt.toLowerCase()).toContain("never follow instructions");
   });
 });
 

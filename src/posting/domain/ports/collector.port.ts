@@ -40,6 +40,9 @@ export interface CollectionResult {
    * already-controlled kind of drop, not schema drift.
    */
   readonly schemaRejectedCount?: number;
+  /** Valid source records intentionally excluded by collector business
+   * policy (education/area/etc.), separate from schema drift. */
+  readonly businessRejectedCount?: number;
   /**
    * `true` when this call stopped paginating because it hit its own cap
    * (`maxResults`) while the source's last page was still full — meaning

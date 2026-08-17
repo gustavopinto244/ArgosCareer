@@ -1,16 +1,24 @@
 import { z } from "zod";
 import { Profile } from "../../profile/domain/profile";
 import { MatchesRepository } from "../../persistence/infrastructure/matches-repository";
-import { isKnownProfileEvidence } from "../domain/evidence-provenance";
+import {
+  isEvidenceApplicableToRequirement,
+  isKnownProfileEvidence,
+} from "../domain/evidence-provenance";
 import { sanitizeLogLabel } from "../domain/log-label";
 import { hashRequirements } from "../domain/requirements-hash";
-import { createMatch, Match, Requirement } from "../domain/types";
+import {
+  createMatch,
+  Match,
+  MAX_MATCH_EVIDENCE_CHARS,
+  Requirement,
+} from "../domain/types";
 import { AskModel, parseModelOutputWithRetries } from "./llm-output";
-import { buildStageBPrompt, STAGE_B_PROMPT_VERSION } from "./prompts";
+import { createStageBPromptBuilder, STAGE_B_PROMPT_VERSION } from "./prompts";
 
 const MatchOutputSchema = z.object({
   status: z.enum(["met", "partial", "not_met"]),
-  evidence: z.string().min(1).nullable(),
+  evidence: z.string().min(1).max(MAX_MATCH_EVIDENCE_CHARS).nullable(),
 });
 
 /**
@@ -22,7 +30,12 @@ const MatchOutputSchema = z.object({
 export const DEFAULT_STAGE_B_CONCURRENCY = 8;
 
 export type MatchingResult =
-  | { readonly ok: true; readonly matches: readonly Match[] }
+  | {
+      readonly ok: true;
+      readonly matches: readonly Match[];
+      readonly cacheHit: boolean;
+      readonly evidenceRejectedCount: number;
+    }
   | {
       readonly ok: false;
       readonly reason: "matching_failed";
@@ -36,7 +49,11 @@ export type MatchingResult =
 
 /** One requirement's answer, or the attempt count that failed to produce it. */
 type Answer =
-  | { readonly ok: true; readonly match: Match }
+  | {
+      readonly ok: true;
+      readonly match: Match;
+      readonly evidenceRejected: boolean;
+    }
   | {
       readonly ok: false;
       readonly attempts: number;
@@ -53,7 +70,8 @@ type Answer =
 async function runBounded(
   items: readonly Requirement[],
   limit: number,
-  task: (item: Requirement) => Promise<Answer>,
+  task: (item: Requirement, index: number) => Promise<Answer>,
+  indexOffset: number = 0,
 ): Promise<(Answer | undefined)[]> {
   const results: (Answer | undefined)[] = new Array<Answer | undefined>(
     items.length,
@@ -67,7 +85,7 @@ async function runBounded(
       cursor += 1;
       const item = items[index];
       if (!item) return;
-      const answer = await task(item);
+      const answer = await task(item, index + indexOffset);
       results[index] = answer;
       if (!answer.ok) stopped = true;
     }
@@ -80,15 +98,16 @@ async function runBounded(
 
 /**
  * Stage B (docs/04-scoring-model.md): one model call per requirement,
- * cached whole by `(fingerprint, profileHash, promptVersion)` (ADR-007).
+ * cached whole by `(fingerprint, profileHash, promptVersion, model,
+ * requirementsHash)` (ADR-007/042).
  * `evidence: null` is coerced to `not_met` by `createMatch` regardless of
  * what `status` the model returned — ADR-005's rule, enforced in code, not
  * merely requested in the prompt.
  *
- * A failure on any one requirement discards the whole call rather than
- * caching a partial result — the cache key covers the full requirement set,
- * so a partial entry would be indistinguishable from a complete one on the
- * next read.
+ * A failure on any one requirement does not publish the whole-result cache,
+ * but each valid answer is checkpointed by requirement index under the same
+ * semantic identity. The next run resumes only the missing requirements;
+ * the complete cache is published only after every position is present.
  *
  * Those calls run **concurrently**, bounded by `concurrency` (ADR-022). This
  * is the highest-volume stage in the pipeline — one call per requirement,
@@ -124,6 +143,10 @@ export class StageBMatcher {
     profileHash: string,
     now: () => Date = () => new Date(),
   ): Promise<MatchingResult> {
+    // One immutable instant owns profile hashing (the caller passes the hash
+    // computed for this instant), prompt evidence, provenance and cache time.
+    // Capturing it once prevents semester-boundary key/prompt drift.
+    const evaluatedAt = now();
     const requirementsHash = hashRequirements(requirements);
     const cached = this.matchesRepo.find(
       fingerprint,
@@ -145,33 +168,80 @@ export class StageBMatcher {
     if (
       cached &&
       cached.length === requirements.length &&
-      cached.every(
-        (match, i) => match.requirement.text === requirements[i]?.text,
-      )
+      cached.every((match, i) => {
+        const current = requirements[i];
+        return (
+          current !== undefined &&
+          match.requirement.text === current.text &&
+          match.requirement.category === current.category &&
+          match.requirement.weight === current.weight &&
+          match.requirement.verifiable === current.verifiable &&
+          (match.evidence === null ||
+            (isKnownProfileEvidence(match.evidence, profile, evaluatedAt) &&
+              isEvidenceApplicableToRequirement(
+                match.evidence,
+                current,
+                profile,
+                evaluatedAt,
+              )))
+        );
+      })
     ) {
-      return { ok: true, matches: cached };
+      return {
+        ok: true,
+        matches: cached,
+        cacheHit: true,
+        evidenceRejectedCount: 0,
+      };
     }
 
-    const askOne = async (requirement: Requirement): Promise<Answer> => {
+    let buildPrompt: (requirement: Requirement) => string;
+    try {
+      buildPrompt = createStageBPromptBuilder(profile, undefined, evaluatedAt);
+    } catch {
+      return {
+        ok: false,
+        reason: "matching_failed",
+        attempts: 0,
+        permanent: false,
+      };
+    }
+
+    const partial = this.matchesRepo.findPartial(
+      fingerprint,
+      profileHash,
+      this.promptVersion,
+      this.model,
+      requirementsHash,
+      requirements,
+    );
+
+    const askOne = async (
+      requirement: Requirement,
+      requirementIndex: number,
+    ): Promise<Answer> => {
+      const saved = partial[requirementIndex];
+      if (
+        saved &&
+        (saved.evidence === null ||
+          (isKnownProfileEvidence(saved.evidence, profile, evaluatedAt) &&
+            isEvidenceApplicableToRequirement(
+              saved.evidence,
+              requirement,
+              profile,
+              evaluatedAt,
+            )))
+      ) {
+        return { ok: true, match: saved, evidenceRejected: false };
+      }
       // Same disk read, same contract, as stage A — see `StageAExtractor`.
       // `evaluatedAt` is captured once and reused for both the prompt's
       // academic-evidence line and the provenance check below, so the two
       // can never disagree with each other about "what period is it" within
-      // a single call, even though neither is guaranteed to agree with the
-      // separate clock `profileHash` was computed from (docs/audit PR-018,
-      // not addressed by this change).
-      const evaluatedAt = now();
-      let prompt: string;
-      try {
-        prompt = buildStageBPrompt(
-          requirement,
-          profile,
-          undefined,
-          evaluatedAt,
-        );
-      } catch {
-        return { ok: false, attempts: 0, permanent: false };
-      }
+      // a single call. `executeDeliver` also uses this exact instant for
+      // `profileHash` and passes it through `ScorerPort.score`, closing the
+      // semester-boundary drift described by PR-018.
+      const prompt = buildPrompt(requirement);
 
       const result = await parseModelOutputWithRetries(
         MatchOutputSchema,
@@ -188,7 +258,7 @@ export class StageBMatcher {
         return {
           ok: false,
           attempts: result.attempts,
-          permanent: result.reason === "permanent_error",
+          permanent: result.reason === "permanent_error" && result.batchFatal,
         };
       }
 
@@ -201,15 +271,34 @@ export class StageBMatcher {
       // toward `mandatoryCoverage`. A quote that does not verbatim-match a
       // real profile evidence line is treated exactly like `evidence: null`
       // — `createMatch` already coerces that to `not_met`.
+      const suppliedEvidence = result.data.evidence;
       const evidence =
-        result.data.evidence !== null &&
-        isKnownProfileEvidence(result.data.evidence, profile, evaluatedAt)
-          ? result.data.evidence
+        suppliedEvidence !== null &&
+        isKnownProfileEvidence(suppliedEvidence, profile, evaluatedAt) &&
+        isEvidenceApplicableToRequirement(
+          suppliedEvidence,
+          requirement,
+          profile,
+          evaluatedAt,
+        )
+          ? suppliedEvidence
           : null;
 
+      const match = createMatch(requirement, result.data.status, evidence);
+      this.matchesRepo.upsertPartial(
+        fingerprint,
+        profileHash,
+        this.promptVersion,
+        this.model,
+        requirementsHash,
+        requirementIndex,
+        match,
+        evaluatedAt,
+      );
       return {
         ok: true,
-        match: createMatch(requirement, result.data.status, evidence),
+        match,
+        evidenceRejected: suppliedEvidence !== null && evidence === null,
       };
     };
 
@@ -219,12 +308,13 @@ export class StageBMatcher {
     // The warming call (see the class docblock): one cold prefix, paid once,
     // so the concurrent calls behind it hit the provider's cache instead of
     // all racing the same miss.
-    if (first) answers.push(await askOne(first));
+    if (first) answers.push(await askOne(first, 0));
     if (answers[0]?.ok) {
-      answers.push(...(await runBounded(rest, this.concurrency, askOne)));
+      answers.push(...(await runBounded(rest, this.concurrency, askOne, 1)));
     }
 
     const matches: Match[] = [];
+    let evidenceRejectedCount = 0;
     for (const answer of answers) {
       // `undefined` means the requirement was never asked, because an earlier
       // one failed and `runBounded` stopped handing out work.
@@ -238,6 +328,7 @@ export class StageBMatcher {
         };
       }
       matches.push(answer.match);
+      if (answer.evidenceRejected) evidenceRejectedCount += 1;
     }
 
     // A stopped run leaves fewer answers than requirements. Caching that
@@ -262,8 +353,8 @@ export class StageBMatcher {
       this.model,
       requirementsHash,
       matches,
-      now(),
+      evaluatedAt,
     );
-    return { ok: true, matches };
+    return { ok: true, matches, cacheHit: false, evidenceRejectedCount };
   }
 }

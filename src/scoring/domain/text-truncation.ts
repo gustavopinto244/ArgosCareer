@@ -20,7 +20,17 @@ function truncateAtWordBoundary(text: string, maxChars: number): string {
     if (result.length + segment.length > maxChars) break;
     result += segment;
   }
-  return result.trimEnd();
+  if (result) return result.trimEnd();
+
+  // A URL, hash, minified blob, or adversarial single "word" may itself be
+  // larger than the whole budget. Falling back to grapheme boundaries keeps
+  // the input bounded without silently erasing it altogether.
+  const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+  for (const { segment } of graphemes.segment(text)) {
+    if (result.length + segment.length > maxChars) break;
+    result += segment;
+  }
+  return result;
 }
 
 export interface TruncationResult {

@@ -11,6 +11,20 @@ const APP_TITLE = "ArgosCareer";
 
 const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
 const DEFAULT_TIMEOUT_MS = 30_000;
+export const DEFAULT_MAX_COMPLETION_TOKENS = 2_048;
+export const DEFAULT_MAX_RESPONSE_BYTES = 1_000_000;
+
+const UsageSchema = z
+  .object({
+    prompt_tokens: z.number().int().nonnegative().optional(),
+    completion_tokens: z.number().int().nonnegative().optional(),
+    cost: z.number().nonnegative().optional(),
+    prompt_tokens_details: z
+      .object({ cached_tokens: z.number().int().nonnegative().optional() })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
 
 /**
  * Tolerant on purpose (same reasoning as `GupyJobSchema`): this is a
@@ -39,18 +53,7 @@ const ChatCompletionResponseSchema = z
      * response here: usage accounting is reported by OpenRouter but is not
      * something a call should fail over if a provider omits it.
      */
-    usage: z
-      .object({
-        prompt_tokens: z.number().optional(),
-        completion_tokens: z.number().optional(),
-        cost: z.number().optional(),
-        prompt_tokens_details: z
-          .object({ cached_tokens: z.number().optional() })
-          .passthrough()
-          .optional(),
-      })
-      .passthrough()
-      .optional(),
+    usage: UsageSchema.optional(),
   })
   .passthrough();
 
@@ -78,6 +81,9 @@ export type AttemptOutcome =
   | "providerError"
   | "authError"
   | "configError"
+  /** Permanent for this request, but not evidence that every posting in the
+   * batch is doomed (400/409/413/422). */
+  | "requestError"
   | "invalidEnvelope"
   | "invalidOutput"
   /** Fallback for a non-2xx status this classifier has no more specific
@@ -95,6 +101,7 @@ const ZERO_OUTCOMES: Readonly<Record<AttemptOutcome, number>> = {
   providerError: 0,
   authError: 0,
   configError: 0,
+  requestError: 0,
   invalidEnvelope: 0,
   invalidOutput: 0,
   httpError: 0,
@@ -165,6 +172,12 @@ export function isTransientFailure(category: FailureCategory): boolean {
   return TRANSIENT_CATEGORIES.has(category);
 }
 
+/** Only credentials or endpoint/model configuration are run-wide. A bad or
+ * oversized individual prompt is permanent for that posting, not the batch. */
+export function isBatchFatalFailure(category: FailureCategory): boolean {
+  return category === "authError" || category === "configError";
+}
+
 /**
  * Whether a failure is evidence the *provider itself* is degraded — as
  * opposed to evidence about one specific request or response (docs/audit
@@ -204,9 +217,10 @@ export function isBreakerTrippingFailure(category: FailureCategory): boolean {
  * client's own `AbortController` timeout uses — both mean "no timely
  * response," and treating 408 as a permanent `configError` (docs/audit
  * PR-009) meant a legitimately retryable status was never retried; anything
- * else non-2xx falls to `configError` (permanent — a 4xx is almost always a
- * malformed or unsupported request, not something retrying fixes) or
- * `serverError` (transient, the safe default for an unclassified 5xx).
+ * A 402 is account-wide insufficient-credit/configuration state and stops the
+ * batch; request-shape failures such as 400/409/413/422 are permanent only
+ * for the current posting. Anything else falls to `serverError` (transient,
+ * the safe default for an unclassified 5xx) or `httpError`.
  */
 function classifyHttpStatus(
   status: number,
@@ -217,7 +231,8 @@ function classifyHttpStatus(
   if (status === 502 || status === 503 || status === 504)
     return "providerError";
   if (status >= 500) return "serverError";
-  if (status >= 400) return "configError";
+  if (status === 402 || status === 404 || status === 405) return "configError";
+  if (status >= 400) return "requestError";
   return "httpError";
 }
 
@@ -286,6 +301,10 @@ export interface OpenRouterClientOptions {
    * (docs/07-testing-strategy.md). Defaults to the global fetch. */
   fetchImpl?: FetchLike;
   timeoutMs?: number;
+  /** Provider-side output ceiling. Local Zod bounds remain the second line
+   * of defence, but this prevents paying for an arbitrarily large response. */
+  maxCompletionTokens?: number;
+  maxResponseBytes?: number;
   /** Injected for tests, so a breaker trip can be asserted without waiting
    * out a real cooldown (docs/audit AC-016). Defaults to one shared instance
    * per client, protecting every call this client makes — across Stage A
@@ -313,6 +332,8 @@ export class OpenRouterClient {
   private readonly baseUrl: string;
   private readonly fetchImpl: FetchLike;
   private readonly timeoutMs: number;
+  private readonly maxCompletionTokens: number;
+  private readonly maxResponseBytes: number;
   private readonly circuitBreaker: CircuitBreaker;
 
   private calls = 0;
@@ -333,6 +354,29 @@ export class OpenRouterClient {
     this.baseUrl = options.baseUrl ?? DEFAULT_BASE_URL;
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.maxCompletionTokens =
+      options.maxCompletionTokens ?? DEFAULT_MAX_COMPLETION_TOKENS;
+    this.maxResponseBytes =
+      options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
+    if (!Number.isSafeInteger(this.timeoutMs) || this.timeoutMs <= 0) {
+      throw new Error("OpenRouter timeoutMs must be a positive safe integer");
+    }
+    if (
+      !Number.isSafeInteger(this.maxCompletionTokens) ||
+      this.maxCompletionTokens <= 0
+    ) {
+      throw new Error(
+        "OpenRouter maxCompletionTokens must be a positive safe integer",
+      );
+    }
+    if (
+      !Number.isSafeInteger(this.maxResponseBytes) ||
+      this.maxResponseBytes <= 0
+    ) {
+      throw new Error(
+        "OpenRouter maxResponseBytes must be a positive safe integer",
+      );
+    }
     this.circuitBreaker = options.circuitBreaker ?? new CircuitBreaker();
   }
 
@@ -357,6 +401,70 @@ export class OpenRouterClient {
       attemptsWithoutUsage: this.attemptsWithoutUsage,
       blockedByCircuit: this.blockedByCircuit,
     };
+  }
+
+  private captureUsage(value: unknown): boolean {
+    const parsed = UsageSchema.safeParse(value);
+    if (!parsed.success) return false;
+    const usage = parsed.data;
+    this.promptTokens += usage.prompt_tokens ?? 0;
+    this.completionTokens += usage.completion_tokens ?? 0;
+    this.cachedPromptTokens += usage.prompt_tokens_details?.cached_tokens ?? 0;
+    this.costUsd += usage.cost ?? 0;
+    return true;
+  }
+
+  private async readBody(
+    response: Response,
+    signal: AbortSignal,
+  ): Promise<string> {
+    const declared = Number(response.headers.get("content-length"));
+    if (Number.isFinite(declared) && declared > this.maxResponseBytes) {
+      throw new Error(
+        `OpenRouter response exceeds ${this.maxResponseBytes} bytes`,
+      );
+    }
+    if (!response.body) return "";
+    const reader = response.body.getReader();
+    const aborted = new Promise<never>((_resolve, reject) => {
+      signal.addEventListener(
+        "abort",
+        () =>
+          reject(new DOMException("The operation was aborted.", "AbortError")),
+        { once: true },
+      );
+    });
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    try {
+      for (;;) {
+        const { done, value } = await Promise.race([reader.read(), aborted]);
+        if (done) break;
+        total += value.byteLength;
+        if (total > this.maxResponseBytes) {
+          await reader.cancel();
+          throw new Error(
+            `OpenRouter response exceeds ${this.maxResponseBytes} bytes`,
+          );
+        }
+        chunks.push(value);
+      }
+      return new TextDecoder().decode(Buffer.concat(chunks, total));
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
+  private async readBodyWithDeadline(
+    response: Response,
+    controller: AbortController,
+  ): Promise<string> {
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      return await this.readBody(response, controller.signal);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async complete(prompt: string): Promise<string> {
@@ -397,6 +505,7 @@ export class OpenRouterClient {
         body: JSON.stringify({
           model: this.model,
           messages: [{ role: "user", content: prompt }],
+          max_tokens: this.maxCompletionTokens,
         }),
         signal: controller.signal,
       });
@@ -416,16 +525,28 @@ export class OpenRouterClient {
     }
 
     if (!response.ok) {
-      const body = await response.text().catch(() => "");
+      const body = await this.readBodyWithDeadline(response, controller).catch(
+        () => "",
+      );
       const category = classifyHttpStatus(response.status);
       this.attemptsByOutcome[category] += 1;
-      this.attemptsWithoutUsage += 1;
+      let errorJson: unknown;
+      try {
+        errorJson = JSON.parse(body);
+      } catch {
+        errorJson = null;
+      }
+      const usage =
+        errorJson !== null && typeof errorJson === "object"
+          ? (errorJson as { usage?: unknown }).usage
+          : undefined;
+      if (!this.captureUsage(usage)) this.attemptsWithoutUsage += 1;
       const retryAfterMs = parseRetryAfterMs(
         response.headers.get("retry-after"),
       );
       this.circuitBreaker.onFailure(isBreakerTrippingFailure(category));
       throw new LlmTransportError(
-        `OpenRouter responded ${response.status}: ${body}`.trim(),
+        `OpenRouter responded ${response.status}`,
         category,
         { status: response.status, retryAfterMs },
       );
@@ -433,22 +554,30 @@ export class OpenRouterClient {
 
     let json: unknown;
     try {
-      json = await response.json();
+      json = JSON.parse(await this.readBodyWithDeadline(response, controller));
     } catch (cause) {
-      this.attemptsByOutcome.invalidEnvelope += 1;
+      const category = controller.signal.aborted
+        ? "timeout"
+        : "invalidEnvelope";
+      this.attemptsByOutcome[category] += 1;
       this.attemptsWithoutUsage += 1;
       // A content/response-shape problem, not evidence the provider is
       // down (docs/audit PR-009) — see isBreakerTrippingFailure.
-      this.circuitBreaker.onFailure(
-        isBreakerTrippingFailure("invalidEnvelope"),
-      );
+      this.circuitBreaker.onFailure(isBreakerTrippingFailure(category));
       throw new LlmTransportError(
-        "Malformed OpenRouter response body",
-        "invalidEnvelope",
+        category === "timeout"
+          ? "OpenRouter response body timed out"
+          : "Malformed OpenRouter response body",
+        category,
         { cause },
       );
     }
 
+    const rawUsage =
+      json !== null && typeof json === "object"
+        ? (json as { usage?: unknown }).usage
+        : undefined;
+    const hasUsage = this.captureUsage(rawUsage);
     const parsed = ChatCompletionResponseSchema.safeParse(json);
     // Captured before the shape check below, deliberately — a response that
     // is a valid chat-completion envelope but fails Stage A/B's own schema
@@ -456,16 +585,7 @@ export class OpenRouterClient {
     // usage is ever visible (REMEDIATION_PLAN.md AC-015: "persistir usage
     // retornado pelo provider mesmo quando o conteúdo falhar posteriormente
     // no schema Stage A/B").
-    const usage = parsed.success ? parsed.data.usage : undefined;
-    if (usage) {
-      this.promptTokens += usage.prompt_tokens ?? 0;
-      this.completionTokens += usage.completion_tokens ?? 0;
-      this.cachedPromptTokens +=
-        usage.prompt_tokens_details?.cached_tokens ?? 0;
-      this.costUsd += usage.cost ?? 0;
-    } else {
-      this.attemptsWithoutUsage += 1;
-    }
+    if (!hasUsage) this.attemptsWithoutUsage += 1;
 
     const firstChoice = parsed.success ? parsed.data.choices[0] : undefined;
     if (!firstChoice) {

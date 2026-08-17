@@ -29,8 +29,10 @@ import {
   renameSync,
   rmSync,
   statSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { dirname } from "node:path";
 
 /**
@@ -123,6 +125,32 @@ export function emptyState(): CathoState {
   return { version: 2, entries: {} };
 }
 
+function isStateEntry(value: unknown): value is CathoStateEntry {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const entry = value as Record<string, unknown>;
+  if (entry.state === "ingested" || entry.state === "expired") return true;
+  if (entry.state === "retryable" || entry.state === "quarantined") {
+    return (
+      Number.isSafeInteger(entry.failCount) &&
+      (entry.failCount as number) >= 1 &&
+      typeof entry.reason === "string"
+    );
+  }
+  if (entry.state !== "collected") return false;
+  const payload = entry.payload;
+  return (
+    payload !== null &&
+    typeof payload === "object" &&
+    !Array.isArray(payload) &&
+    typeof (payload as Record<string, unknown>).id === "string" &&
+    typeof (payload as Record<string, unknown>).url === "string" &&
+    typeof (payload as Record<string, unknown>).pageTitle === "string" &&
+    Object.hasOwn(payload, "jobPosting")
+  );
+}
+
 /** Malformed, missing, or old-format (the previous flat `string[]` shape)
  * state files all fall back to empty rather than throwing — a corrupt
  * checkpoint must degrade to "start the backlog over," never crash the
@@ -131,16 +159,20 @@ export function loadState(path: string): CathoState {
   if (!existsSync(path)) return emptyState();
   try {
     const raw: unknown = JSON.parse(readFileSync(path, "utf8"));
-    if (
-      raw !== null &&
-      typeof raw === "object" &&
-      (raw as { version?: unknown }).version === 2 &&
-      typeof (raw as { entries?: unknown }).entries === "object" &&
-      (raw as { entries?: unknown }).entries !== null
-    ) {
-      return raw as CathoState;
+    if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+      return emptyState();
     }
-    return emptyState();
+    if ((raw as { version?: unknown }).version !== 2) return emptyState();
+    const entries = (raw as { entries?: unknown }).entries;
+    if (
+      entries === null ||
+      typeof entries !== "object" ||
+      Array.isArray(entries)
+    ) {
+      return emptyState();
+    }
+    if (!Object.values(entries).every(isStateEntry)) return emptyState();
+    return { version: 2, entries: entries as Record<string, CathoStateEntry> };
   } catch {
     return emptyState();
   }
@@ -169,6 +201,8 @@ export const DEFAULT_LOCK_STALE_AFTER_MS = 30 * 60 * 1000;
 
 export interface LockResult {
   readonly acquired: boolean;
+  /** Unforgeable ownership token required to refresh/release this lease. */
+  readonly token?: string;
   /** Present only when `acquired` is `false` — why, for the caller's own
    * log line. */
   readonly reason?: string;
@@ -200,13 +234,16 @@ export function acquireLock(
   staleAfterMs: number = DEFAULT_LOCK_STALE_AFTER_MS,
 ): LockResult {
   mkdirSync(dirname(lockPath), { recursive: true });
+  const token = randomUUID();
   const contents = JSON.stringify({
+    token,
     pid: process.pid,
     startedAt: now.toISOString(),
+    heartbeatAt: now.toISOString(),
   });
   try {
     writeFileSync(lockPath, contents, { encoding: "utf8", flag: "wx" });
-    return { acquired: true };
+    return { acquired: true, token };
   } catch (cause) {
     if ((cause as NodeJS.ErrnoException).code !== "EEXIST") throw cause;
   }
@@ -228,21 +265,127 @@ export function acquireLock(
     };
   }
 
-  // Stale -- a previous process almost certainly crashed without
-  // releasing it. Plain overwrite, not another `wx` create: this call
-  // already knows the file exists.
-  writeFileSync(lockPath, contents, "utf8");
-  return { acquired: true };
+  // Serialize stale takeover itself. Without this second atomic `wx`, two
+  // contenders can both observe the same stale mtime, both overwrite the
+  // lock and both believe they acquired it.
+  const takeoverPath = `${lockPath}.takeover`;
+  try {
+    writeFileSync(takeoverPath, token, { encoding: "utf8", flag: "wx" });
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code !== "EEXIST") throw cause;
+    // A contender can itself crash after creating the takeover mutex. It is
+    // a lease too, not a permanent tombstone. Removal races are harmless:
+    // the retrying `wx` below still elects exactly one winner.
+    try {
+      const takeoverAgeMs = now.getTime() - statSync(takeoverPath).mtimeMs;
+      if (takeoverAgeMs <= staleAfterMs) {
+        return {
+          acquired: false,
+          reason: "stale-lock takeover already in progress",
+        };
+      }
+      rmSync(takeoverPath);
+      writeFileSync(takeoverPath, token, { encoding: "utf8", flag: "wx" });
+    } catch (retryCause) {
+      if ((retryCause as NodeJS.ErrnoException).code !== "EEXIST") {
+        throw retryCause;
+      }
+      return {
+        acquired: false,
+        reason: "stale-lock takeover already in progress",
+      };
+    }
+  }
+
+  try {
+    // Re-check after winning the takeover mutex: the owner may have emitted a
+    // heartbeat between our first stat and this point.
+    let currentAgeMs: number;
+    try {
+      currentAgeMs = now.getTime() - statSync(lockPath).mtimeMs;
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause;
+      writeFileSync(lockPath, contents, { encoding: "utf8", flag: "wx" });
+      return { acquired: true, token };
+    }
+    if (currentAgeMs <= staleAfterMs) {
+      return {
+        acquired: false,
+        reason: `lock refreshed during takeover (${Math.round(currentAgeMs / 1000)}s old)`,
+      };
+    }
+    rmSync(lockPath);
+    writeFileSync(lockPath, contents, { encoding: "utf8", flag: "wx" });
+    return { acquired: true, token };
+  } finally {
+    rmSync(takeoverPath, { force: true });
+  }
 }
 
-/** Releasing a lock that is already gone is a no-op, not an error --
- * whatever removed it (a stale takeover, manual cleanup) already did this
- * call's job. */
-export function releaseLock(lockPath: string): void {
+function lockToken(lockPath: string): string | null {
   try {
+    const parsed: unknown = JSON.parse(readFileSync(lockPath, "utf8"));
+    return parsed !== null &&
+      typeof parsed === "object" &&
+      typeof (parsed as { token?: unknown }).token === "string"
+      ? (parsed as { token: string }).token
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Refreshes only the lease this caller owns. A replaced owner can never
+ * keep another process's lock alive. */
+export function refreshLock(
+  lockPath: string,
+  token: string,
+  now: Date = new Date(),
+): boolean {
+  const takeoverPath = `${lockPath}.takeover`;
+  try {
+    // Serialize refresh/release with stale takeover. Without this guard, an
+    // old owner could validate its token, lose the lock to a takeover, and
+    // then touch or remove the replacement owner's file (a classic
+    // check-then-act race).
+    writeFileSync(takeoverPath, token, { encoding: "utf8", flag: "wx" });
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === "EEXIST") return false;
+    throw cause;
+  }
+  try {
+    if (lockToken(lockPath) !== token) return false;
+    // Heartbeat through mtime only. Rewriting the owner JSON had a TOCTOU:
+    // a stale takeover could replace the lock after `lockToken` returned,
+    // then the old owner would overwrite the new owner's token. Touching
+    // mtime can at worst briefly extend a replacement lease; it never
+    // changes ownership data.
+    utimesSync(lockPath, now, now);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    rmSync(takeoverPath, { force: true });
+  }
+}
+
+/** Releases only the lease identified by `token`. An old process finishing
+ * after a stale takeover cannot delete the new owner's lock. */
+export function releaseLock(lockPath: string, token: string): void {
+  const takeoverPath = `${lockPath}.takeover`;
+  try {
+    writeFileSync(takeoverPath, token, { encoding: "utf8", flag: "wx" });
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === "EEXIST") return;
+    throw cause;
+  }
+  try {
+    if (lockToken(lockPath) !== token) return;
     rmSync(lockPath);
   } catch {
     // Already gone.
+  } finally {
+    rmSync(takeoverPath, { force: true });
   }
 }
 

@@ -121,6 +121,13 @@ describe("renderPostingEntry", () => {
     expect(text).not.toContain("Confiança baixa");
   });
 
+  it("makes bounded scoring input visible to the operator", () => {
+    const text = renderPostingEntry(
+      scored({ outcome: { ...outcome(), inputTruncated: true } }),
+    );
+    expect(text).toContain("Conteúdo da vaga foi reduzido");
+  });
+
   it("renders the recommended resume variant, highlights and missing terms when computed (docs/audit AC-026)", () => {
     const text = renderPostingEntry(
       scored({

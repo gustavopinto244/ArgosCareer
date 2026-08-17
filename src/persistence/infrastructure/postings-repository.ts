@@ -116,75 +116,87 @@ export class PostingsRepository {
   constructor(private readonly db: Db) {}
 
   upsert(posting: Posting): UpsertResult {
-    return this.db.transaction((tx) => {
-      const existing = tx
-        .select()
-        .from(postings)
+    return this.db.transaction((tx) => this.upsertIn(tx, posting));
+  }
+
+  /** One transaction for a collector page/batch. This preserves each
+   * posting's exact upsert semantics while avoiding one fsync/savepoint
+   * lifecycle per item. */
+  upsertMany(values: readonly Posting[]): readonly UpsertResult[] {
+    if (values.length === 0) return [];
+    return this.db.transaction((tx) =>
+      values.map((posting) => this.upsertIn(tx, posting)),
+    );
+  }
+
+  private upsertIn(db: Db, posting: Posting): UpsertResult {
+    const existing = db
+      .select()
+      .from(postings)
+      .where(eq(postings.fingerprint, posting.fingerprint))
+      .get();
+
+    const locationCity =
+      posting.location.kind === "known" ? posting.location.city : null;
+
+    if (existing) {
+      db.update(postings)
+        .set({
+          source: posting.source,
+          sourceId: posting.sourceId,
+          company: posting.company,
+          title: posting.title,
+          locationKind: posting.location.kind,
+          locationCity,
+          workMode: posting.workMode,
+          seniority: posting.seniority,
+          experienceYears: posting.experienceYears,
+          applicationDeadline: posting.applicationDeadline,
+          publishedAt: posting.publishedAt,
+          sourceUrl: posting.sourceUrl,
+          description: posting.description,
+          lastSeenAt: posting.lastSeenAt,
+          rawPayload: JSON.stringify(posting.rawPayload),
+          // firstSeenAt is deliberately absent from this SET clause.
+        })
         .where(eq(postings.fingerprint, posting.fingerprint))
-        .get();
+        .run();
+    } else {
+      db.insert(postings)
+        .values({
+          source: posting.source,
+          sourceId: posting.sourceId,
+          fingerprint: posting.fingerprint,
+          company: posting.company,
+          title: posting.title,
+          locationKind: posting.location.kind,
+          locationCity,
+          workMode: posting.workMode,
+          seniority: posting.seniority,
+          experienceYears: posting.experienceYears,
+          applicationDeadline: posting.applicationDeadline,
+          publishedAt: posting.publishedAt,
+          sourceUrl: posting.sourceUrl,
+          description: posting.description,
+          firstSeenAt: posting.firstSeenAt,
+          lastSeenAt: posting.lastSeenAt,
+          rawPayload: JSON.stringify(posting.rawPayload),
+        })
+        .run();
+    }
 
-      const locationCity =
-        posting.location.kind === "known" ? posting.location.city : null;
+    const stored = db
+      .select()
+      .from(postings)
+      .where(eq(postings.fingerprint, posting.fingerprint))
+      .get();
+    if (!stored) {
+      throw new Error(
+        `Postings upsert did not persist fingerprint ${posting.fingerprint}`,
+      );
+    }
 
-      if (existing) {
-        tx.update(postings)
-          .set({
-            source: posting.source,
-            sourceId: posting.sourceId,
-            company: posting.company,
-            title: posting.title,
-            locationKind: posting.location.kind,
-            locationCity,
-            workMode: posting.workMode,
-            seniority: posting.seniority,
-            experienceYears: posting.experienceYears,
-            applicationDeadline: posting.applicationDeadline,
-            publishedAt: posting.publishedAt,
-            sourceUrl: posting.sourceUrl,
-            description: posting.description,
-            lastSeenAt: posting.lastSeenAt,
-            rawPayload: JSON.stringify(posting.rawPayload),
-            // firstSeenAt is deliberately absent from this SET clause.
-          })
-          .where(eq(postings.fingerprint, posting.fingerprint))
-          .run();
-      } else {
-        tx.insert(postings)
-          .values({
-            source: posting.source,
-            sourceId: posting.sourceId,
-            fingerprint: posting.fingerprint,
-            company: posting.company,
-            title: posting.title,
-            locationKind: posting.location.kind,
-            locationCity,
-            workMode: posting.workMode,
-            seniority: posting.seniority,
-            experienceYears: posting.experienceYears,
-            applicationDeadline: posting.applicationDeadline,
-            publishedAt: posting.publishedAt,
-            sourceUrl: posting.sourceUrl,
-            description: posting.description,
-            firstSeenAt: posting.firstSeenAt,
-            lastSeenAt: posting.lastSeenAt,
-            rawPayload: JSON.stringify(posting.rawPayload),
-          })
-          .run();
-      }
-
-      const stored = tx
-        .select()
-        .from(postings)
-        .where(eq(postings.fingerprint, posting.fingerprint))
-        .get();
-      if (!stored) {
-        throw new Error(
-          `Postings upsert did not persist fingerprint ${posting.fingerprint}`,
-        );
-      }
-
-      return { posting: rowToPosting(stored), wasNew: !existing };
-    });
+    return { posting: rowToPosting(stored), wasNew: !existing };
   }
 
   findByFingerprint(fingerprint: string): Posting | null {
@@ -323,6 +335,15 @@ export class PostingsRepository {
       .update(postings)
       .set({ notifiedAt })
       .where(eq(postings.fingerprint, fingerprint))
+      .run();
+  }
+
+  markNotifiedMany(fingerprints: readonly string[], notifiedAt: Date): void {
+    if (fingerprints.length === 0) return;
+    this.db
+      .update(postings)
+      .set({ notifiedAt })
+      .where(inArray(postings.fingerprint, fingerprints))
       .run();
   }
 

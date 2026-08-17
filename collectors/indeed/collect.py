@@ -19,7 +19,7 @@ lives outside the app entirely).
 
 Required environment:
   ARGOS_API_URL   e.g. http://100.x.x.x:3000 (Atlas's Tailscale address)
-  ARGOS_API_KEY   the same Bearer key every other API caller uses
+  ARGOS_INGEST_API_KEY   an Indeed-only ingest credential
 
 Optional environment (defaults below):
   SEARCH_TERM, LOCATION, COUNTRY_INDEED, RESULTS_WANTED
@@ -50,9 +50,14 @@ def main() -> None:
     search_term = env("SEARCH_TERM", DEFAULT_SEARCH_TERM)
     location = env("LOCATION", DEFAULT_LOCATION)
     country_indeed = env("COUNTRY_INDEED", DEFAULT_COUNTRY_INDEED)
-    results_wanted = int(env("RESULTS_WANTED", DEFAULT_RESULTS_WANTED))
+    try:
+        results_wanted = int(env("RESULTS_WANTED", DEFAULT_RESULTS_WANTED))
+    except ValueError as cause:
+        raise SystemExit("ERROR: RESULTS_WANTED must be a positive integer") from cause
+    if results_wanted <= 0:
+        raise SystemExit("ERROR: RESULTS_WANTED must be a positive integer")
     api_url = env("ARGOS_API_URL", required=True).rstrip("/")
-    api_key = env("ARGOS_API_KEY", required=True)
+    api_key = env("ARGOS_INGEST_API_KEY", required=True)
 
     print(
         f"jobspy: searching Indeed for '{search_term}' in '{location}' "
@@ -101,6 +106,7 @@ def main() -> None:
         json=body,
         headers={"Authorization": f"Bearer {api_key}"},
         timeout=120,
+        allow_redirects=False,
     )
     print(f"ingest: HTTP {response.status_code}")
     print(response.text[:2000])

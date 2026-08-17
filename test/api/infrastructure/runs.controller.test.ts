@@ -8,6 +8,7 @@ import { Test } from "@nestjs/testing";
 import { JSON_BODY_LIMIT } from "../../../src/http-config";
 import request from "supertest";
 import { ApiModule } from "../../../src/api/infrastructure/api.module";
+import { ApiKeyGuard } from "../../../src/api/infrastructure/api-key.guard";
 import { COLLECTOR } from "../../../src/api/infrastructure/collector.provider";
 import { NOTIFIER } from "../../../src/api/infrastructure/notifier.provider";
 import { CRITERIA } from "../../../src/api/infrastructure/config.provider";
@@ -35,6 +36,8 @@ import { RunLock } from "../../../src/scheduling/domain/run-lock";
 import { RUN_LOCK } from "../../../src/scheduling/infrastructure/run-lock.provider";
 
 const API_KEY = "test-api-key-for-suite";
+const AUTOMATION_KEY = "test-automation-key-for-suite";
+const CATHO_INGEST_KEY = "test-catho-ingest-key-for-suite";
 
 /**
  * No real Gupy request in this suite — `COLLECTOR` is overridden with this
@@ -80,6 +83,10 @@ beforeEach(async () => {
   env = { ...process.env };
   process.env.DATABASE_PATH = join(dir, "argos.db");
   process.env.API_KEY = API_KEY;
+  process.env.API_AUTOMATION_KEY = AUTOMATION_KEY;
+  process.env.INGEST_CATHO_API_KEY = CATHO_INGEST_KEY;
+  delete process.env.INGEST_INDEED_API_KEY;
+  delete process.env.INGEST_LINKEDIN_API_KEY;
   // /runs/deliver's buildScorer reads this — stub needs no LLM_API_KEY/model
   // and makes no network call, matching the fakes above for the same reason.
   process.env.SCORER_ADAPTER = "stub";
@@ -135,6 +142,10 @@ function auth(req: request.Test): request.Test {
   return req.set("Authorization", `Bearer ${API_KEY}`);
 }
 
+function authWith(req: request.Test, key: string): request.Test {
+  return req.set("Authorization", `Bearer ${key}`);
+}
+
 function gupyPayload(id: number, name: string, careerPageName = "Empresa X") {
   return { id, name, careerPageName };
 }
@@ -167,6 +178,64 @@ describe("ApiKeyGuard", () => {
 
   it("accepts the correct key", async () => {
     await auth(request(app.getHttpServer()).get("/health")).expect(200);
+  });
+
+  it("allows automation reads but denies external ingest and manual discard", async () => {
+    await authWith(
+      request(app.getHttpServer()).get("/health"),
+      AUTOMATION_KEY,
+    ).expect(200);
+    await authWith(
+      request(app.getHttpServer())
+        .post("/runs/collect/external")
+        .send({ source: "gupy", postings: [], truncated: true }),
+      AUTOMATION_KEY,
+    ).expect(403);
+    await authWith(
+      request(app.getHttpServer()).post("/postings/anything/discard"),
+      AUTOMATION_KEY,
+    ).expect(403);
+    // Nest/Express accepts a trailing slash by default. Capability checks must
+    // normalize it rather than accidentally treating it as a different route.
+    await authWith(
+      request(app.getHttpServer())
+        .post("/runs/collect/external/")
+        .send({ source: "gupy", postings: [], truncated: true }),
+      AUTOMATION_KEY,
+    ).expect(403);
+    await authWith(
+      request(app.getHttpServer()).post("/postings/anything/discard/"),
+      AUTOMATION_KEY,
+    ).expect(403);
+  });
+
+  it("restricts a source credential to external ingest for its own source", async () => {
+    await authWith(
+      request(app.getHttpServer()).get("/health"),
+      CATHO_INGEST_KEY,
+    ).expect(403);
+    await authWith(
+      request(app.getHttpServer())
+        .post("/runs/collect/external")
+        .send({ source: "gupy", postings: [], truncated: true }),
+      CATHO_INGEST_KEY,
+    ).expect(403);
+
+    const accepted = await authWith(
+      request(app.getHttpServer())
+        .post("/runs/collect/external")
+        .send({ source: "catho", postings: [], truncated: true }),
+      CATHO_INGEST_KEY,
+    );
+    expect(accepted.status).toBe(201);
+    expect(
+      new RunsRepository(db).findById(accepted.body.runId)?.triggeredBy,
+    ).toMatch(/^ingest:catho:/);
+  });
+
+  it("refuses to start when two principals share the same credential", () => {
+    process.env.API_AUTOMATION_KEY = API_KEY;
+    expect(() => new ApiKeyGuard()).toThrow(/distinct values/);
   });
 });
 
@@ -294,6 +363,7 @@ describe("POST /runs/collect", () => {
     const run = repo.findById(res.body.runId);
     expect(run?.kind).toBe("collect");
     expect(run?.outcome).toBe("success");
+    expect(run?.triggeredBy).toMatch(/^admin:/);
   });
 
   it("passes the request body through to the collector as collect params", async () => {
@@ -564,6 +634,7 @@ describe("POST /runs/dedup", () => {
       scanned: 0,
       markedDuplicate: 0,
       shadowCandidateCount: 0,
+      comparisonTruncatedCount: 0,
     });
     const repo = new RunsRepository(db);
     expect(repo.findById(res.body.runId)?.kind).toBe("dedup");
@@ -614,6 +685,21 @@ describe("POST /runs/deliver", () => {
       request(app.getHttpServer()).post("/runs/deliver"),
     );
     expect(fourth.status).toBe(429);
+  });
+
+  it("keeps expensive-operation budgets independent per principal", async () => {
+    for (const key of [API_KEY, AUTOMATION_KEY]) {
+      for (let i = 0; i < 3; i++) {
+        await authWith(
+          request(app.getHttpServer()).post("/runs/deliver"),
+          key,
+        ).expect(201);
+      }
+      await authWith(
+        request(app.getHttpServer()).post("/runs/deliver"),
+        key,
+      ).expect(429);
+    }
   });
 });
 

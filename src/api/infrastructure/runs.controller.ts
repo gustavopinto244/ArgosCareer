@@ -6,8 +6,11 @@ import {
   Param,
   Post,
   Query,
+  Req,
 } from "@nestjs/common";
+import type { Request } from "express";
 import { ExternalRawPosting } from "../../cli/main";
+import { principalFromRequest } from "./auth-principal";
 import { CollectParams, RunsService } from "./runs.service";
 
 export interface IngestExternalBody {
@@ -50,18 +53,18 @@ export class RunsController {
   }
 
   @Post("runs/collect")
-  collect(@Body() body: CollectParams = {}) {
-    return this.runs.collect(body);
+  collect(@Req() request: Request, @Body() body: CollectParams = {}) {
+    return this.runs.collect(body, principalFromRequest(request).id);
   }
 
   @Post("runs/dedup")
-  dedup() {
-    return this.runs.dedup();
+  dedup(@Req() request: Request) {
+    return this.runs.dedup(principalFromRequest(request).id);
   }
 
   @Post("runs/deliver")
-  deliver() {
-    return this.runs.deliver();
+  deliver(@Req() request: Request) {
+    return this.runs.deliver(principalFromRequest(request).id);
   }
 
   /**
@@ -72,7 +75,10 @@ export class RunsController {
    * the same boundary Gupy/CIEE's own payloads cross).
    */
   @Post("runs/collect/external")
-  collectExternal(@Body() body: IngestExternalBody = {}) {
+  collectExternal(
+    @Req() request: Request,
+    @Body() body: IngestExternalBody = {},
+  ) {
     if (!body.source) {
       throw new BadRequestException("'source' is required");
     }
@@ -83,6 +89,7 @@ export class RunsController {
       body.source,
       body.postings,
       body.truncated ?? false,
+      principalFromRequest(request).id,
     );
   }
 }

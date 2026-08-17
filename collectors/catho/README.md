@@ -50,7 +50,7 @@ docker build -t argos-catho-collector:local .
 # 2. Configure
 cp .env.example .env
 # edit .env: ARGOS_API_URL (Atlas's Tailscale address, argos-career's port),
-# ARGOS_API_KEY (the same key in ../../.env's API_KEY)
+# ARGOS_INGEST_API_KEY (matches ../../.env's INGEST_CATHO_API_KEY)
 mkdir -p data
 
 # 3. Try one run by hand before scheduling anything — with a small
@@ -61,7 +61,7 @@ docker run --rm \
   -v "$(pwd)/data:/data" \
   -e MAX_PAGES_PER_RUN=10 \
   -e REQUEST_INTERVAL_MS -e TITLE_PATTERN -e STATE_PATH \
-  -e ARGOS_API_URL -e ARGOS_API_KEY \
+  -e ARGOS_API_URL -e ARGOS_INGEST_API_KEY \
   argos-catho-collector:local
 
 # 4. Install the systemd user units

@@ -44,7 +44,7 @@
  *
  * Required environment:
  *   ARGOS_API_URL   e.g. http://100.x.x.x:3000 (Atlas's Tailscale address)
- *   ARGOS_API_KEY   the same Bearer key every other API caller uses
+ *   ARGOS_INGEST_API_KEY   a Catho-only ingest credential
  *
  * Optional environment (defaults below):
  *   MAX_PAGES_PER_RUN, REQUEST_INTERVAL_MS, STATE_PATH, TITLE_PATTERN
@@ -61,8 +61,10 @@ import {
   markIngested,
   needsPageFetch,
   releaseLock,
+  refreshLock,
   saveStateAtomic,
 } from "./state";
+import { fetchAllowedCathoText, readResponseTextBounded } from "./safe-fetch";
 
 const SITEMAP_INDEX = "https://www.catho.com.br/sitemap-index.xml";
 // Only the fresh, numbered "sitemap_vagas_N.xml" set (regenerated daily,
@@ -86,6 +88,8 @@ const DEFAULT_STATE_PATH = "/data/catho-state.json";
 // round trip on its own default interval) is unnecessary I/O for a loss
 // window this small already.
 const DEFAULT_CHECKPOINT_EVERY = 10;
+const LOCK_HEARTBEAT_MS = 60_000;
+const MAX_INGEST_RESPONSE_BYTES = 64 * 1024;
 const FETCH_UA =
   "ArgosCareer/0.1.0 (+https://github.com/gustavopinto244/ArgosCareer; personal internship search bot)";
 
@@ -102,6 +106,22 @@ function requiredEnv(name: string): string {
   return value;
 }
 
+function positiveIntegerEnv(
+  name: string,
+  fallback: number,
+  options: { readonly allowZero?: boolean } = {},
+): number {
+  const raw = env(name, String(fallback));
+  const value = Number(raw);
+  const minimum = options.allowZero ? 0 : 1;
+  if (!Number.isSafeInteger(value) || value < minimum) {
+    throw new Error(
+      `${name} must be a safe integer ${options.allowZero ? ">= 0" : "> 0"}`,
+    );
+  }
+  return value;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -112,11 +132,7 @@ interface SitemapCandidate {
 }
 
 async function fetchText(url: string): Promise<string> {
-  const response = await fetch(url, { headers: { "User-Agent": FETCH_UA } });
-  if (!response.ok) {
-    throw new Error(`${url} responded ${response.status}`);
-  }
-  return response.text();
+  return fetchAllowedCathoText(url, { userAgent: FETCH_UA });
 }
 
 function extractLocs(xml: string): string[] {
@@ -234,22 +250,30 @@ async function loadCandidatePage(
 }
 
 async function main(): Promise<void> {
-  const titlePattern = new RegExp(
-    env("TITLE_PATTERN", DEFAULT_TITLE_PATTERN),
-    "i",
+  let titlePattern: RegExp;
+  try {
+    titlePattern = new RegExp(env("TITLE_PATTERN", DEFAULT_TITLE_PATTERN), "i");
+  } catch (cause) {
+    throw new Error(`TITLE_PATTERN is not a valid regular expression`, {
+      cause,
+    });
+  }
+  const maxPagesPerRun = positiveIntegerEnv(
+    "MAX_PAGES_PER_RUN",
+    DEFAULT_MAX_PAGES_PER_RUN,
   );
-  const maxPagesPerRun = Number(
-    env("MAX_PAGES_PER_RUN", String(DEFAULT_MAX_PAGES_PER_RUN)),
+  const requestIntervalMs = positiveIntegerEnv(
+    "REQUEST_INTERVAL_MS",
+    DEFAULT_REQUEST_INTERVAL_MS,
+    { allowZero: true },
   );
-  const requestIntervalMs = Number(
-    env("REQUEST_INTERVAL_MS", String(DEFAULT_REQUEST_INTERVAL_MS)),
-  );
-  const checkpointEvery = Number(
-    env("CHECKPOINT_EVERY", String(DEFAULT_CHECKPOINT_EVERY)),
+  const checkpointEvery = positiveIntegerEnv(
+    "CHECKPOINT_EVERY",
+    DEFAULT_CHECKPOINT_EVERY,
   );
   const statePath = env("STATE_PATH", DEFAULT_STATE_PATH);
   const apiUrl = requiredEnv("ARGOS_API_URL").replace(/\/$/, "");
-  const apiKey = requiredEnv("ARGOS_API_KEY");
+  const apiKey = requiredEnv("ARGOS_INGEST_API_KEY");
 
   // Single-writer mutual exclusion (docs/audit PR-012): a manual run
   // overlapping the scheduled timer would otherwise each load their own
@@ -259,10 +283,19 @@ async function main(): Promise<void> {
   // before any lock is ever taken.
   const lockPath = `${statePath}.lock`;
   const lock = acquireLock(lockPath);
-  if (!lock.acquired) {
+  if (!lock.acquired || !lock.token) {
     console.log(`skipping run: ${lock.reason}`);
     return;
   }
+  let lockLost = false;
+  const heartbeat = setInterval(() => {
+    if (!refreshLock(lockPath, lock.token!)) {
+      console.error("ERROR: Catho state lock ownership was lost");
+      process.exitCode = 1;
+      lockLost = true;
+    }
+  }, LOCK_HEARTBEAT_MS);
+  heartbeat.unref();
 
   try {
     await runOnce({
@@ -273,9 +306,15 @@ async function main(): Promise<void> {
       statePath,
       apiUrl,
       apiKey,
+      assertLockOwned: () => {
+        if (lockLost) {
+          throw new Error("Catho state lock ownership was lost");
+        }
+      },
     });
   } finally {
-    releaseLock(lockPath);
+    clearInterval(heartbeat);
+    releaseLock(lockPath, lock.token);
   }
 }
 
@@ -287,6 +326,7 @@ interface RunOnceOptions {
   readonly statePath: string;
   readonly apiUrl: string;
   readonly apiKey: string;
+  readonly assertLockOwned: () => void;
 }
 
 /** The actual collect-and-ingest run, factored out of `main` so the lock
@@ -302,6 +342,7 @@ async function runOnce(options: RunOnceOptions): Promise<void> {
     statePath,
     apiUrl,
     apiKey,
+    assertLockOwned,
   } = options;
 
   let state: CathoState = loadState(statePath);
@@ -348,9 +389,11 @@ async function runOnce(options: RunOnceOptions): Promise<void> {
 
     try {
       for (let i = 0; i < toFetch.length; i++) {
+        assertLockOwned();
         if (i > 0) await sleep(requestIntervalMs);
         const candidate = toFetch[i]!;
         const signals = await loadCandidatePage(page, candidate);
+        assertLockOwned();
         const outcome = classifyPageResult({ ...signals, candidate });
         outcomeCounts[outcome.kind] += 1;
         state = applyPageOutcome(state, candidate.id, outcome);
@@ -360,6 +403,7 @@ async function runOnce(options: RunOnceOptions): Promise<void> {
         // page loads' worth of outcomes and payloads, not the entire
         // batch.
         if ((i + 1) % checkpointEvery === 0) {
+          assertLockOwned();
           saveStateAtomic(statePath, state);
         }
       }
@@ -378,17 +422,19 @@ async function runOnce(options: RunOnceOptions): Promise<void> {
     // `checkpointEvery` pages since the last one) is saved now, so a
     // crash or a failed ingest POST right after this never means
     // reopening a page that already succeeded (AC-001).
+    assertLockOwned();
     saveStateAtomic(statePath, state);
   } else {
     console.log("no new pages to fetch this run");
   }
 
   const pending = collectedPayloadsPendingIngest(state);
-  if (pending.length === 0) {
+  if (pending.length === 0 && !truncated) {
     console.log("nothing pending ingest, exiting");
     return;
   }
   console.log(`ingesting ${pending.length} payload(s) pending confirmation`);
+  assertLockOwned();
 
   const body = {
     source: "catho",
@@ -396,6 +442,9 @@ async function runOnce(options: RunOnceOptions): Promise<void> {
     truncated,
   };
   let response: Response;
+  let responsePreview: string;
+  const ingestController = new AbortController();
+  const ingestTimer = setTimeout(() => ingestController.abort(), 20_000);
   try {
     response = await fetch(`${apiUrl}/runs/collect/external`, {
       method: "POST",
@@ -404,7 +453,14 @@ async function runOnce(options: RunOnceOptions): Promise<void> {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify(body),
+      redirect: "error",
+      signal: ingestController.signal,
     });
+    responsePreview = await readResponseTextBounded(
+      response,
+      MAX_INGEST_RESPONSE_BYTES,
+      ingestController.signal,
+    );
   } catch (error) {
     // Network failure: the payloads stay "collected" in the already-saved
     // state file — nothing to undo, next run retries the ingest alone.
@@ -415,10 +471,12 @@ async function runOnce(options: RunOnceOptions): Promise<void> {
     console.error(`ERROR: ingest request failed: ${String(error)}`);
     process.exitCode = 1;
     return;
+  } finally {
+    clearTimeout(ingestTimer);
   }
 
   console.log(`ingest: HTTP ${response.status}`);
-  console.log((await response.text()).slice(0, 2000));
+  console.log(responsePreview.slice(0, 2000));
 
   if (!response.ok) {
     // Same as a network failure — 409 (RunLock busy), 429, 5xx, or any
@@ -432,6 +490,7 @@ async function runOnce(options: RunOnceOptions): Promise<void> {
     return;
   }
 
+  assertLockOwned();
   state = markIngested(
     state,
     pending.map((p) => p.id),

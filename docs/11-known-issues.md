@@ -304,13 +304,23 @@ single chat at roughly one message per second.
 > as an ADR-007 trade-off. `TelegramNotifier` now wraps every
 > `sendMessage` attempt in an `AbortController` timeout (`timeoutMs`,
 > default 20 s), the same pattern `GupyCollector`/`OpenRouterClient`
-> already use. AC-022's other ask — per-chunk resumable delivery so a
-> partial failure does not re-send already-delivered chunks — is **not**
-> addressed here: this entry's own 2026-08-17 resolution already named
-> that trade-off and kept it deliberately, since it is safe (never
-> silently drops a posting) even where it is occasionally redundant, and
-> building real per-chunk idempotency is a materially bigger change than
-> the timeout gap actually found.
+> already use.
+>
+> **Second follow-up, 2026-08-17 (ADR-048): AC-022's remaining delivery
+> gap is implemented.** Digest chunks now have durable operation/chunk
+> checkpoints keyed by destination and rendered-content hashes. A valid
+> Telegram success acknowledgement must contain `ok: true` and an integer
+> `message_id`; confirmed chunks survive restart and are skipped on retry.
+> Definite failures resume from the failed chunk. Ambiguous failures
+> (network/timeout/5xx/invalid acknowledgement, including a crash after send
+> before confirmation) stop in `uncertain`/`sending` and require the explicit
+> `argos reconcile-delivery` command to mark the chunk confirmed or authorize
+> a retry. This provides resumability without falsely promising exactly-once
+> delivery from an API that has no caller-supplied idempotency key. Restart,
+> lease takeover, manifest mismatch and partial retry are covered against a
+> real temporary SQLite database. A live ambiguous Telegram failure has not
+> been manufactured in production; short `sendText()` alerts remain outside
+> the durable digest path and are documented as such.
 
 ---
 
@@ -367,8 +377,9 @@ records both probes and the correction.
 
 ## B5 — Three hot-path inefficiencies, measured against a corpus that hasn't grown into them yet
 
-**Status:** open, deliberately not actioned · **Found:** 2026-08-17, a
-post-remediation audit (docs/audit AC-032)
+**Status:** bounded and optimized; production speedup not yet benchmarked ·
+**Found:** 2026-08-17, a post-remediation audit (docs/audit AC-032) ·
+**Implemented:** 2026-08-17 (ADR-050)
 
 Three separate spots do more work than they need to, none yet a real cost
 at this project's current corpus size:
@@ -392,23 +403,24 @@ at this project's current corpus size:
   select-then-write-then-select per posting, a mark-notified call per
   posting delivered.
 
-**Deliberately not fixed.** The audit's own recommendation for this
-finding is "measure real profiles before optimizing," not "optimize" —
-advice this project is taking literally rather than treating as a
-formality. A1/A3 (above) already track the actual bottleneck this
-project has real numbers for (Stage A/B's LLM round-trip latency at
-backlog scale) and are still waiting on a real cold-cache measurement of
-their own. Speculatively fixing these three without that data — especially
-the Stage B one, which would mean deciding whether `evaluatedAt` can
-safely move to once-per-call, a real behavior question ADR-013's own
-prompt-caching design already reasons carefully about — is exactly the
-premature optimization the audit is warning against, not what it is
-asking for.
+**Resolution, 2026-08-17.** The changes are semantic-preserving bounds and
+elimination of repeated work, not a claimed benchmark win:
 
-**Revisit when:** A1/A3 get their real backlog-scale measurement, or the
-corpus visibly grows into one of these specifically (a single employer
-posting hundreds of listings would make the dedup one worth measuring on
-its own, independent of A1/A3).
+- prompt templates are cached by resolved path and Stage B renders the
+  invariant evidence prefix once per posting; one `evaluatedAt` now owns the
+  profile hash, prompt, provenance checks and cache timestamps;
+- layer-2 comparison is capped at 500 recent in-window postings per candidate,
+  and `comparisonTruncatedCount` makes every activation of that cap visible;
+  layer 2 is shadow-only, so truncation cannot suppress a posting;
+- collection uses one transaction per query/batch and notification updates
+  delivered fingerprints together, while retaining the existing upsert and
+  write-once semantics.
+
+Regression tests prove output/order/cache and persistence behavior. No
+wall-clock or fsync benchmark has yet been run on the production corpus, so
+this entry does not claim a measured latency improvement. Revisit measurement
+when `comparisonTruncatedCount` becomes nonzero, collection volume grows, or
+A1/A3 receive their cold-cache backlog benchmark.
 
 ---
 

@@ -125,6 +125,25 @@ describe("PostingsRepository.upsert", () => {
     expect(repository.count()).toBe(2);
   });
 
+  it("upsertMany preserves insert and re-sighting semantics in one transaction", () => {
+    const firstSeenAt = new Date("2026-08-10T00:00:00Z");
+    const results = repository.upsertMany([
+      posting({ sourceId: "1", firstSeenAt, lastSeenAt: firstSeenAt }),
+      posting({
+        sourceId: "1",
+        firstSeenAt: new Date("2026-08-14T00:00:00Z"),
+        lastSeenAt: new Date("2026-08-14T00:00:00Z"),
+        workMode: "remote",
+      }),
+      posting({ sourceId: "2", title: "Estágio Frontend" }),
+    ]);
+
+    expect(results.map((result) => result.wasNew)).toEqual([true, false, true]);
+    expect(results[1]?.posting.firstSeenAt).toEqual(firstSeenAt);
+    expect(results[1]?.posting.workMode).toBe("remote");
+    expect(repository.count()).toBe(2);
+  });
+
   it("retains the raw payload across an upsert", () => {
     const result = repository.upsert(
       posting({ rawPayload: { id: 123, note: "original" } }),
@@ -274,6 +293,21 @@ describe("PostingsRepository.findUnnotified / markNotified", () => {
     const unnotified = repository.findUnnotified();
     expect(unnotified).toHaveLength(1);
     expect(unnotified[0]?.fingerprint).toBe(a.posting.fingerprint);
+  });
+
+  it("marks a delivered batch together and treats an empty batch as a no-op", () => {
+    const first = repository.upsert(posting({ sourceId: "1" })).posting;
+    const second = repository.upsert(
+      posting({ sourceId: "2", title: "Estágio Frontend" }),
+    ).posting;
+
+    repository.markNotifiedMany(
+      [first.fingerprint, second.fingerprint],
+      new Date("2026-08-17T12:00:00Z"),
+    );
+    repository.markNotifiedMany([], new Date());
+
+    expect(repository.findUnnotified()).toEqual([]);
   });
 });
 

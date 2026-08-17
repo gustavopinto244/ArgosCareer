@@ -13,6 +13,11 @@ export type { ScoreFailureReason };
  */
 export interface ExtractionMetadata {
   readonly inputTruncated: boolean;
+  readonly stageACacheHit: boolean;
+  readonly stageBCacheHit: boolean;
+  /** Model quotes rejected because they were fabricated or unrelated to the
+   * requirement. A coerced `not_met` must remain observable, not silent. */
+  readonly evidenceRejectedCount: number;
 }
 
 /**
@@ -53,5 +58,9 @@ export type ScoreResult =
  * `CollectorPort`, failure is a value (docs/05-domain-model.md).
  */
 export interface ScorerPort {
-  score(posting: Posting, profileHash: string): Promise<ScoreResult>;
+  score(
+    posting: Posting,
+    profileHash: string,
+    evaluatedAt?: Date,
+  ): Promise<ScoreResult>;
 }

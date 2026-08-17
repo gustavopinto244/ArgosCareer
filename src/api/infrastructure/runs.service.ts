@@ -92,8 +92,9 @@ export class RunsService {
    */
   private async enforceExpensiveOperationLimit(
     operation: string,
+    principalId: string,
   ): Promise<void> {
-    const key = `expensive-operation:${operation}`;
+    const key = `expensive-operation:${principalId}:${operation}`;
     const record = await this.throttlerStorage.increment(
       key,
       EXPENSIVE_THROTTLE.ttl,
@@ -155,8 +156,8 @@ export class RunsService {
    * 4-hourly tick is the most likely thing to collide with a manual call,
    * not another manual call racing itself.
    */
-  async collect(params: CollectParams) {
-    await this.enforceExpensiveOperationLimit("collect");
+  async collect(params: CollectParams, principalId = "internal") {
+    await this.enforceExpensiveOperationLimit("collect", principalId);
     // An empty body means "run the configured cycle", the same thing the
     // cron does; a body with any field set is a deliberate one-off query
     // and overrides the configuration rather than adding to it.
@@ -170,6 +171,7 @@ export class RunsService {
         () => new Date(),
         this.criteria.collection.queryIntervalMs,
         this.criteria.collection,
+        principalId,
       ),
     );
     if (!outcome.ok) {
@@ -179,9 +181,9 @@ export class RunsService {
   }
 
   /** Same guard as `collect` — see ADR-024. */
-  async dedup() {
+  async dedup(principalId = "internal") {
     const outcome = await runExclusive(this.runLock, "dedup", () =>
-      Promise.resolve(executeDedup(this.db)),
+      Promise.resolve(executeDedup(this.db, undefined, undefined, principalId)),
     );
     if (!outcome.ok) {
       throw new ConflictException("dedup is already running");
@@ -203,8 +205,8 @@ export class RunsService {
    * send two overlapping digests to Telegram before either marks anything
    * notified.
    */
-  async deliver() {
-    await this.enforceExpensiveOperationLimit("deliver");
+  async deliver(principalId = "internal") {
+    await this.enforceExpensiveOperationLimit("deliver", principalId);
     const built = buildScorer(this.db, this.criteria, this.profile);
     if (!built.ok) {
       throw new BadRequestException(`Misconfigured scorer: ${built.error}`);
@@ -217,6 +219,10 @@ export class RunsService {
         this.criteria,
         this.profile,
         built.getUsage,
+        undefined,
+        undefined,
+        undefined,
+        principalId,
       ),
     );
     if (!outcome.ok) {
@@ -241,15 +247,16 @@ export class RunsService {
     source: string,
     postings: readonly ExternalRawPosting[],
     truncated: boolean = false,
+    principalId = "internal",
   ) {
-    await this.enforceExpensiveOperationLimit("ingestExternal");
+    await this.enforceExpensiveOperationLimit("ingestExternal", principalId);
     const normalize = normalizerFor(source);
     if (!normalize) {
       throw new BadRequestException(
         `No normalizer registered for source "${source}"`,
       );
     }
-    if (postings.length === 0) {
+    if (postings.length === 0 && !truncated) {
       throw new BadRequestException("'postings' must not be empty");
     }
 
@@ -261,6 +268,7 @@ export class RunsService {
         postings,
         undefined,
         truncated,
+        principalId,
       ),
     );
     if (!outcome.ok) {

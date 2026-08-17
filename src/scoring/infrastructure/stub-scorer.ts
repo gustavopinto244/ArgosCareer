@@ -24,7 +24,11 @@ import { buildScoringConfig } from "./scoring-config";
 export class StubScorer implements ScorerPort {
   constructor(private readonly criteria: Criteria) {}
 
-  async score(posting: Posting, _profileHash: string): Promise<ScoreResult> {
+  async score(
+    posting: Posting,
+    _profileHash: string,
+    _evaluatedAt?: Date,
+  ): Promise<ScoreResult> {
     const tracks = classifyTrack(
       posting.title,
       this.criteria.tracks,
@@ -38,6 +42,9 @@ export class StubScorer implements ScorerPort {
       ...EMPTY_RECOMMENDATION,
       // Never calls Stage A -- there is no input to have truncated.
       inputTruncated: false,
+      stageACacheHit: false,
+      stageBCacheHit: false,
+      evidenceRejectedCount: 0,
     });
   }
 }

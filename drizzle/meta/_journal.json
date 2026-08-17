@@ -155,6 +155,20 @@
       "when": 1786984155670,
       "tag": "0021_mute_amphibian",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1786989456267,
+      "tag": "0022_confused_madelyne_pryor",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1786990650283,
+      "tag": "0023_fancy_celestials",
+      "breakpoints": true
     }
   ]
 }
