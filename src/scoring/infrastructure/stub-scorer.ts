@@ -32,6 +32,12 @@ export class StubScorer implements ScorerPort {
     );
     const outcome = computeScore([], tracks, buildScoringConfig(this.criteria));
 
-    return Promise.resolve({ ok: true, ...outcome, ...EMPTY_RECOMMENDATION });
+    return Promise.resolve({
+      ok: true,
+      ...outcome,
+      ...EMPTY_RECOMMENDATION,
+      // Never calls Stage A -- there is no input to have truncated.
+      inputTruncated: false,
+    });
   }
 }

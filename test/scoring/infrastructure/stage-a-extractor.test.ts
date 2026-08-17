@@ -10,7 +10,11 @@ import {
 } from "../../../src/persistence/infrastructure/db";
 import { ExtractionsRepository } from "../../../src/persistence/infrastructure/extractions-repository";
 import { hashExtractionInput } from "../../../src/scoring/domain/extraction-input-hash";
-import { StageAExtractor } from "../../../src/scoring/infrastructure/stage-a-extractor";
+import {
+  DEFAULT_MAX_DESCRIPTION_CHARS,
+  MAX_REQUIREMENT_TEXT_CHARS,
+  StageAExtractor,
+} from "../../../src/scoring/infrastructure/stage-a-extractor";
 
 let dir: string;
 let db: Db;
@@ -74,6 +78,7 @@ describe("StageAExtractor.extract", () => {
       ],
       seniority: "internship",
       experienceYears: null,
+      inputTruncated: false,
     });
     expect(ask).toHaveBeenCalledTimes(1);
     expect(
@@ -130,6 +135,7 @@ describe("StageAExtractor.extract", () => {
       ],
       seniority: "trainee",
       experienceYears: 1,
+      inputTruncated: false,
     });
     expect(ask).not.toHaveBeenCalled();
   });
@@ -164,6 +170,7 @@ describe("StageAExtractor.extract", () => {
       requirements: [],
       seniority: null,
       experienceYears: null,
+      inputTruncated: false,
     });
   });
 
@@ -272,6 +279,151 @@ describe("StageAExtractor.extract", () => {
     await extractorB.extract(posting(), () => NOW);
     expect(ask).toHaveBeenCalledTimes(2);
   });
+
+  describe("docs/audit AC-017 — bounded and sanitized input", () => {
+    it("strips HTML markup from title and description before they reach the prompt or the cache key", async () => {
+      let prompt = "";
+      const ask = vi.fn(async (p: string) => {
+        prompt = p;
+        return JSON.stringify({
+          requirements: [],
+          seniority: null,
+          experienceYears: null,
+        });
+      });
+      const extractor = new StageAExtractor(ask, extractionsRepo);
+      const richPosting = {
+        ...posting(),
+        description:
+          "<p>Buscamos <strong>estagiário</strong></p><ul><li>Node.js</li></ul>",
+      };
+
+      await extractor.extract(richPosting, () => NOW);
+
+      expect(prompt).not.toContain("<p>");
+      expect(prompt).not.toContain("<strong>");
+      expect(prompt).toContain("estagiário");
+      expect(prompt).toContain("- Node.js");
+
+      // The cache row must be addressable by the same normalized-text hash
+      // a plain-text posting with equivalent content would produce -- the
+      // markup itself must not become part of the cache identity.
+      const plainTextEquivalent = "Buscamos estagiário\n\n- Node.js";
+      expect(
+        extractionsRepo.find(
+          richPosting.fingerprint,
+          "a-v3",
+          "unknown",
+          hashExtractionInput(richPosting.title, plainTextEquivalent),
+        ),
+      ).not.toBeNull();
+    });
+
+    it("truncates an oversized description, flags inputTruncated, and hashes/prompts the truncated text", async () => {
+      let prompt = "";
+      const ask = vi.fn(async (p: string) => {
+        prompt = p;
+        return JSON.stringify({
+          requirements: [],
+          seniority: null,
+          experienceYears: null,
+        });
+      });
+      // A tiny budget makes the boundary reachable without a 12,000-char
+      // fixture -- `maxDescriptionChars` is a constructor parameter
+      // precisely so this is testable without the production default.
+      const extractor = new StageAExtractor(
+        ask,
+        extractionsRepo,
+        "a-v3",
+        "unknown",
+        20,
+      );
+      const longPosting = {
+        ...posting(),
+        description: "Requisito um. Requisito dois. Requisito três longo.",
+      };
+
+      const result = await extractor.extract(longPosting, () => NOW);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.inputTruncated).toBe(true);
+      expect(prompt).not.toContain("três longo");
+    });
+
+    it("does not flag inputTruncated when the description fits the budget", async () => {
+      const ask = vi.fn(async () =>
+        JSON.stringify({
+          requirements: [],
+          seniority: null,
+          experienceYears: null,
+        }),
+      );
+      const extractor = new StageAExtractor(ask, extractionsRepo);
+
+      const result = await extractor.extract(posting(), () => NOW);
+
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.inputTruncated).toBe(false);
+    });
+
+    it("rejects an extraction with more requirements than the configured ceiling", async () => {
+      const requirement = {
+        text: "Node.js",
+        category: "language",
+        weight: "mandatory",
+      };
+      const ask = vi.fn(async () =>
+        JSON.stringify({
+          requirements: Array.from({ length: 3 }, () => requirement),
+          seniority: null,
+          experienceYears: null,
+        }),
+      );
+      // A ceiling of 2 makes the 3-element response above over budget.
+      const extractor = new StageAExtractor(
+        ask,
+        extractionsRepo,
+        "a-v3",
+        "unknown",
+        DEFAULT_MAX_DESCRIPTION_CHARS,
+        2,
+      );
+
+      const result = await extractor.extract(posting(), () => NOW);
+
+      expect(result).toEqual({
+        ok: false,
+        reason: "extraction_failed",
+        attempts: 3,
+      });
+    });
+
+    it("rejects a requirement whose text exceeds the per-field length bound", async () => {
+      const ask = vi.fn(async () =>
+        JSON.stringify({
+          requirements: [
+            {
+              text: "x".repeat(MAX_REQUIREMENT_TEXT_CHARS + 1),
+              category: "language",
+              weight: "mandatory",
+            },
+          ],
+          seniority: null,
+          experienceYears: null,
+        }),
+      );
+      const extractor = new StageAExtractor(ask, extractionsRepo);
+
+      const result = await extractor.extract(posting(), () => NOW);
+
+      expect(result).toEqual({
+        ok: false,
+        reason: "extraction_failed",
+        attempts: 3,
+      });
+    });
+  });
 });
 
 /**
@@ -309,6 +461,7 @@ describe("StageAExtractor.extract — posting with no description", () => {
       requirements: [],
       seniority: null,
       experienceYears: null,
+      inputTruncated: false,
     });
   });
 

@@ -76,6 +76,11 @@ export class ApiScorer implements ScorerPort {
       matching.matches,
       this.profile,
     );
-    return { ok: true, ...outcome, ...recommendation };
+    return {
+      ok: true,
+      ...outcome,
+      ...recommendation,
+      inputTruncated: extraction.inputTruncated,
+    };
   }
 }
