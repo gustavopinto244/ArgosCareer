@@ -55,6 +55,7 @@ import {
   applyPageOutcome,
   classifyPageResult,
   collectedPayloadsPendingIngest,
+  isAllowedCathoUrl,
   loadState,
   markIngested,
   needsPageFetch,
@@ -115,8 +116,15 @@ function extractLocs(xml: string): string[] {
  * A candidate's stable ID is the numeric segment at the end of its sitemap
  * URL (`/vagas/<slug>/<id>/`) — independent of Catho's own internal "offer"
  * ID scheme, which the page never exposes to a plain sitemap read.
+ *
+ * `isAllowedCathoUrl` runs first, before the path regex even matters
+ * (docs/audit AC-034): the sitemap is an external, unauthenticated source,
+ * and a compromised or malformed `<loc>` entry pointing anywhere other than
+ * `https://www.catho.com.br` must never reach `page.goto` — a real SSRF
+ * shape from the browser's network position, not a hypothetical one.
  */
 function toCandidate(url: string): SitemapCandidate | null {
+  if (!isAllowedCathoUrl(url)) return null;
   const match = /\/vagas\/[^/]+\/(\d+)\/?$/.exec(url);
   return match ? { id: match[1]!, url } : null;
 }
@@ -137,7 +145,13 @@ async function discoverCandidates(
     for (const url of urls) {
       if (!titlePattern.test(url)) continue;
       const candidate = toCandidate(url);
-      if (candidate) candidates.push(candidate);
+      if (candidate) {
+        candidates.push(candidate);
+      } else if (!isAllowedCathoUrl(url)) {
+        // Never opened (AC-034) -- logged so a compromised/malformed
+        // sitemap entry is visible in run output, not silently dropped.
+        console.warn(`rejected candidate URL (disallowed host): ${url}`);
+      }
     }
     console.log(`${sitemapUrl}: ${urls.length} urls scanned`);
   }

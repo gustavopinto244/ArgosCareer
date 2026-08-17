@@ -8,6 +8,7 @@ import {
   classifyPageResult,
   collectedPayloadsPendingIngest,
   emptyState,
+  isAllowedCathoUrl,
   loadState,
   markIngested,
   needsPageFetch,
@@ -20,6 +21,40 @@ const CANDIDATE = {
   url: "https://www.catho.com.br/vagas/estagio-x/37070531/",
 };
 const JOB_POSTING = { title: "Estágio X" };
+
+describe("isAllowedCathoUrl (AC-034 — SSRF-shaped sitemap candidate)", () => {
+  it("accepts a real Catho posting URL", () => {
+    expect(isAllowedCathoUrl(CANDIDATE.url)).toBe(true);
+  });
+
+  it("rejects a private/local IP address", () => {
+    expect(isAllowedCathoUrl("http://127.0.0.1/vagas/estagio-x/1/")).toBe(
+      false,
+    );
+  });
+
+  it("rejects an external host with a Catho-shaped path", () => {
+    expect(
+      isAllowedCathoUrl("https://evil.example.com/vagas/estagio-x/1/"),
+    ).toBe(false);
+  });
+
+  it("rejects a Catho lookalike subdomain", () => {
+    expect(
+      isAllowedCathoUrl("https://www.catho.com.br.evil.com/vagas/x/1/"),
+    ).toBe(false);
+  });
+
+  it("rejects plain http even on the real host", () => {
+    expect(
+      isAllowedCathoUrl("http://www.catho.com.br/vagas/estagio-x/1/"),
+    ).toBe(false);
+  });
+
+  it("rejects an unparseable URL rather than throwing", () => {
+    expect(isAllowedCathoUrl("not a url")).toBe(false);
+  });
+});
 
 describe("classifyPageResult (AC-002 — retryable vs. expired)", () => {
   it("classifies a real posting page as collected", () => {
@@ -97,6 +132,20 @@ describe("classifyPageResult (AC-002 — retryable vs. expired)", () => {
       candidate: CANDIDATE,
     });
     expect(outcome).toEqual({ kind: "retryable", reason: "no response" });
+  });
+
+  it("classifies a 2xx that redirected off catho.com.br as retryable, not collected (docs/audit AC-034)", () => {
+    const outcome = classifyPageResult({
+      httpStatus: 200,
+      finalUrl: "https://evil.example.com/vagas/estagio-x/37070531/",
+      jsonLd: JOB_POSTING,
+      pageTitle: "Vaga de Emprego de Estágio X, Rio de Janeiro /",
+      candidate: CANDIDATE,
+    });
+    expect(outcome).toEqual({
+      kind: "retryable",
+      reason: "final URL host not allowed",
+    });
   });
 
   it("classifies a 2xx on the real posting URL with missing JSON-LD as retryable, not expired", () => {
