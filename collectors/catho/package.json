@@ -1,0 +1,15 @@
+{
+  "name": "argos-catho-collector",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Ephemeral, host-side Catho collector (ADR-032) — never part of argos-career's own container.",
+  "scripts": {
+    "start": "tsx collect.ts"
+  },
+  "dependencies": {
+    "playwright": "1.62.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.12"
+  }
+}

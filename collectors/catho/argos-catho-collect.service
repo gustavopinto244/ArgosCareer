@@ -1,0 +1,17 @@
+[Unit]
+Description=Collect Catho postings via Playwright and ingest into argos-career
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/apps/argos-career/app/collectors/catho/.env
+ExecStart=/usr/bin/docker run --rm \
+  -v %h/apps/argos-career/app/collectors/catho/data:/data \
+  -e MAX_PAGES_PER_RUN \
+  -e REQUEST_INTERVAL_MS \
+  -e TITLE_PATTERN \
+  -e SEEN_IDS_PATH \
+  -e ARGOS_API_URL \
+  -e ARGOS_API_KEY \
+  argos-catho-collector:local

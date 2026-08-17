@@ -174,11 +174,12 @@ Reasoning and thresholds: ADR-010 and its amendment.
 business they are.** Worth reasoning about before building cross-source dedup
 for a pair that will never need it.
 
-| Kind                            | How a posting gets there                                             | Overlap with other kinds                                     |
-| ------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------ |
-| **ATS** (Gupy, Sólides)         | The employer publishes on its own careers page, which the ATS powers | Low — the posting lives at the employer                      |
-| **Agency** (CIEE)               | The employer delegates hiring; candidates apply _through_ the agency | Low — a vacancy takes one route or the other, not both       |
-| **Aggregator** (Jooble, Adzuna) | Scraped or fed from other boards, including the two above            | **High by construction** — its whole product is republishing |
+| Kind                            | How a posting gets there                                                                                             | Overlap with other kinds                                                                                                                                                                                      |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **ATS** (Gupy, Sólides)         | The employer publishes on its own careers page, which the ATS powers                                                 | Low — the posting lives at the employer                                                                                                                                                                       |
+| **Agency** (CIEE)               | The employer delegates hiring; candidates apply _through_ the agency                                                 | Low — a vacancy takes one route or the other, not both                                                                                                                                                        |
+| **Aggregator** (Jooble, Adzuna) | Scraped or fed from other boards, including the two above                                                            | **High by construction** — its whole product is republishing                                                                                                                                                  |
+| **Job board** (Catho)           | The employer posts directly to Catho's own audience, not syndicated from elsewhere and not the employer's own domain | **Unmeasured, plausibly non-zero** — a company might run its own Gupy/Sólides careers page and separately pay to cross-post the same role on a job board for more reach, unlike the ATS-vs-agency split above |
 
 Measured on the real corpus, 2026-08-16, with 386 distinct Gupy employers and
 1,552 distinct CIEE employers: **zero** companies in common. The only name
@@ -523,6 +524,45 @@ undefined route, not a robots-specific block: this host serves only the one
 JSON endpoint above, nothing to crawl and nothing declared.** Separately,
 `vagas.solides.com.br` (the page the API sits behind, never queried by this
 collector) has an open `robots.txt` (`Allow: /`).
+
+## Verified: the Catho posting shape (ADR-032)
+
+No public API — `catho.com.br`'s `robots.txt` disallows only its search
+path (`/buscar/vagas/`); individual posting pages
+(`/vagas/<slug>/<id>/`) are not disallowed but return a plain `403` to a
+non-browser `User-Agent`, `200` to a real one. `collectors/catho/collect.ts`
+opens each candidate with a real headless Chromium (Playwright) — an honest
+User-Agent, not a forgery, since it genuinely is what it claims to be
+(ADR-020, ADR-032).
+
+Candidate discovery is sitemap-only: `sitemap-index.xml` lists 5 fresh
+`sitemap2/sitemap_vagas_N.xml` files, **205,362 URLs nationwide** measured
+2026-08-17, filtered by a title-keyword regex on the URL slug (no
+server-side search reaches this project — that endpoint is exactly what
+`robots.txt` disallows). Extrapolated from one sitemap file's real count:
+**~6,800 title-matched candidates nationwide.** Every `<lastmod>` in a given
+sitemap file was identical — the file's generation date, not a per-posting
+signal, so no date-based narrowing is possible either (same shape as
+CIEE's undated backlog, `docs/11` B1).
+
+Once a page is open, extraction reads its `application/ld+json`
+`schema.org/JobPosting` markup — `title`, `description`, `datePosted`,
+`hiringOrganization.name`, `jobLocation`, `baseSalary`. **One field is
+wrong, confirmed on 2 real samples:**
+`jobLocation[].address.addressLocality` read `"São Paulo"` for postings
+actually in Paulínia and Santos — contradicted by each posting's own
+correct postal code and by three independent page surfaces (`<title>`,
+`og:title`, meta description) that agreed with each other and with the
+real city. `catho-normalizer.ts` parses the city from the page `<title>`
+instead (`"Vaga de Emprego de {title}, {city} /"`), never from
+`addressLocality`.
+
+Full schema: `src/posting/infrastructure/catho-schema.ts`. No curated
+fixture exists for Catho, unlike every other source — the payload is
+captured live per run by a real browser, not a static API response a
+`fixture:*` script can snapshot; the schema and normalizer were instead
+fitted directly against real pages inspected manually during discovery
+(2 samples), recorded in ADR-032.
 
 ## Unverified assumptions
 

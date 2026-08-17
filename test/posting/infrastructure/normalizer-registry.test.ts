@@ -41,6 +41,7 @@ describe("normalizerFor", () => {
 
   it("lists what this build can normalize", () => {
     expect(registeredSources()).toEqual([
+      "catho",
       "ciee",
       "gupy",
       "indeed",

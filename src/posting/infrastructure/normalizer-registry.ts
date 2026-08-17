@@ -1,5 +1,6 @@
 import { Posting } from "../domain/posting";
 import { RawPosting } from "../domain/raw-posting";
+import { normalizeCathoJob } from "./catho-normalizer";
 import { normalizeCieeVaga } from "./ciee-normalizer";
 import { normalizeGupyJob } from "./gupy-normalizer";
 import { normalizeIndeedJob } from "./indeed-normalizer";
@@ -39,6 +40,7 @@ const NORMALIZERS: ReadonlyMap<string, Normalizer> = new Map([
   ["indeed", normalizeIndeedJob],
   ["linkedin", normalizeLinkedinAlertJob],
   ["solides", normalizeSolidesJob],
+  ["catho", normalizeCathoJob],
 ]);
 
 /**
