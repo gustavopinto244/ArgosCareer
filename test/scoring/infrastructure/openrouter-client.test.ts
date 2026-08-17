@@ -327,6 +327,7 @@ describe("OpenRouterClient.complete — HTTP status taxonomy (docs/audit AC-016)
   it.each([
     [401, "authError"],
     [403, "authError"],
+    [408, "timeout"],
     [429, "rateLimited"],
     [400, "configError"],
     [404, "configError"],
@@ -498,5 +499,83 @@ describe("OpenRouterClient.complete — circuit breaker (docs/audit AC-016)", ()
     // Still closed -- every failure reached fetch, none were blocked.
     expect(fetchImpl).toHaveBeenCalledTimes(3);
     expect(c.getUsage().blockedByCircuit).toBe(0);
+  });
+
+  it("does not open the breaker on repeated content-local failures (invalidOutput, docs/audit PR-009)", async () => {
+    // Five content-filtered/empty-choices responses across five different
+    // postings say nothing about whether the provider itself is up -- the
+    // real-world scenario PR-009 names: before this, exactly this pattern
+    // tripped the shared breaker and blocked every other posting's calls.
+    const fetchImpl = vi.fn(async () => jsonResponse({ choices: [] }));
+    const clock = 0;
+    const breaker = new CircuitBreaker({
+      failureThreshold: 2,
+      cooldownMs: 10_000,
+      now: () => clock,
+    });
+    const c = new OpenRouterClient({
+      apiKey: "k",
+      model: "m",
+      fetchImpl,
+      circuitBreaker: breaker,
+    });
+
+    await expect(c.complete("p1")).rejects.toThrow();
+    await expect(c.complete("p2")).rejects.toThrow();
+    await expect(c.complete("p3")).rejects.toThrow();
+
+    // Still closed -- an unrelated posting's call must not be blocked.
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(c.getUsage().blockedByCircuit).toBe(0);
+  });
+
+  it("does not open the breaker on repeated content-local failures (invalidEnvelope)", async () => {
+    const fetchImpl = vi.fn(
+      async () => new Response("not json", { status: 200 }),
+    );
+    const clock = 0;
+    const breaker = new CircuitBreaker({
+      failureThreshold: 2,
+      cooldownMs: 10_000,
+      now: () => clock,
+    });
+    const c = new OpenRouterClient({
+      apiKey: "k",
+      model: "m",
+      fetchImpl,
+      circuitBreaker: breaker,
+    });
+
+    await expect(c.complete("p1")).rejects.toThrow();
+    await expect(c.complete("p2")).rejects.toThrow();
+    await expect(c.complete("p3")).rejects.toThrow();
+
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(c.getUsage().blockedByCircuit).toBe(0);
+  });
+
+  it("still opens the breaker on repeated transport-level failures (serverError)", async () => {
+    // The other half of PR-009's distinction: a real 5xx run IS evidence
+    // the provider is degraded, and must still trip the breaker.
+    const fetchImpl = vi.fn(async () => new Response("boom", { status: 500 }));
+    const clock = 0;
+    const breaker = new CircuitBreaker({
+      failureThreshold: 2,
+      cooldownMs: 10_000,
+      now: () => clock,
+    });
+    const c = new OpenRouterClient({
+      apiKey: "k",
+      model: "m",
+      fetchImpl,
+      circuitBreaker: breaker,
+    });
+
+    await expect(c.complete("p1")).rejects.toThrow();
+    await expect(c.complete("p2")).rejects.toThrow();
+
+    const error = await c.complete("p3").catch((e: unknown) => e);
+    expect((error as LlmTransportError).category).toBe("circuitOpen");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 });

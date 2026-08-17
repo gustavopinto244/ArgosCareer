@@ -1395,6 +1395,7 @@ describe("executeDeliver", () => {
         ok: false,
         reason: "extraction_failed",
         attempts: 3,
+        permanent: false,
       }),
     };
     const { notifier, digests } = recordingNotifier();
@@ -1447,6 +1448,7 @@ describe("executeDeliver", () => {
           ok: false,
           reason: "extraction_failed",
           attempts: 3,
+          permanent: false,
         }),
       };
     }
@@ -1569,6 +1571,97 @@ describe("executeDeliver", () => {
         "max_retries_exceeded",
       );
       expect(postingsRepo.findUnnotified()).toHaveLength(0);
+    });
+  });
+
+  describe("docs/audit PR-007 — a permanent transport failure stops the batch", () => {
+    it("stops scoring the rest of the run after one permanent failure, leaving the others untouched", async () => {
+      const collector = stubCollector({
+        source: "gupy",
+        collectedAt: new Date(),
+        postings: [1, 2, 3].map((n) => ({
+          source: "gupy",
+          sourceId: String(n),
+          payload: gupyPayload(n, `Estágio em Backend ${n}`, `Empresa ${n}`),
+        })),
+      });
+      await executeCollect(db, () => collector, [{}], undefined, 0);
+
+      const criteria = deliverCriteria();
+      // Every posting would fail identically -- a revoked API key, not a
+      // content-specific problem -- so the second and third calls this
+      // scorer would otherwise receive are exactly the "known-doomed
+      // requests" PR-007 says must not happen.
+      const scoreCalls: string[] = [];
+      const permanentlyFailingScorer: ScorerPort = {
+        score: async (posting) => {
+          scoreCalls.push(posting.fingerprint);
+          return {
+            ok: false,
+            reason: "extraction_failed",
+            attempts: 1,
+            permanent: true,
+          };
+        },
+      };
+      const { notifier, digests } = recordingNotifier();
+
+      const outcome = await executeDeliver(
+        db,
+        permanentlyFailingScorer,
+        notifier,
+        criteria,
+        deliverProfile(),
+      );
+
+      expect(scoreCalls).toHaveLength(1);
+      expect(outcome.filtered).toBe(3);
+      expect(outcome.scored).toBe(0);
+      expect(digests[0]?.review).toHaveLength(1);
+
+      // The two postings never reached are simply untouched -- still
+      // candidates for the next run once the config problem is fixed.
+      const postingsRepo = new PostingsRepository(db);
+      expect(postingsRepo.findUnnotified()).toHaveLength(3);
+    });
+
+    it("keeps scoring normally when a failure is not permanent", async () => {
+      const collector = stubCollector({
+        source: "gupy",
+        collectedAt: new Date(),
+        postings: [1, 2].map((n) => ({
+          source: "gupy",
+          sourceId: String(n),
+          payload: gupyPayload(n, `Estágio em Backend ${n}`, `Empresa ${n}`),
+        })),
+      });
+      await executeCollect(db, () => collector, [{}], undefined, 0);
+
+      const criteria = deliverCriteria();
+      const scoreCalls: string[] = [];
+      const transientlyFailingScorer: ScorerPort = {
+        score: async (posting) => {
+          scoreCalls.push(posting.fingerprint);
+          return {
+            ok: false,
+            reason: "extraction_failed",
+            attempts: 3,
+            permanent: false,
+          };
+        },
+      };
+      const { notifier } = recordingNotifier();
+
+      const outcome = await executeDeliver(
+        db,
+        transientlyFailingScorer,
+        notifier,
+        criteria,
+        deliverProfile(),
+      );
+
+      expect(scoreCalls).toHaveLength(2);
+      expect(outcome.filtered).toBe(2);
     });
   });
 

@@ -108,6 +108,49 @@ describe("CircuitBreaker", () => {
     expect(() => breaker.beforeCall()).not.toThrow();
   });
 
+  it("blocks a second concurrent caller while the half-open trial is still in flight (docs/audit PR-008)", () => {
+    let clock = 0;
+    const breaker = new CircuitBreaker({
+      failureThreshold: 1,
+      cooldownMs: 10_000,
+      now: () => clock,
+    });
+
+    breaker.onFailure(true);
+    clock = 10_000;
+
+    // The first caller past cooldown is the trial — it passes.
+    expect(() => breaker.beforeCall()).not.toThrow();
+    expect(breaker.getState()).toBe("half_open");
+
+    // A second, concurrent caller (another Stage B worker waking from the
+    // same Retry-After, ADR-022) must not also be treated as a trial —
+    // exactly the bug PR-008 found: the original check only looked at
+    // "not open", which half_open already satisfies.
+    expect(() => breaker.beforeCall()).toThrow(CircuitBreakerOpenError);
+    expect(() => breaker.beforeCall()).toThrow(CircuitBreakerOpenError);
+    expect(breaker.getState()).toBe("half_open");
+  });
+
+  it("allows a new trial once the in-flight one resolves with success", () => {
+    let clock = 0;
+    const breaker = new CircuitBreaker({
+      failureThreshold: 1,
+      cooldownMs: 10_000,
+      now: () => clock,
+    });
+
+    breaker.onFailure(true);
+    clock = 10_000;
+    breaker.beforeCall(); // the trial
+    expect(() => breaker.beforeCall()).toThrow(CircuitBreakerOpenError);
+
+    breaker.onSuccess();
+
+    expect(breaker.getState()).toBe("closed");
+    expect(() => breaker.beforeCall()).not.toThrow();
+  });
+
   it("a failed trial call reopens the breaker and restarts the cooldown", () => {
     let clock = 0;
     const breaker = new CircuitBreaker({

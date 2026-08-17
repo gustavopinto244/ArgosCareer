@@ -14,6 +14,7 @@ import { PostingsRepository } from "../../../src/persistence/infrastructure/post
 import { Criteria } from "../../../src/prefilter/domain/criteria";
 import { Profile } from "../../../src/profile/domain/profile";
 import { ApiScorer } from "../../../src/scoring/infrastructure/api-scorer";
+import { LlmTransportError } from "../../../src/scoring/infrastructure/openrouter-client";
 import { StageAExtractor } from "../../../src/scoring/infrastructure/stage-a-extractor";
 import { StageBMatcher } from "../../../src/scoring/infrastructure/stage-b-matcher";
 
@@ -182,6 +183,7 @@ describe("ApiScorer.score", () => {
       ok: false,
       reason: "extraction_failed",
       attempts: 3,
+      permanent: false,
     });
     expect(matchSpy).not.toHaveBeenCalled();
     matchSpy.mockRestore();
@@ -200,6 +202,42 @@ describe("ApiScorer.score", () => {
       ok: false,
       reason: "matching_failed",
       attempts: 3,
+      permanent: false,
+    });
+  });
+
+  it("marks extraction failure permanent when the underlying cause is a permanent transport error (docs/audit PR-007)", async () => {
+    const ask = vi.fn(async () => {
+      throw new LlmTransportError("revoked key", "authError");
+    });
+
+    const scorer = buildScorer(ask);
+    const result = await scorer.score(posting(), "profile-hash-1");
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "extraction_failed",
+      attempts: 1,
+      permanent: true,
+    });
+  });
+
+  it("marks matching failure permanent when the underlying cause is a permanent transport error", async () => {
+    const ask = vi
+      .fn()
+      .mockResolvedValueOnce(extractionResponse())
+      .mockImplementation(async () => {
+        throw new LlmTransportError("unsupported model", "configError");
+      });
+
+    const scorer = buildScorer(ask);
+    const result = await scorer.score(posting(), "profile-hash-1");
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "matching_failed",
+      attempts: 1,
+      permanent: true,
     });
   });
 

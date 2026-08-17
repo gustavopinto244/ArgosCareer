@@ -42,6 +42,7 @@ export class ApiScorer implements ScorerPort {
         ok: false,
         reason: extraction.reason,
         attempts: extraction.attempts,
+        permanent: extraction.permanent,
       };
     }
 
@@ -64,6 +65,7 @@ export class ApiScorer implements ScorerPort {
         ok: false,
         reason: matching.reason,
         attempts: matching.attempts,
+        permanent: matching.permanent,
       };
     }
 

@@ -11,6 +11,7 @@ import { MatchesRepository } from "../../../src/persistence/infrastructure/match
 import { Profile } from "../../../src/profile/domain/profile";
 import { hashRequirements } from "../../../src/scoring/domain/requirements-hash";
 import { Requirement } from "../../../src/scoring/domain/types";
+import { LlmTransportError } from "../../../src/scoring/infrastructure/openrouter-client";
 import { StageBMatcher } from "../../../src/scoring/infrastructure/stage-b-matcher";
 
 let dir: string;
@@ -397,6 +398,7 @@ describe("StageBMatcher.match — failure, never throws", () => {
       ok: false,
       reason: "matching_failed",
       attempts: 3,
+      permanent: false,
     });
     expect(
       matchesRepo.find("fp1", "hash1", "b-v3", "unknown", "any-hash"),
@@ -422,6 +424,28 @@ describe("StageBMatcher.match — failure, never throws", () => {
     expect(
       matchesRepo.find("fp1", "hash1", "b-v3", "unknown", "any-hash"),
     ).toBeNull();
+  });
+
+  it("marks the failure permanent when the underlying cause is a permanent transport error (docs/audit PR-007)", async () => {
+    const ask = vi.fn(async () => {
+      throw new LlmTransportError("revoked key", "authError");
+    });
+    const matcher = new StageBMatcher(ask, matchesRepo);
+
+    const result = await matcher.match(
+      "fp1",
+      [requirement()],
+      profile(),
+      "hash1",
+      () => NOW,
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "matching_failed",
+      attempts: 1,
+      permanent: true,
+    });
   });
 });
 

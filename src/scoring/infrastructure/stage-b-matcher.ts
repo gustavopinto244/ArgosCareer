@@ -27,12 +27,21 @@ export type MatchingResult =
       readonly ok: false;
       readonly reason: "matching_failed";
       readonly attempts: number;
+      /** docs/audit PR-007 — see `ExtractionResult`'s matching field for the
+       * full reasoning. True only when `parseModelOutputWithRetries`
+       * itself reported `permanent_error`, never for the local
+       * `buildStageBPrompt` template-read failure below. */
+      readonly permanent: boolean;
     };
 
 /** One requirement's answer, or the attempt count that failed to produce it. */
 type Answer =
   | { readonly ok: true; readonly match: Match }
-  | { readonly ok: false; readonly attempts: number };
+  | {
+      readonly ok: false;
+      readonly attempts: number;
+      readonly permanent: boolean;
+    };
 
 /**
  * Runs `task` over `items` with at most `limit` in flight, preserving input
@@ -143,7 +152,7 @@ export class StageBMatcher {
           evaluatedAt,
         );
       } catch {
-        return { ok: false, attempts: 0 };
+        return { ok: false, attempts: 0, permanent: false };
       }
 
       const result = await parseModelOutputWithRetries(
@@ -157,7 +166,13 @@ export class StageBMatcher {
           operationLabel: `stage-b:${fingerprint}:${sanitizeLogLabel(requirement.text)}`,
         },
       );
-      if (!result.ok) return { ok: false, attempts: result.attempts };
+      if (!result.ok) {
+        return {
+          ok: false,
+          attempts: result.attempts,
+          permanent: result.reason === "permanent_error",
+        };
+      }
 
       // Evidence provenance (docs/audit AC-008, SECURITY.md's claim that
       // "it cannot manufacture evidence that is not in the profile" —
@@ -201,6 +216,7 @@ export class StageBMatcher {
           ok: false,
           reason: "matching_failed",
           attempts: answer.attempts,
+          permanent: answer.permanent,
         };
       }
       matches.push(answer.match);
@@ -208,8 +224,17 @@ export class StageBMatcher {
 
     // A stopped run leaves fewer answers than requirements. Caching that
     // would poison the key, which covers the full requirement set (ADR-007).
+    // Not itself a permanent-transport failure -- the requirement(s) that
+    // stopped the run already reported that above; this branch only fires
+    // when every answer that came back was ok but the count still fell
+    // short (defensive, `runBounded`'s own invariant).
     if (matches.length !== requirements.length) {
-      return { ok: false, reason: "matching_failed", attempts: 0 };
+      return {
+        ok: false,
+        reason: "matching_failed",
+        attempts: 0,
+        permanent: false,
+      };
     }
 
     this.matchesRepo.upsert(

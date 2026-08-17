@@ -166,18 +166,53 @@ export function isTransientFailure(category: FailureCategory): boolean {
 }
 
 /**
+ * Whether a failure is evidence the *provider itself* is degraded — as
+ * opposed to evidence about one specific request or response (docs/audit
+ * PR-009). Deliberately a narrower set than `isTransientFailure`: a
+ * connection failure, a timeout, a rate limit, or a 5xx says something
+ * about the transport as a whole, which is exactly what
+ * `CircuitBreaker` — one shared instance protecting every concurrent Stage
+ * B worker (ADR-022) — needs to open on. A malformed envelope or an
+ * unexpected empty-`choices` response (`invalidEnvelope`/`invalidOutput`)
+ * is a fact about *that one response* — content filtering or a one-off
+ * hiccup for a specific prompt — and five of those in a row said nothing
+ * reliable about whether the next, unrelated posting's call would succeed.
+ * Before this distinction existed, both unconditionally called
+ * `onFailure(true)`, so five content-filtered answers across five
+ * unrelated postings could trip the shared breaker and block every other
+ * posting's calls for the full cooldown — the exact "systemic" failure the
+ * breaker is supposed to reserve itself for.
+ */
+const BREAKER_TRIPPING_CATEGORIES: ReadonlySet<FailureCategory> =
+  new Set<FailureCategory>([
+    "timeout",
+    "networkError",
+    "rateLimited",
+    "serverError",
+    "providerError",
+  ]);
+
+export function isBreakerTrippingFailure(category: FailureCategory): boolean {
+  return BREAKER_TRIPPING_CATEGORIES.has(category);
+}
+
+/**
  * 401/403 (bad or revoked credentials) and 429 get their own category each;
  * 502/503/504 are OpenRouter's own documented vocabulary for "the upstream
  * model provider is unavailable," distinct enough from a generic 500 to be
- * worth its own bucket; everything else non-2xx falls to `configError`
- * (permanent — a 4xx is almost always a malformed or unsupported request,
- * not something retrying fixes) or `serverError` (transient, the safe
- * default for an unclassified 5xx).
+ * worth its own bucket; 408 (Request Timeout) reuses the same category this
+ * client's own `AbortController` timeout uses — both mean "no timely
+ * response," and treating 408 as a permanent `configError` (docs/audit
+ * PR-009) meant a legitimately retryable status was never retried; anything
+ * else non-2xx falls to `configError` (permanent — a 4xx is almost always a
+ * malformed or unsupported request, not something retrying fixes) or
+ * `serverError` (transient, the safe default for an unclassified 5xx).
  */
 function classifyHttpStatus(
   status: number,
 ): Exclude<AttemptOutcome, "success"> {
   if (status === 401 || status === 403) return "authError";
+  if (status === 408) return "timeout";
   if (status === 429) return "rateLimited";
   if (status === 502 || status === 503 || status === 504)
     return "providerError";
@@ -372,7 +407,7 @@ export class OpenRouterClient {
       const category = controller.signal.aborted ? "timeout" : "networkError";
       this.attemptsByOutcome[category] += 1;
       this.attemptsWithoutUsage += 1;
-      this.circuitBreaker.onFailure(true);
+      this.circuitBreaker.onFailure(isBreakerTrippingFailure(category));
       throw new LlmTransportError((cause as Error).message, category, {
         cause,
       });
@@ -388,7 +423,7 @@ export class OpenRouterClient {
       const retryAfterMs = parseRetryAfterMs(
         response.headers.get("retry-after"),
       );
-      this.circuitBreaker.onFailure(isTransientFailure(category));
+      this.circuitBreaker.onFailure(isBreakerTrippingFailure(category));
       throw new LlmTransportError(
         `OpenRouter responded ${response.status}: ${body}`.trim(),
         category,
@@ -402,7 +437,11 @@ export class OpenRouterClient {
     } catch (cause) {
       this.attemptsByOutcome.invalidEnvelope += 1;
       this.attemptsWithoutUsage += 1;
-      this.circuitBreaker.onFailure(true);
+      // A content/response-shape problem, not evidence the provider is
+      // down (docs/audit PR-009) — see isBreakerTrippingFailure.
+      this.circuitBreaker.onFailure(
+        isBreakerTrippingFailure("invalidEnvelope"),
+      );
       throw new LlmTransportError(
         "Malformed OpenRouter response body",
         "invalidEnvelope",
@@ -431,7 +470,10 @@ export class OpenRouterClient {
     const firstChoice = parsed.success ? parsed.data.choices[0] : undefined;
     if (!firstChoice) {
       this.attemptsByOutcome.invalidOutput += 1;
-      this.circuitBreaker.onFailure(true);
+      // Same reasoning as invalidEnvelope above (docs/audit PR-009): a
+      // content-filtered or empty-choices response is a fact about this
+      // one call, not the provider as a whole.
+      this.circuitBreaker.onFailure(isBreakerTrippingFailure("invalidOutput"));
       throw new LlmTransportError(
         "Unexpected OpenRouter response shape",
         "invalidOutput",

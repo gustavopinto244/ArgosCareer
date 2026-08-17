@@ -64,9 +64,24 @@ export class CircuitBreaker {
    * exactly one trial call through (half-open) without resetting the
    * failure count, so a single lucky success does not immediately re-arm a
    * still-failing provider.
+   *
+   * The `half_open` branch is what makes "exactly one" true (docs/audit
+   * PR-008): the original version only checked `state !== "open"`, so the
+   * *first* caller past cooldown flipped the state to `half_open` and
+   * returned — but every other caller racing it (Stage B's concurrent
+   * workers, ADR-022, can all wake from the same `Retry-After` at once) saw
+   * that same non-`"open"` state and was let through too, recreating the
+   * exact retry storm this breaker exists to prevent. Blocking every caller
+   * that arrives while already `half_open` — not just while `open` — is
+   * what makes the trial actually singular: the state stays `half_open`
+   * until `onSuccess`/`onFailure` resolves it, and nothing else can pass
+   * through in between.
    */
   beforeCall(): void {
-    if (this.state !== "open") return;
+    if (this.state === "closed") return;
+    if (this.state === "half_open") {
+      throw new CircuitBreakerOpenError(this.cooldownMs);
+    }
     const elapsed = this.now() - this.openedAt;
     if (elapsed < this.cooldownMs) {
       throw new CircuitBreakerOpenError(this.cooldownMs - elapsed);

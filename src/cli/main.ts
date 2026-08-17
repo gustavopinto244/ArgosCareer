@@ -712,6 +712,15 @@ export async function executeDeliver(
             ...EMPTY_RECOMMENDATION,
           },
         });
+        // docs/audit PR-007: a permanent OpenRouter transport failure (a
+        // revoked API key, an unsupported model) is a fact about this
+        // run's configuration, not about this one posting -- every
+        // remaining posting in `filtered` would fail for the identical
+        // reason. Stopping here turns what used to be one doomed request
+        // per remaining posting into exactly one. Postings not yet reached
+        // are simply never scored this run; they stay unnotified and are
+        // reconsidered in full next run once the config problem is fixed.
+        if (result.permanent) break;
       }
     }
 
