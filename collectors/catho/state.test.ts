@@ -1,9 +1,16 @@
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+  readFileSync,
+  utimesSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   MAX_RETRYABLE_ATTEMPTS_BEFORE_QUARANTINE,
+  acquireLock,
   applyPageOutcome,
   classifyPageResult,
   collectedPayloadsPendingIngest,
@@ -12,6 +19,8 @@ import {
   loadState,
   markIngested,
   needsPageFetch,
+  releaseLock,
+  requeueQuarantined,
   saveStateAtomic,
   type CathoState,
 } from "./state";
@@ -228,7 +237,25 @@ describe("applyPageOutcome / needsPageFetch (AC-001/AC-002 state machine)", () =
     expect(state.entries[CANDIDATE.id]).toEqual({
       state: "quarantined",
       failCount: MAX_RETRYABLE_ATTEMPTS_BEFORE_QUARANTINE,
+      reason: "HTTP 403",
     });
+  });
+
+  it("carries the most recent failure's own reason, not just that it failed (docs/audit PR-011)", () => {
+    let state: CathoState = emptyState();
+    state = applyPageOutcome(state, CANDIDATE.id, {
+      kind: "retryable",
+      reason: "HTTP 403",
+    });
+    expect(state.entries[CANDIDATE.id]?.reason).toBe("HTTP 403");
+
+    state = applyPageOutcome(state, CANDIDATE.id, {
+      kind: "retryable",
+      reason: "no response",
+    });
+    // Overwritten, not accumulated -- this is "why did the most recent
+    // attempt fail," not a full history.
+    expect(state.entries[CANDIDATE.id]?.reason).toBe("no response");
   });
 
   it("a quarantined id is not fetched again automatically", () => {
@@ -266,6 +293,68 @@ describe("applyPageOutcome / needsPageFetch (AC-001/AC-002 state machine)", () =
     const before = emptyState();
     applyPageOutcome(before, CANDIDATE.id, { kind: "expired" });
     expect(before.entries).toEqual({});
+  });
+});
+
+function quarantine(state: CathoState, id: string): CathoState {
+  let next = state;
+  for (let i = 0; i < MAX_RETRYABLE_ATTEMPTS_BEFORE_QUARANTINE; i++) {
+    next = applyPageOutcome(next, id, {
+      kind: "retryable",
+      reason: "HTTP 403",
+    });
+  }
+  return next;
+}
+
+describe("requeueQuarantined (docs/audit PR-011 — an operable retry control)", () => {
+  it("removes a named quarantined entry, making it eligible for a fresh fetch again", () => {
+    const state = quarantine(emptyState(), CANDIDATE.id);
+    expect(needsPageFetch(state, CANDIDATE.id)).toBe(false);
+
+    const result = requeueQuarantined(state, [CANDIDATE.id]);
+
+    expect(result.requeued).toEqual([CANDIDATE.id]);
+    expect(result.state.entries[CANDIDATE.id]).toBeUndefined();
+    expect(needsPageFetch(result.state, CANDIDATE.id)).toBe(true);
+  });
+
+  it("requeues every quarantined entry when no ids are given", () => {
+    let state = quarantine(emptyState(), "1");
+    state = quarantine(state, "2");
+    state = applyPageOutcome(state, "3", { kind: "expired" });
+
+    const result = requeueQuarantined(state);
+
+    expect(result.requeued.sort()).toEqual(["1", "2"]);
+    expect(result.state.entries["1"]).toBeUndefined();
+    expect(result.state.entries["2"]).toBeUndefined();
+    // Not quarantined -- untouched.
+    expect(result.state.entries["3"]?.state).toBe("expired");
+  });
+
+  it("skips an id that is not quarantined, without touching it", () => {
+    const state = applyPageOutcome(emptyState(), CANDIDATE.id, {
+      kind: "retryable",
+      reason: "HTTP 403",
+    });
+
+    const result = requeueQuarantined(state, [CANDIDATE.id]);
+
+    expect(result.requeued).toEqual([]);
+    expect(result.state.entries[CANDIDATE.id]?.state).toBe("retryable");
+  });
+
+  it("skips an id that does not exist at all, without throwing", () => {
+    const result = requeueQuarantined(emptyState(), ["does-not-exist"]);
+    expect(result.requeued).toEqual([]);
+  });
+
+  it("does not mutate the state object passed in", () => {
+    const before = quarantine(emptyState(), CANDIDATE.id);
+    const snapshot = JSON.stringify(before);
+    requeueQuarantined(before, [CANDIDATE.id]);
+    expect(JSON.stringify(before)).toBe(snapshot);
   });
 });
 
@@ -383,5 +472,69 @@ describe("loadState / saveStateAtomic", () => {
     const afterSecond = JSON.parse(readFileSync(path, "utf8")) as CathoState;
     expect(afterSecond.entries["2"]?.state).toBe("expired");
     expect(afterSecond.entries["1"]).toBeUndefined();
+  });
+});
+
+describe("acquireLock / releaseLock (docs/audit PR-012 — single-writer mutual exclusion)", () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "catho-lock-"));
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("acquires a lock that does not exist yet", () => {
+    const lockPath = join(dir, "state.json.lock");
+    expect(acquireLock(lockPath).acquired).toBe(true);
+  });
+
+  it("refuses a second acquisition while the lock is fresh", () => {
+    const lockPath = join(dir, "state.json.lock");
+    acquireLock(lockPath);
+
+    const second = acquireLock(lockPath);
+
+    expect(second.acquired).toBe(false);
+    expect(second.reason).toMatch(/lock held/);
+  });
+
+  it("allows re-acquiring after release", () => {
+    const lockPath = join(dir, "state.json.lock");
+    acquireLock(lockPath);
+    releaseLock(lockPath);
+
+    expect(acquireLock(lockPath).acquired).toBe(true);
+  });
+
+  it("releasing an already-released (or never-acquired) lock is a no-op, not a throw", () => {
+    const lockPath = join(dir, "state.json.lock");
+    expect(() => releaseLock(lockPath)).not.toThrow();
+  });
+
+  it("takes over a lock older than staleAfterMs, treating it as abandoned", () => {
+    const lockPath = join(dir, "state.json.lock");
+    const created = new Date("2026-08-17T03:00:00Z");
+    acquireLock(lockPath);
+    // acquireLock stats the file's real filesystem mtime -- backdating it
+    // directly is the only deterministic way to simulate "this lock is
+    // old" without a real sleep.
+    utimesSync(lockPath, created, created);
+
+    const stillFresh = acquireLock(
+      lockPath,
+      new Date(created.getTime() + 500),
+      1_000,
+    );
+    expect(stillFresh.acquired).toBe(false);
+
+    const nowStale = acquireLock(
+      lockPath,
+      new Date(created.getTime() + 2_000),
+      1_000,
+    );
+    expect(nowStale.acquired).toBe(true);
   });
 });

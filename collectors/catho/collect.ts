@@ -52,6 +52,7 @@
 import { chromium } from "playwright";
 import {
   CathoState,
+  acquireLock,
   applyPageOutcome,
   classifyPageResult,
   collectedPayloadsPendingIngest,
@@ -59,6 +60,7 @@ import {
   loadState,
   markIngested,
   needsPageFetch,
+  releaseLock,
   saveStateAtomic,
 } from "./state";
 
@@ -75,6 +77,15 @@ const DEFAULT_TITLE_PATTERN =
 const DEFAULT_MAX_PAGES_PER_RUN = 300;
 const DEFAULT_REQUEST_INTERVAL_MS = 1_500;
 const DEFAULT_STATE_PATH = "/data/catho-state.json";
+// How many page outcomes accumulate in memory before the next durable
+// checkpoint (docs/audit PR-012) -- state used to save only once, after
+// the entire page loop and browser shutdown, so a crash at page 299 of a
+// 300-page run lost every accumulated outcome and payload, not just the
+// in-flight one. Bounded, not per-item: `saveStateAtomic` rewrites the
+// whole file, and doing that after every single page (a $1.5s network
+// round trip on its own default interval) is unnecessary I/O for a loss
+// window this small already.
+const DEFAULT_CHECKPOINT_EVERY = 10;
 const FETCH_UA =
   "ArgosCareer/0.1.0 (+https://github.com/gustavopinto244/ArgosCareer; personal internship search bot)";
 
@@ -233,9 +244,65 @@ async function main(): Promise<void> {
   const requestIntervalMs = Number(
     env("REQUEST_INTERVAL_MS", String(DEFAULT_REQUEST_INTERVAL_MS)),
   );
+  const checkpointEvery = Number(
+    env("CHECKPOINT_EVERY", String(DEFAULT_CHECKPOINT_EVERY)),
+  );
   const statePath = env("STATE_PATH", DEFAULT_STATE_PATH);
   const apiUrl = requiredEnv("ARGOS_API_URL").replace(/\/$/, "");
   const apiKey = requiredEnv("ARGOS_API_KEY");
+
+  // Single-writer mutual exclusion (docs/audit PR-012): a manual run
+  // overlapping the scheduled timer would otherwise each load their own
+  // state snapshot and each write their own view back, silently
+  // discarding whatever the other accumulated in between. Acquired only
+  // after every env var above is validated, so a config error exits
+  // before any lock is ever taken.
+  const lockPath = `${statePath}.lock`;
+  const lock = acquireLock(lockPath);
+  if (!lock.acquired) {
+    console.log(`skipping run: ${lock.reason}`);
+    return;
+  }
+
+  try {
+    await runOnce({
+      titlePattern,
+      maxPagesPerRun,
+      requestIntervalMs,
+      checkpointEvery,
+      statePath,
+      apiUrl,
+      apiKey,
+    });
+  } finally {
+    releaseLock(lockPath);
+  }
+}
+
+interface RunOnceOptions {
+  readonly titlePattern: RegExp;
+  readonly maxPagesPerRun: number;
+  readonly requestIntervalMs: number;
+  readonly checkpointEvery: number;
+  readonly statePath: string;
+  readonly apiUrl: string;
+  readonly apiKey: string;
+}
+
+/** The actual collect-and-ingest run, factored out of `main` so the lock
+ * acquired there (docs/audit PR-012) wraps it via a plain `try`/`finally`
+ * rather than every early exit inside this function needing to remember
+ * to release it itself. */
+async function runOnce(options: RunOnceOptions): Promise<void> {
+  const {
+    titlePattern,
+    maxPagesPerRun,
+    requestIntervalMs,
+    checkpointEvery,
+    statePath,
+    apiUrl,
+    apiKey,
+  } = options;
 
   let state: CathoState = loadState(statePath);
   console.log(
@@ -287,6 +354,14 @@ async function main(): Promise<void> {
         const outcome = classifyPageResult({ ...signals, candidate });
         outcomeCounts[outcome.kind] += 1;
         state = applyPageOutcome(state, candidate.id, outcome);
+        // Bounded incremental checkpoint (docs/audit PR-012): every
+        // `checkpointEvery` pages, not only once after the whole loop —
+        // a crash partway through this run now loses at most this many
+        // page loads' worth of outcomes and payloads, not the entire
+        // batch.
+        if ((i + 1) % checkpointEvery === 0) {
+          saveStateAtomic(statePath, state);
+        }
       }
     } finally {
       await browser.close();
@@ -298,9 +373,11 @@ async function main(): Promise<void> {
         `${outcomeCounts.retryable} retryable (will retry, or quarantine after ` +
         `repeated failures)`,
     );
-    // Durable checkpoint before attempting ingest — a payload that was
-    // fetched is saved to disk now, so a crash or a failed ingest POST
-    // right after this never means reopening the page (AC-001).
+    // Final flush before attempting ingest — whatever the periodic
+    // checkpoint above hasn't already written (fewer than
+    // `checkpointEvery` pages since the last one) is saved now, so a
+    // crash or a failed ingest POST right after this never means
+    // reopening a page that already succeeded (AC-001).
     saveStateAtomic(statePath, state);
   } else {
     console.log("no new pages to fetch this run");
@@ -331,8 +408,13 @@ async function main(): Promise<void> {
   } catch (error) {
     // Network failure: the payloads stay "collected" in the already-saved
     // state file — nothing to undo, next run retries the ingest alone.
+    // `exitCode`, not `process.exit()` (docs/audit PR-012): the latter
+    // terminates immediately, skipping the `finally` below that releases
+    // this run's lock -- this way the lock still comes off cleanly on the
+    // way out, and the process still exits non-zero once it drains.
     console.error(`ERROR: ingest request failed: ${String(error)}`);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   console.log(`ingest: HTTP ${response.status}`);
@@ -346,7 +428,8 @@ async function main(): Promise<void> {
       `ERROR: ingest not confirmed (HTTP ${response.status}) — ${pending.length} ` +
         `payload(s) stay queued for the next run`,
     );
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   state = markIngested(

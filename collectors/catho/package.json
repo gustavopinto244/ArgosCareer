@@ -5,6 +5,7 @@
   "description": "Ephemeral, host-side Catho collector (ADR-032) — never part of argos-career's own container.",
   "scripts": {
     "start": "tsx collect.ts",
+    "requeue": "tsx requeue.ts",
     "test": "vitest run"
   },
   "dependencies": {

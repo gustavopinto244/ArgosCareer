@@ -27,6 +27,8 @@ import {
   mkdirSync,
   readFileSync,
   renameSync,
+  rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { dirname } from "node:path";
@@ -95,6 +97,14 @@ export interface CathoStateEntry {
   /** Consecutive retryable-failure count, present only on `"retryable"`/
    * `"quarantined"` entries. */
   readonly failCount?: number;
+  /** The most recent `PageOutcome`'s own `reason` for a `"retryable"`/
+   * `"quarantined"` entry (docs/audit PR-011) — previously computed by
+   * `classifyPageResult` and then discarded the moment `applyPageOutcome`
+   * ran, so a quarantined ID carried no trace of *why*: a persistent 403
+   * looked identical to a persistent timeout or five different transient
+   * causes in a row. Overwritten on every retry, not accumulated — this is
+   * "why did the most recent attempt fail," not a full history. */
+  readonly reason?: string;
 }
 
 export interface CathoState {
@@ -149,6 +159,91 @@ export function saveStateAtomic(path: string, state: CathoState): void {
   const tmpPath = `${path}.tmp-${process.pid}`;
   writeFileSync(tmpPath, JSON.stringify(state), "utf8");
   renameSync(tmpPath, path);
+}
+
+/** After this long, an existing lock file is treated as abandoned rather
+ * than held by a live process (docs/audit PR-012) — generous relative to
+ * `MAX_PAGES_PER_RUN`'s default (300) at the default request interval
+ * (1.5s), which bounds a normal run to well under this. */
+export const DEFAULT_LOCK_STALE_AFTER_MS = 30 * 60 * 1000;
+
+export interface LockResult {
+  readonly acquired: boolean;
+  /** Present only when `acquired` is `false` — why, for the caller's own
+   * log line. */
+  readonly reason?: string;
+}
+
+/**
+ * Single-writer mutual exclusion for the state file (docs/audit PR-012):
+ * `saveStateAtomic`'s rename is atomic against a torn write, but says
+ * nothing about two *processes* — a manual run overlapping the scheduled
+ * timer, say — each loading their own snapshot and each writing their own
+ * view back, silently discarding whatever the other accumulated in
+ * between (last-writer-wins). `wx` (write, fail if exists) makes
+ * acquisition itself atomic at the filesystem level: two processes racing
+ * to create the same lock file can never both succeed.
+ *
+ * A lock file that still exists is not automatically "someone else is
+ * running" — a process that crashed mid-run (the exact PR-012 scenario
+ * this collector otherwise has to survive) would leave one behind
+ * forever with no other change here. `staleAfterMs` bounds how long a
+ * lock is trusted before a new run takes it over anyway; there is no PID
+ * liveness check (`kill -0`) because this collector's own doc comment
+ * already states it runs as an ephemeral, possibly-containerized
+ * process — a PID recorded by one container means nothing to a process
+ * checking from a different one.
+ */
+export function acquireLock(
+  lockPath: string,
+  now: Date = new Date(),
+  staleAfterMs: number = DEFAULT_LOCK_STALE_AFTER_MS,
+): LockResult {
+  mkdirSync(dirname(lockPath), { recursive: true });
+  const contents = JSON.stringify({
+    pid: process.pid,
+    startedAt: now.toISOString(),
+  });
+  try {
+    writeFileSync(lockPath, contents, { encoding: "utf8", flag: "wx" });
+    return { acquired: true };
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code !== "EEXIST") throw cause;
+  }
+
+  let ageMs: number;
+  try {
+    ageMs = now.getTime() - statSync(lockPath).mtimeMs;
+  } catch {
+    // Removed between the failed create above and this stat -- treat as
+    // free and let the caller's own next attempt (or this one, in
+    // practice) succeed rather than reporting a lock that no longer
+    // exists.
+    return { acquired: false, reason: "lock state changed concurrently" };
+  }
+  if (ageMs <= staleAfterMs) {
+    return {
+      acquired: false,
+      reason: `lock held (${Math.round(ageMs / 1000)}s old)`,
+    };
+  }
+
+  // Stale -- a previous process almost certainly crashed without
+  // releasing it. Plain overwrite, not another `wx` create: this call
+  // already knows the file exists.
+  writeFileSync(lockPath, contents, "utf8");
+  return { acquired: true };
+}
+
+/** Releasing a lock that is already gone is a no-op, not an error --
+ * whatever removed it (a stale takeover, manual cleanup) already did this
+ * call's job. */
+export function releaseLock(lockPath: string): void {
+  try {
+    rmSync(lockPath);
+  } catch {
+    // Already gone.
+  }
 }
 
 /** Whether `id` needs a fresh Playwright page load this run — true for an
@@ -244,10 +339,48 @@ export function applyPageOutcome(
     const failCount = (state.entries[id]?.failCount ?? 0) + 1;
     entries[id] =
       failCount >= MAX_RETRYABLE_ATTEMPTS_BEFORE_QUARANTINE
-        ? { state: "quarantined", failCount }
-        : { state: "retryable", failCount };
+        ? { state: "quarantined", failCount, reason: outcome.reason }
+        : { state: "retryable", failCount, reason: outcome.reason };
   }
   return { version: 2, entries };
+}
+
+/**
+ * Reopens quarantined entries for another attempt (docs/audit PR-011) —
+ * the "explicit retry/reconciliation control" a quarantine has otherwise
+ * never had: past the retry budget, `needsPageFetch` returns `false`
+ * forever and no other code path in this collector ever revisits an ID
+ * again. Removes the entry entirely rather than resetting it to
+ * `"retryable"` with `failCount: 0` — an absent ID and a fresh ID mean the
+ * exact same thing to `needsPageFetch`/`toCandidate`, so this is not a new
+ * state, just forgetting the old verdict and letting the ID compete for
+ * this run's budget like any other unseen candidate.
+ *
+ * `ids: undefined` requeues every quarantined entry in the state. An `id`
+ * that does not exist, or exists but is not quarantined, is silently
+ * skipped — `requeued` names exactly what changed, so a caller can tell
+ * a typo'd ID from a real one without a thrown error over an operator
+ * mistake.
+ */
+export function requeueQuarantined(
+  state: CathoState,
+  ids?: readonly string[],
+): { readonly state: CathoState; readonly requeued: readonly string[] } {
+  const targets =
+    ids ??
+    Object.entries(state.entries)
+      .filter(([, entry]) => entry.state === "quarantined")
+      .map(([id]) => id);
+
+  const entries = { ...state.entries };
+  const requeued: string[] = [];
+  for (const id of targets) {
+    if (entries[id]?.state === "quarantined") {
+      delete entries[id];
+      requeued.push(id);
+    }
+  }
+  return { state: { version: 2, entries }, requeued };
 }
 
 /** Every payload waiting on a durable ingest confirmation — collected this
