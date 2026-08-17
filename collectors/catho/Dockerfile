@@ -16,6 +16,6 @@ WORKDIR /app
 COPY package.json .
 RUN npm install
 
-COPY collect.ts .
+COPY state.ts collect.ts ./
 
 ENTRYPOINT ["npx", "tsx", "collect.ts"]

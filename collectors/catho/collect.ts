@@ -9,17 +9,32 @@
  * touches, and Playwright's real Chromium User-Agent is an honest
  * statement of what it is, not a forged one — individual posting pages
  * (`/vagas/<slug>/<id>/`) return a plain 403 to a non-browser UA but are
- * not disallowed by robots.txt at all.
+ * not disallowed by robots.txt at all. Auditing this collector live
+ * (`docs/audit/AUDIT-PRE-DEPLOY-2026-08-17.md`) found that Playwright's
+ * default headless Chromium gets the *same* 403 Catho gives a non-browser
+ * client — a deeper, fingerprint-based block this collector does not yet
+ * get past. Do not deploy/schedule this until that is resolved; the
+ * checkpoint fixes below are correct and worth having regardless of when
+ * that happens.
  *
  * The one real cost this shape has that Gupy/Sólides don't: there is no
  * server-side search, so there is no way to ask Catho for only
  * Rio-de-Janeiro-metro internships. Every candidate posting (title-filtered
  * from the sitemap) has to be opened once to learn its real city. Bounded
  * per run (MAX_PAGES_PER_RUN) rather than run to completion in one process —
- * a state file tracks which posting IDs have already been visited
- * (ingested or found expired) so repeated runs make incremental progress
+ * `state.ts`'s checkpoint tracks which posting IDs have already reached a
+ * terminal or in-progress state, so repeated runs make incremental progress
  * through the backlog instead of re-walking it, and so a normal run, once
  * the backlog is drained, only touches what's actually new.
+ *
+ * Checkpoint semantics (`state.ts`, fixing AUDIT_REPORT.md AC-001/AC-002):
+ * an ID only becomes "ingested" — permanently done — after argos-career's
+ * API confirms the POST with a 2xx. A page load that fails, times out, or
+ * gets a non-2xx (including the 403 above) is "retryable," not "expired":
+ * only a 2xx response that lands on the bare `/vagas` listing counts as a
+ * confirmed expiration. A payload that was fetched but never successfully
+ * ingested stays queued in the state file and is retried on ingest alone —
+ * no page reload needed — on the next run.
  *
  * One run, one exit — matches the "ephemeral container" shape
  * `collectors/indeed` already established. Never on the critical path: a
@@ -32,11 +47,19 @@
  *   ARGOS_API_KEY   the same Bearer key every other API caller uses
  *
  * Optional environment (defaults below):
- *   MAX_PAGES_PER_RUN, REQUEST_INTERVAL_MS, SEEN_IDS_PATH, TITLE_PATTERN
+ *   MAX_PAGES_PER_RUN, REQUEST_INTERVAL_MS, STATE_PATH, TITLE_PATTERN
  */
 import { chromium } from "playwright";
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import {
+  CathoState,
+  applyPageOutcome,
+  classifyPageResult,
+  collectedPayloadsPendingIngest,
+  loadState,
+  markIngested,
+  needsPageFetch,
+  saveStateAtomic,
+} from "./state";
 
 const SITEMAP_INDEX = "https://www.catho.com.br/sitemap-index.xml";
 // Only the fresh, numbered "sitemap_vagas_N.xml" set (regenerated daily,
@@ -50,7 +73,7 @@ const DEFAULT_TITLE_PATTERN =
   "estagio|estagiario|estagiaria|estágio|estagiário|estagiária|trainee";
 const DEFAULT_MAX_PAGES_PER_RUN = 300;
 const DEFAULT_REQUEST_INTERVAL_MS = 1_500;
-const DEFAULT_SEEN_IDS_PATH = "/data/catho-seen-ids.json";
+const DEFAULT_STATE_PATH = "/data/catho-state.json";
 const FETCH_UA =
   "ArgosCareer/0.1.0 (+https://github.com/gustavopinto244/ArgosCareer; personal internship search bot)";
 
@@ -121,61 +144,50 @@ async function discoverCandidates(
   return candidates;
 }
 
-function loadSeenIds(path: string): Set<string> {
-  if (!existsSync(path)) return new Set();
-  try {
-    const raw: unknown = JSON.parse(readFileSync(path, "utf8"));
-    return new Set(Array.isArray(raw) ? raw.map(String) : []);
-  } catch {
-    console.warn(
-      `WARNING: could not parse ${path}, starting with an empty seen-set`,
-    );
-    return new Set();
-  }
-}
-
-function saveSeenIds(path: string, ids: Set<string>): void {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify([...ids].sort()), "utf8");
-}
-
-interface CollectedPosting {
-  sourceId: string;
-  payload: {
-    id: string;
-    url: string;
-    pageTitle: string;
-    jobPosting: unknown;
-  };
-}
-
 /**
- * Opens one posting page with a real Chromium browser and extracts its
- * `application/ld+json` `JobPosting` markup and page `<title>`.
- *
- * Returns `null` — not a throw — when the page redirects away from its own
- * URL (an expired posting falling back to the generic listing, confirmed
- * during discovery) or carries no JSON-LD at all. The caller still marks
- * the ID as seen either way: revisiting a confirmed-expired posting on the
- * next run wastes a page load for no gain.
+ * Opens one posting page with a real Chromium browser and gathers the raw
+ * signals `classifyPageResult` (state.ts) needs — this function makes no
+ * classification decision itself, only observes.
  */
-async function collectOne(
+async function loadCandidatePage(
   page: import("playwright").Page,
   candidate: SitemapCandidate,
-): Promise<CollectedPosting | null> {
-  const response = await page.goto(candidate.url, {
-    waitUntil: "domcontentloaded",
-    timeout: 20_000,
-  });
-  if (!response || !response.ok()) return null;
-
-  const finalUrl = page.url();
-  if (!finalUrl.includes(`/${candidate.id}`)) {
-    // Redirected away from its own posting path — expired, per discovery.
-    return null;
+): Promise<{
+  httpStatus: number | null;
+  finalUrl: string;
+  jsonLd: unknown;
+  pageTitle: string;
+}> {
+  let response;
+  try {
+    response = await page.goto(candidate.url, {
+      waitUntil: "domcontentloaded",
+      timeout: 20_000,
+    });
+  } catch {
+    return {
+      httpStatus: null,
+      finalUrl: candidate.url,
+      jsonLd: null,
+      pageTitle: "",
+    };
+  }
+  if (!response) {
+    return {
+      httpStatus: null,
+      finalUrl: candidate.url,
+      jsonLd: null,
+      pageTitle: "",
+    };
   }
 
-  const jobPosting = await page.evaluate(() => {
+  const httpStatus = response.status();
+  const finalUrl = page.url();
+  if (httpStatus < 200 || httpStatus >= 300) {
+    return { httpStatus, finalUrl, jsonLd: null, pageTitle: "" };
+  }
+
+  const jsonLd = await page.evaluate(() => {
     const script = document.querySelector('script[type="application/ld+json"]');
     if (!script?.textContent) return null;
     try {
@@ -184,14 +196,9 @@ async function collectOne(
       return null;
     }
   });
-  if (!jobPosting) return null;
-
   const pageTitle = await page.title();
 
-  return {
-    sourceId: candidate.id,
-    payload: { id: candidate.id, url: candidate.url, pageTitle, jobPosting },
-  };
+  return { httpStatus, finalUrl, jsonLd, pageTitle };
 }
 
 async function main(): Promise<void> {
@@ -205,84 +212,104 @@ async function main(): Promise<void> {
   const requestIntervalMs = Number(
     env("REQUEST_INTERVAL_MS", String(DEFAULT_REQUEST_INTERVAL_MS)),
   );
-  const seenIdsPath = env("SEEN_IDS_PATH", DEFAULT_SEEN_IDS_PATH);
+  const statePath = env("STATE_PATH", DEFAULT_STATE_PATH);
   const apiUrl = requiredEnv("ARGOS_API_URL").replace(/\/$/, "");
   const apiKey = requiredEnv("ARGOS_API_KEY");
 
-  const seenIds = loadSeenIds(seenIdsPath);
-  console.log(`seen-ids: ${seenIds.size} known from previous runs`);
+  let state: CathoState = loadState(statePath);
+  console.log(
+    `state: ${Object.keys(state.entries).length} known id(s) from previous runs`,
+  );
 
   const candidates = await discoverCandidates(titlePattern);
-  const unseen = candidates.filter((c) => !seenIds.has(c.id));
+  const toFetch = candidates
+    .filter((c) => needsPageFetch(state, c.id))
+    .slice(0, maxPagesPerRun);
   console.log(
-    `candidates: ${candidates.length} title-matched, ${unseen.length} not yet seen`,
+    `candidates: ${candidates.length} title-matched, ${toFetch.length} need a page load this run`,
   );
 
-  const batch = unseen.slice(0, maxPagesPerRun);
-  if (batch.length === 0) {
-    console.log("nothing new to collect, exiting");
-    return;
-  }
-  console.log(`collecting ${batch.length} posting(s) this run`);
+  if (toFetch.length > 0) {
+    console.log(`fetching ${toFetch.length} page(s) this run`);
+    const browser = await chromium.launch();
+    const page = await browser.newPage();
+    const outcomeCounts = { collected: 0, expired: 0, retryable: 0 };
 
-  const browser = await chromium.launch();
-  const page = await browser.newPage();
-  const postings: CollectedPosting[] = [];
-  // IDs resolved either way (collected or confirmed-expired) — safe to mark
-  // seen, since revisiting either wastes a page load for no gain. IDs that
-  // errored transiently (timeout, network blip) are deliberately excluded:
-  // they stay unseen so the next run retries them from the same candidate
-  // list, rather than being silently dropped forever.
-  const resolvedIds = new Set<string>();
-
-  try {
-    for (let i = 0; i < batch.length; i++) {
-      if (i > 0) await sleep(requestIntervalMs);
-      const candidate = batch[i]!;
-      try {
-        const result = await collectOne(page, candidate);
-        resolvedIds.add(candidate.id);
-        if (result) postings.push(result);
-      } catch (error) {
-        console.warn(`WARNING: ${candidate.url} failed: ${String(error)}`);
+    try {
+      for (let i = 0; i < toFetch.length; i++) {
+        if (i > 0) await sleep(requestIntervalMs);
+        const candidate = toFetch[i]!;
+        const signals = await loadCandidatePage(page, candidate);
+        const outcome = classifyPageResult({ ...signals, candidate });
+        outcomeCounts[outcome.kind] += 1;
+        state = applyPageOutcome(state, candidate.id, outcome);
       }
+    } finally {
+      await browser.close();
     }
-  } finally {
-    await browser.close();
+
+    console.log(
+      `page results: ${outcomeCounts.collected} collected, ` +
+        `${outcomeCounts.expired} confirmed expired, ` +
+        `${outcomeCounts.retryable} retryable (will retry, or quarantine after ` +
+        `repeated failures)`,
+    );
+    // Durable checkpoint before attempting ingest — a payload that was
+    // fetched is saved to disk now, so a crash or a failed ingest POST
+    // right after this never means reopening the page (AC-001).
+    saveStateAtomic(statePath, state);
+  } else {
+    console.log("no new pages to fetch this run");
   }
 
-  const expired = resolvedIds.size - postings.length;
-  console.log(
-    `done: ${postings.length} collected, ${expired} expired/redirected, ` +
-      `${batch.length - resolvedIds.size} errored (will retry next run)`,
-  );
-
-  for (const id of resolvedIds) seenIds.add(id);
-  saveSeenIds(seenIdsPath, seenIds);
-
-  if (postings.length === 0) {
-    console.log("nothing to ingest, exiting");
+  const pending = collectedPayloadsPendingIngest(state);
+  if (pending.length === 0) {
+    console.log("nothing pending ingest, exiting");
     return;
   }
+  console.log(`ingesting ${pending.length} payload(s) pending confirmation`);
 
   const body = {
     source: "catho",
-    postings: postings.map((p) => ({
-      sourceId: p.sourceId,
-      payload: p.payload,
-    })),
+    postings: pending.map((p) => ({ sourceId: p.id, payload: p })),
   };
-  const response = await fetch(`${apiUrl}/runs/collect/external`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(body),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${apiUrl}/runs/collect/external`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+    });
+  } catch (error) {
+    // Network failure: the payloads stay "collected" in the already-saved
+    // state file — nothing to undo, next run retries the ingest alone.
+    console.error(`ERROR: ingest request failed: ${String(error)}`);
+    process.exit(1);
+  }
+
   console.log(`ingest: HTTP ${response.status}`);
   console.log((await response.text()).slice(0, 2000));
-  if (!response.ok) process.exit(1);
+
+  if (!response.ok) {
+    // Same as a network failure — 409 (RunLock busy), 429, 5xx, or any
+    // other non-2xx all leave the batch "collected," retried whole on the
+    // next scheduled run (every 30 min) rather than discarded (AC-001).
+    console.error(
+      `ERROR: ingest not confirmed (HTTP ${response.status}) — ${pending.length} ` +
+        `payload(s) stay queued for the next run`,
+    );
+    process.exit(1);
+  }
+
+  state = markIngested(
+    state,
+    pending.map((p) => p.id),
+  );
+  saveStateAtomic(statePath, state);
+  console.log(`confirmed: ${pending.length} payload(s) marked ingested`);
 }
 
 void main();
