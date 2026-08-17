@@ -216,9 +216,14 @@ location:
   # from one of these is not "cannot be ruled out," it is "the city-parsing
   # regex failed on a nationwide crawl" (docs/audit AC-024). Catho has no
   # per-city search and no traffic today (403-blocked, ADR-033) -- this is
-  # a deliberate default in place before it is ever deployed.
+  # a deliberate default in place before it is ever deployed. CIEE is here
+  # too (docs/audit PR-016, ADR-011 Amendment 7): its one query above
+  # (line 106) sets no city on purpose, sweeping the whole national board
+  # -- an unknown city from it is not "probably Rio," it is "anywhere in
+  # Brazil the parser could not read."
   nationwideSources:
     - catho
+    - ciee
 
 blockedCompanies: []
 
