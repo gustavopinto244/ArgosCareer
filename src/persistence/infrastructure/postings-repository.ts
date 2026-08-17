@@ -1,4 +1,14 @@
-import { and, eq, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
+import {
+  and,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  or,
+  sql,
+} from "drizzle-orm";
 import {
   Location,
   Posting,
@@ -440,6 +450,53 @@ export class PostingsRepository {
       .set({ scoreFailureCount: 0, lastScoreFailedAt: null })
       .where(eq(postings.fingerprint, fingerprint))
       .run();
+  }
+
+  /**
+   * Reopens a posting whose most recent scoring attempt failed (docs/audit
+   * PR-024) for the next `scoreAndDeliver` run — the "a human who sees the
+   * failure reason can re-run scoring manually" path ADR-006 promised
+   * without ever building. Deliberately narrow: `scoreFailureCount > 0`
+   * only holds for a posting whose last known outcome was a failure —
+   * `clearScoreFailures` zeroes it the moment any attempt actually
+   * succeeds, so a successfully-delivered posting is never eligible here.
+   *
+   * `notifiedAt`'s "write once, never cleared" discipline
+   * (`findUnnotified`'s own doc comment, ADR-007) stays intact for every
+   * posting a human actually saw a real verdict for — this is a scoped,
+   * deliberate exception for the one case that discipline was never meant
+   * to cover: a posting marked notified only because ADR-006 chose to
+   * surface its failure reason rather than hide it, not because scoring
+   * ever produced something to show.
+   *
+   * Also clears `scoringClaimedAt`/`scoringClaimRunId` — leaving the old
+   * run's claim in place would make `claimForScoring` skip this posting
+   * again for up to `DEFAULT_STALE_CLAIM_MS` (4 hours) despite
+   * `notifiedAt` being clear, since that claim has not gone stale yet from
+   * the next run's point of view.
+   *
+   * Returns `false` when the fingerprint does not exist, or exists but its
+   * last attempt did not fail — the same idempotent-check pattern
+   * `discard`/`restoreDuplicate` already use.
+   */
+  rescore(fingerprint: string): boolean {
+    const result = this.db
+      .update(postings)
+      .set({
+        notifiedAt: null,
+        scoreFailureCount: 0,
+        lastScoreFailedAt: null,
+        scoringClaimedAt: null,
+        scoringClaimRunId: null,
+      })
+      .where(
+        and(
+          eq(postings.fingerprint, fingerprint),
+          gt(postings.scoreFailureCount, 0),
+        ),
+      )
+      .run();
+    return result.changes > 0;
   }
 
   /**
