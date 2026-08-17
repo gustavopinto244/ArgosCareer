@@ -200,6 +200,28 @@ describe("MCP server", () => {
     expect(body.delivered).toBe(0);
   });
 
+  it("run_deliver is rate-limited past the expensive-operation budget, same as the REST path (docs/audit AC-021)", async () => {
+    // MCP tool calls all share one /mcp route, invisible to a per-HTTP-route
+    // throttle guard -- this is why the check lives in RunsService, not on
+    // RunsController alone. isError, not a thrown connection failure: MCP's
+    // safely() wrapper turns the 429 into a tool error result.
+    for (let i = 0; i < 3; i++) {
+      const result = await client.callTool({
+        name: "run_deliver",
+        arguments: {},
+      });
+      expect(result.isError).toBeFalsy();
+    }
+
+    const fourth = await client.callTool({
+      name: "run_deliver",
+      arguments: {},
+    });
+    expect(fourth.isError).toBe(true);
+    const content = fourth.content as { type: string; text: string }[];
+    expect(content[0]?.text).toContain("Rate limit exceeded");
+  });
+
   it("get_study_plan reads the corpus and sends through the fake notifier", async () => {
     const result = await client.callTool({
       name: "get_study_plan",

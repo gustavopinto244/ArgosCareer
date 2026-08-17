@@ -1,6 +1,11 @@
 import { Module } from "@nestjs/common";
 import { APP_GUARD } from "@nestjs/core";
+import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 import { ApiKeyGuard } from "./api-key.guard";
+import {
+  DEFAULT_THROTTLER_LIMIT,
+  DEFAULT_THROTTLER_TTL_MS,
+} from "./throttler-limits";
 import { collectorProvider } from "./collector.provider";
 import {
   criteriaProvider,
@@ -34,8 +39,28 @@ import { runLockProvider } from "../../scheduling/infrastructure/run-lock.provid
  * rather than duplicated here — it and `SchedulingModule`'s copy resolve
  * `RUN_LOCK` to the same exported singleton, so `RunsService`'s REST/MCP
  * stage triggers and `SchedulerService`'s cron ticks guard each other.
+ *
+ * `ThrottlerGuard` is a second global `APP_GUARD`, registered after
+ * `ApiKeyGuard` (docs/audit AC-021) — NestJS runs guards in registration
+ * order, so an unauthenticated request is still rejected before it can
+ * consume any rate-limit budget. This is the generous, every-route
+ * default (`throttler-limits.ts`); the tighter limit on `collect`/
+ * `deliver`/`ingestExternal` — real OpenRouter spend, a real Telegram
+ * send — is enforced in `RunsService` itself, not here: those three are
+ * also reachable through `McpController`'s single `/mcp` route, invisible
+ * to a per-HTTP-route guard, so the check lives in the one place both
+ * controllers actually call. `RunLock` already stops two `deliver` runs
+ * from overlapping; it says nothing about a leaked key calling either
+ * protocol in a tight sequential loop. See `throttler-limits.ts` for the
+ * actual numbers and why a full per-caller credential scope is
+ * deliberately not what this is.
  */
 @Module({
+  imports: [
+    ThrottlerModule.forRoot([
+      { ttl: DEFAULT_THROTTLER_TTL_MS, limit: DEFAULT_THROTTLER_LIMIT },
+    ]),
+  ],
   controllers: [
     RunsController,
     MarketController,
@@ -54,6 +79,7 @@ import { runLockProvider } from "../../scheduling/infrastructure/run-lock.provid
     PostingsService,
     runLockProvider,
     { provide: APP_GUARD, useClass: ApiKeyGuard },
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
 })
 export class ApiModule {}
