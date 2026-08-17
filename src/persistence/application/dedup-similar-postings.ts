@@ -8,6 +8,40 @@ export interface DedupConfig {
   readonly windowDays: number;
 }
 
+/**
+ * Common Brazilian legal-entity suffixes, checked as the trailing token of
+ * a normalized company name — never substring-matched, so a real word that
+ * happens to contain one of these ("Casamentos Ltda" still keeps
+ * "casamentos" whole) is untouched. Small and deliberately conservative,
+ * same discipline as `title-similarity.ts`'s `STOPWORDS`: this is a
+ * heuristic over real Brazilian company names, not a general-purpose
+ * corporate-suffix list.
+ */
+const COMPANY_SUFFIXES = new Set(["sa", "ltda", "me", "eireli", "epp"]);
+
+/**
+ * Layer 2's grouping key — deliberately *not* `computeFingerprint`'s
+ * `normalize(company)`, which is frozen under ADR-007 and must never
+ * change. `"Empresa X"` (LinkedIn) and `"Empresa X S.A."` (Gupy) are the
+ * same real company, formatted differently by two sources; grouping on the
+ * exact normalized string meant they landed in different groups and were
+ * never even title-compared by this function (docs/audit AC-014). Stripping
+ * a trailing legal suffix here only widens which postings get *compared* —
+ * `locationsAgree` and `computeTitleSimilarity` still decide whether they
+ * actually merge, so this cannot turn two different companies into a false
+ * merge on its own.
+ */
+function normalizeCompanyForGrouping(company: string): string {
+  const tokens = normalize(company).split(" ").filter(Boolean);
+  while (
+    tokens.length > 1 &&
+    COMPANY_SUFFIXES.has(tokens[tokens.length - 1]!)
+  ) {
+    tokens.pop();
+  }
+  return tokens.join(" ");
+}
+
 /** Provisional, like every threshold in this project until measured against
  * real data — see ADR-0010. */
 export const DEFAULT_DEDUP_CONFIG: DedupConfig = {
@@ -35,7 +69,17 @@ function withinWindow(a: Date, b: Date, windowDays: number): boolean {
  * Both cities known and equal merges; both unknown merges (nothing
  * contradicts); exactly one known does **not**, because that is precisely
  * the shape that ate a real "Pessoa Desenvolvedora Backend Python" in Rio
- * whose canonical had no city at all.
+ * whose canonical had no city at all (ADR-010 Amendment 1).
+ *
+ * docs/audit AC-014 names this same asymmetry as a cross-source false
+ * negative — "LinkedIn remote usually normalizes to unknown while Gupy
+ * carries a known city, so the same posting never merges." That is true,
+ * and it is deliberate, not an oversight: the fix AC-014 suggests (let one
+ * known side agree with an unknown side) is the exact rule ADR-010
+ * Amendment 1 already tried and reversed after it ate a real posting. A
+ * false negative here costs a redundant Stage A/B call; the false positive
+ * this asymmetry prevents costs a real posting silently vanishing. Not
+ * changed.
  */
 function locationsAgree(a: Posting, b: Posting): boolean {
   const aKnown = a.location.kind === "known";
@@ -65,6 +109,12 @@ function locationsAgree(a: Posting, b: Posting): boolean {
  * canonical in this pass, never against another duplicate. This makes the
  * canonical pick deterministic — earliest-seen wins — regardless of the
  * order rows come back from the database.
+ *
+ * Grouped by `normalizeCompanyForGrouping`, not the fingerprint's own
+ * `normalize(company)` — legal-suffix variance between sources ("Empresa X"
+ * on LinkedIn, "Empresa X S.A." on Gupy) used to put the same real company
+ * in two different groups, so this function never even title-compared them
+ * (docs/audit AC-014).
  */
 export function dedupSimilarPostings(
   repository: PostingsRepository,
@@ -74,7 +124,7 @@ export function dedupSimilarPostings(
 
   const byCompany = new Map<string, Posting[]>();
   for (const posting of active) {
-    const key = normalize(posting.company);
+    const key = normalizeCompanyForGrouping(posting.company);
     const group = byCompany.get(key);
     if (group) {
       group.push(posting);

@@ -73,6 +73,49 @@ describe("dedupSimilarPostings", () => {
     expect(repository.findActive()).toHaveLength(2);
   });
 
+  it("groups a company with a legal-entity suffix together with its bare name, so cross-source variants are compared (docs/audit AC-014)", () => {
+    // The real scenario: "Empresa X" on LinkedIn, "Empresa X S.A." on Gupy
+    // -- the same real company, one source stating the legal suffix and the
+    // other omitting it. Previously grouped separately, so this pair was
+    // never even title-compared.
+    const canonical = insert({
+      sourceId: "1",
+      company: "Empresa X",
+      title: "Estágio Back-End",
+    });
+    insert({
+      sourceId: "2",
+      company: "Empresa X S.A.",
+      title: "Estágio Back End (Rio de Janeiro)",
+      firstSeenAt: new Date("2026-08-12T00:00:00Z"),
+    });
+
+    const outcome = dedupSimilarPostings(repository);
+
+    expect(outcome.markedDuplicate).toBe(1);
+    const active = repository.findActive();
+    expect(active).toHaveLength(1);
+    expect(active[0]?.fingerprint).toBe(canonical.fingerprint);
+  });
+
+  it("still keeps two genuinely different companies apart even when one carries a legal suffix", () => {
+    insert({
+      sourceId: "1",
+      company: "Empresa X S.A.",
+      title: "Estágio Backend",
+    });
+    insert({
+      sourceId: "2",
+      company: "Empresa Y S.A.",
+      title: "Estágio Backend",
+    });
+
+    const outcome = dedupSimilarPostings(repository);
+
+    expect(outcome.markedDuplicate).toBe(0);
+    expect(repository.findActive()).toHaveLength(2);
+  });
+
   it("does not mark same-company postings with dissimilar titles as duplicates", () => {
     insert({ sourceId: "1", title: "Estágio Backend" });
     insert({ sourceId: "2", title: "Vendedor de Loja" });
