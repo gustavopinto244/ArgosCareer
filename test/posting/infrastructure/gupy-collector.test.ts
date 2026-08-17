@@ -235,4 +235,30 @@ describe("GupyCollector — successful collection", () => {
     expect(result.postings).toHaveLength(1);
     expect(result.postings[0]?.sourceId).toBe("1");
   });
+
+  it("reports receivedCount and schemaRejectedCount (docs/audit AC-012)", async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({
+        data: [{ id: 1, name: "Estágio válido" }, { missingIdAndName: true }],
+      }),
+    );
+    const collector = new GupyCollector({ fetchImpl, ...FAST_OPTIONS });
+
+    const result = await collector.collect({ maxResults: 2 });
+
+    expect(result.receivedCount).toBe(2);
+    expect(result.schemaRejectedCount).toBe(1);
+  });
+
+  it("reports zero schemaRejectedCount when every item is valid", async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({ data: [{ id: 1, name: "x" }] }),
+    );
+    const collector = new GupyCollector({ fetchImpl, ...FAST_OPTIONS });
+
+    const result = await collector.collect({ maxResults: 1 });
+
+    expect(result.receivedCount).toBe(1);
+    expect(result.schemaRejectedCount).toBe(0);
+  });
 });

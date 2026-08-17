@@ -111,6 +111,8 @@ export class GupyCollector implements CollectorPort {
 
     const postings: RawPosting[] = [];
     let offset = 0;
+    let receivedCount = 0;
+    let schemaRejectedCount = 0;
 
     try {
       // Bounds the number of raw items scanned, not the number of valid
@@ -162,6 +164,7 @@ export class GupyCollector implements CollectorPort {
 
         const items = envelope.data.data;
         if (items.length === 0) break;
+        receivedCount += items.length;
 
         for (const item of items) {
           const parsed = GupyJobSchema.safeParse(item);
@@ -171,6 +174,8 @@ export class GupyCollector implements CollectorPort {
               sourceId: String(parsed.data.id),
               payload: parsed.data,
             });
+          } else {
+            schemaRejectedCount += 1;
           }
         }
 
@@ -191,7 +196,13 @@ export class GupyCollector implements CollectorPort {
       };
     }
 
-    return { source: SOURCE, postings, collectedAt };
+    return {
+      source: SOURCE,
+      postings,
+      collectedAt,
+      receivedCount,
+      schemaRejectedCount,
+    };
   }
 
   /**

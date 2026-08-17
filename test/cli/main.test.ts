@@ -582,6 +582,93 @@ describe("executeCollect — multi-source dispatch", () => {
     expect(outcome.unnormalizable).toBe(1);
     expect(outcome.error).toContain("No normalizer registered");
   });
+
+  it("counts an item the normalizer rejects as unnormalizable, not silently (docs/audit AC-012)", async () => {
+    // The bug this guards: a registered normalizer returning null (as
+    // opposed to no normalizer being registered at all) was not counted
+    // anywhere on this internal path — executeIngestExternal already
+    // counted the equivalent case correctly.
+    const collector = stubCollector({
+      source: "gupy",
+      collectedAt: new Date(),
+      postings: [
+        {
+          source: "gupy",
+          sourceId: "1",
+          payload: gupyPayload(1, "Estágio válido"),
+        },
+        // careerPageName empty -> normalizeGupyJob returns null
+        {
+          source: "gupy",
+          sourceId: "2",
+          payload: gupyPayload(2, "Sem empresa", ""),
+        },
+      ],
+    });
+
+    const outcome = await executeCollect(
+      db,
+      () => collector,
+      [{}],
+      undefined,
+      0,
+    );
+
+    expect(outcome.normalized).toBe(1);
+    expect(outcome.unnormalizable).toBe(1);
+    expect(outcome.error).toBeUndefined();
+
+    const run = new RunsRepository(db).findById(outcome.runId);
+    expect(run?.unnormalizableCount).toBe(1);
+  });
+
+  it("sums receivedCount and schemaRejectedCount across collectors (docs/audit AC-012)", async () => {
+    const collector: CollectorPort = {
+      collect: async () => ({
+        source: "gupy",
+        collectedAt: new Date(),
+        postings: [
+          { source: "gupy", sourceId: "1", payload: gupyPayload(1, "x") },
+        ],
+        receivedCount: 5,
+        schemaRejectedCount: 3,
+      }),
+    };
+
+    const outcome = await executeCollect(
+      db,
+      () => collector,
+      [{ source: "gupy" }, { source: "gupy" }],
+      undefined,
+      0,
+    );
+
+    expect(outcome.received).toBe(10);
+    expect(outcome.schemaRejected).toBe(6);
+
+    const run = new RunsRepository(db).findById(outcome.runId);
+    expect(run?.receivedCount).toBe(10);
+    expect(run?.schemaRejectedCount).toBe(6);
+  });
+
+  it("defaults received/schemaRejected to 0 when a collector does not report them", async () => {
+    const collector = stubCollector({
+      source: "gupy",
+      collectedAt: new Date(),
+      postings: [],
+    });
+
+    const outcome = await executeCollect(
+      db,
+      () => collector,
+      [{}],
+      undefined,
+      0,
+    );
+
+    expect(outcome.received).toBe(0);
+    expect(outcome.schemaRejected).toBe(0);
+  });
 });
 
 describe("executeDedup", () => {

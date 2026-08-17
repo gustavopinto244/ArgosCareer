@@ -90,6 +90,18 @@ describe("RunsRepository", () => {
     expect(repository.findById(runId)?.outcome).toBe("failed");
   });
 
+  it("records receivedCount and schemaRejectedCount (docs/audit AC-012)", () => {
+    const runId = repository.start("collect", new Date());
+    repository.finish(runId, new Date(), "success", {
+      receivedCount: 50,
+      schemaRejectedCount: 3,
+    });
+
+    const row = repository.findById(runId);
+    expect(row?.receivedCount).toBe(50);
+    expect(row?.schemaRejectedCount).toBe(3);
+  });
+
   it("records tooOldCount, unnormalizableCount and failureReason (docs/11 B2)", () => {
     const runId = repository.start("collect", new Date());
     repository.finish(runId, new Date(), "failed", {

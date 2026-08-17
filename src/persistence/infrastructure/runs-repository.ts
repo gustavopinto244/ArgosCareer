@@ -17,6 +17,11 @@ export interface RunCounts {
   readonly deliveredCount?: number;
   readonly tooOldCount?: number;
   readonly unnormalizableCount?: number;
+  /** Total raw items collectors reported receiving this run, before their
+   * own item schema validated any of them (docs/audit AC-012). */
+  readonly receivedCount?: number;
+  /** Of `receivedCount`, how many failed a collector's own item schema. */
+  readonly schemaRejectedCount?: number;
   readonly failureReason?: string | null;
   /** Serialized to JSON text by `finish` — read back with
    * `parseFailedSources`. */

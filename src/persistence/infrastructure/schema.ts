@@ -175,6 +175,15 @@ export const runs = sqliteTable("runs", {
   // discarded once the run row was written.
   tooOldCount: integer("too_old_count").notNull().default(0),
   unnormalizableCount: integer("unnormalizable_count").notNull().default(0),
+  // docs/audit/AUDIT_REPORT.md AC-012: without these, `collectedCount` (raw
+  // items that passed a collector's own item schema) could not be checked
+  // against how many the source actually returned, or how many silently
+  // failed that schema before ever becoming a candidate `Posting`. A
+  // collector that cannot report `receivedCount` leaves it 0, same as
+  // never having run — honestly incomplete, not a false zero for a source
+  // that is actually failing.
+  receivedCount: integer("received_count").notNull().default(0),
+  schemaRejectedCount: integer("schema_rejected_count").notNull().default(0),
   // The first error message seen this run, collector-reported or a caught
   // exception — null on a clean run. Free text, not structured: the sources
   // of an error message are too varied (an HTTP status line, a Zod issue, a
