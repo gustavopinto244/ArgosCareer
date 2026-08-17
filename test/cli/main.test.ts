@@ -95,6 +95,14 @@ describe("executeCollect", () => {
     const run = runsRepo.findById(outcome.runId);
     expect(run?.outcome).toBe("success");
     expect(run?.newCount).toBe(2);
+
+    // docs/audit PR-021: collection had no posting_events coverage at all
+    // before this -- a posting's fate before scoring was previously only
+    // answerable from the run-level aggregate, never per-posting.
+    const events = new PostingEventsRepository(db).findByRun(outcome.runId);
+    const collectEvents = events.filter((e) => e.stage === "collect");
+    expect(collectEvents).toHaveLength(2);
+    expect(collectEvents.every((e) => e.outcome === "new")).toBe(true);
   });
 
   it("reports already-seen postings on a second run over the same source data", async () => {
@@ -117,6 +125,11 @@ describe("executeCollect", () => {
 
     expect(second.isNew).toBe(0);
     expect(second.alreadySeen).toBe(1);
+
+    const events = new PostingEventsRepository(db).findByRun(second.runId);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.stage).toBe("collect");
+    expect(events[0]?.outcome).toBe("already_seen");
   });
 
   it("skips a normalize failure without failing the whole run", async () => {
@@ -339,6 +352,12 @@ describe("executeCollect — recency window (ADR-019)", () => {
 
     expect(outcome.normalized).toBe(1);
     expect(outcome.tooOld).toBe(1);
+
+    const events = new PostingEventsRepository(db).findByRun(outcome.runId);
+    const tooOldEvents = events.filter((e) => e.outcome === "too_old");
+    expect(tooOldEvents).toHaveLength(1);
+    expect(tooOldEvents[0]?.stage).toBe("collect");
+    expect(tooOldEvents[0]?.reason).toMatch(/publishedAt.*before cutoff/);
   });
 
   it("keeps a posting the source never dated — absence is not evidence of age", async () => {

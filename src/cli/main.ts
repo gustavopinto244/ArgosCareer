@@ -178,6 +178,7 @@ export async function executeCollect(
 ): Promise<CollectOutcome> {
   const postingsRepo = new PostingsRepository(db);
   const runsRepo = new RunsRepository(db);
+  const postingEventsRepo = new PostingEventsRepository(db);
 
   // Per-source, not one global window (docs/audit PR-003): the previous
   // single `lastSuccessfulCollectAt` read from `findLatestFinished("collect",
@@ -301,6 +302,14 @@ export async function executeCollect(
         // Dispatch by the source the payload declares, not by which collector
         // was passed in — an unregistered source is a wiring bug, and saying
         // so beats dropping every posting and looking like an empty source.
+        //
+        // Neither rejection below gets a posting_events row (docs/audit
+        // PR-021 asks for one) — `posting_events.fingerprint` is `NOT
+        // NULL`, and a fingerprint only exists once `normalize` has
+        // already turned a raw payload into a `Posting`. A raw item that
+        // never became one has nothing to key an event on; the run-level
+        // `unnormalizableCount` aggregate is what represents this case,
+        // same as before.
         const normalize = normalizerFor(raw.source);
         if (!normalize) {
           firstError ??= `No normalizer registered for source "${raw.source}"`;
@@ -325,12 +334,33 @@ export async function executeCollect(
           posting.publishedAt.getTime() < cutoff.getTime()
         ) {
           tooOld += 1;
+          // Collection had no posting_events coverage at all before this
+          // (docs/audit PR-021) — a posting dropped here previously left
+          // no trace beyond the run-level `tooOldCount` aggregate, giving
+          // no way to answer "why isn't this specific posting in the
+          // corpus" the way prefilter/score/dedup already can.
+          postingEventsRepo.record({
+            runId,
+            fingerprint: posting.fingerprint,
+            stage: "collect",
+            outcome: "too_old",
+            reason: `publishedAt ${posting.publishedAt.toISOString()} before cutoff ${cutoff.toISOString()}`,
+            occurredAt: collectedAt,
+          });
           continue;
         }
         normalized += 1;
         const { wasNew } = postingsRepo.upsert(posting);
         if (wasNew) isNew += 1;
         else alreadySeen += 1;
+        postingEventsRepo.record({
+          runId,
+          fingerprint: posting.fingerprint,
+          stage: "collect",
+          outcome: wasNew ? "new" : "already_seen",
+          reason: null,
+          occurredAt: collectedAt,
+        });
       }
     }
   } catch (cause) {
