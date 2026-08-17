@@ -214,7 +214,12 @@ export async function executeCollect(
         failures += 1;
         failedSources.add(source);
         firstError ??= result.error.message;
-        continue;
+        // No `continue` here (docs/audit AC-004): a page-2+ failure still
+        // leaves `result.postings` holding whatever pages already
+        // succeeded, and those are real, valid postings — normalizing and
+        // persisting them below is not a consolation prize, it is the
+        // point. The run is still recorded failed via `failures`/
+        // `failedSources` above; only the postings survive.
       }
 
       const collectedAt = now();

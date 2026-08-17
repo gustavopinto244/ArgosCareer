@@ -111,8 +111,10 @@ function keep(vaga: CieeVaga, criteria: CieeCollectorCriteria): boolean {
 
 /**
  * CIEE — Brazil's largest internship agency (M11). Never throws: every
- * failure path returns a `CollectionResult` with `error` set and `postings`
- * empty, matching `CollectorPort` (principle 1).
+ * failure path returns a `CollectionResult` with `error` set, matching
+ * `CollectorPort` (principle 1). `postings` carries whatever pages already
+ * succeeded before the failing one, not `[]` unconditionally (docs/audit
+ * AC-004).
  *
  * **Fetches the whole board, then filters in memory**, which is not how
  * `GupyCollector` works and is not a preference. Every filter parameter
@@ -179,8 +181,10 @@ export class CieeCollector implements CollectorPort {
         if (!response.ok) {
           return {
             source: SOURCE,
-            postings: [],
+            postings,
             collectedAt,
+            receivedCount: scanned,
+            schemaRejectedCount,
             error: {
               message: `CIEE responded ${response.status} ${response.statusText}`,
             },
@@ -193,8 +197,10 @@ export class CieeCollector implements CollectorPort {
         } catch (cause) {
           return {
             source: SOURCE,
-            postings: [],
+            postings,
             collectedAt,
+            receivedCount: scanned,
+            schemaRejectedCount,
             error: { message: "Malformed CIEE response body", cause },
           };
         }
@@ -203,8 +209,10 @@ export class CieeCollector implements CollectorPort {
         if (!envelope.success) {
           return {
             source: SOURCE,
-            postings: [],
+            postings,
             collectedAt,
+            receivedCount: scanned,
+            schemaRejectedCount,
             error: {
               message: "Unexpected CIEE response shape",
               cause: envelope.error,
@@ -246,8 +254,10 @@ export class CieeCollector implements CollectorPort {
       const detail = cause instanceof Error ? cause.message : String(cause);
       return {
         source: SOURCE,
-        postings: [],
+        postings,
         collectedAt,
+        receivedCount: scanned,
+        schemaRejectedCount,
         error: { message: `CIEE request failed: ${detail}`, cause },
       };
     }

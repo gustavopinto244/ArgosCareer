@@ -109,6 +109,32 @@ describe("CieeCollector — never throws", () => {
     expect(result.error?.message).toContain("Invalid CIEE collection criteria");
     expect(fetchImpl).not.toHaveBeenCalled();
   });
+
+  it("keeps postings from a successful first page when the second page fails (docs/audit AC-004)", async () => {
+    let call = 0;
+    const fetchImpl = vi.fn(async () => {
+      call += 1;
+      if (call === 1) {
+        return jsonResponse({
+          content: [{ codigoVaga: 1, nivelEscolar: "SU" }],
+          last: false,
+        });
+      }
+      return new Response("Server Error", { status: 500 });
+    });
+    const collector = new CieeCollector({
+      fetchImpl,
+      timeoutMs: 50,
+      requestIntervalMs: 0,
+      backoffDelaysMs: [1, 1],
+    });
+
+    const result = await collector.collect({ pageSize: 1 });
+
+    expect(result.postings).toHaveLength(1);
+    expect(result.error).toBeDefined();
+    expect(result.error?.message).toContain("CIEE request failed");
+  });
 });
 
 describe("CieeCollector — client-side filtering", () => {
