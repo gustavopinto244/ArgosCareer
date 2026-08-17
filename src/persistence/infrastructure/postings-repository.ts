@@ -16,6 +16,21 @@ export interface UpsertResult {
   readonly wasNew: boolean;
 }
 
+/** `rawPayload` is `unknown` by contract (`posting.ts`) — an opaque debug/
+ * audit snapshot, never read by any pipeline logic (only ever written by
+ * `upsert` with `JSON.stringify`'s own output). A restore or manual edit
+ * that truncates or corrupts it (docs/audit AC-031) must not take down
+ * *every* read of the row it belongs to — `findActive`/`findUnnotified`/
+ * dedup all hydrate through this same path — so a parse failure degrades to
+ * a marker value instead of throwing. */
+function parseRawPayload(value: string): unknown {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return { corrupted: true };
+  }
+}
+
 function rowToPosting(row: PostingRow): Posting {
   const location: Location =
     row.locationKind === "known" && row.locationCity !== null
@@ -42,7 +57,7 @@ function rowToPosting(row: PostingRow): Posting {
     collectedAt: row.lastSeenAt,
     firstSeenAt: row.firstSeenAt,
     lastSeenAt: row.lastSeenAt,
-    rawPayload: JSON.parse(row.rawPayload) as unknown,
+    rawPayload: parseRawPayload(row.rawPayload),
   };
 }
 

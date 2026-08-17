@@ -8,6 +8,19 @@ export interface FingerprintedMatches {
   readonly matches: readonly Match[];
 }
 
+/** `null` on anything that does not parse as an array — same reasoning as
+ * `extractions-repository.ts`'s `parseRequirements` (docs/audit AC-031): a
+ * corrupted cache row must read back as a miss, not throw and take down
+ * whatever read it. */
+function parseMatches(value: string): Match[] | null {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) ? (parsed as Match[]) : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Stage B's cache, keyed `(fingerprint, profileHash, promptVersion)`
  * (ADR-007). `profileHash` is what makes this cache correct: editing the
@@ -75,7 +88,7 @@ export class MatchesRepository {
       )
       .get();
 
-    return row ? (JSON.parse(row.matches) as Match[]) : null;
+    return row ? parseMatches(row.matches) : null;
   }
 
   /**
@@ -100,9 +113,14 @@ export class MatchesRepository {
       )
       .all();
 
-    return rows.map((row) => ({
-      fingerprint: row.fingerprint,
-      matches: JSON.parse(row.matches) as Match[],
-    }));
+    // A corrupted row is skipped, not fatal to the whole scan (same
+    // reasoning as `find` above).
+    const result: FingerprintedMatches[] = [];
+    for (const row of rows) {
+      const parsed = parseMatches(row.matches);
+      if (!parsed) continue;
+      result.push({ fingerprint: row.fingerprint, matches: parsed });
+    }
+    return result;
   }
 }

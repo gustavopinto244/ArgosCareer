@@ -2,19 +2,22 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { sql } from "drizzle-orm";
 import {
   createDatabase,
+  Db,
   runMigrations,
 } from "../../src/persistence/infrastructure/db";
 import { MatchesRepository } from "../../src/persistence/infrastructure/matches-repository";
 import { createMatch, Match } from "../../src/scoring/domain/types";
 
 let dir: string;
+let db: Db;
 let repository: MatchesRepository;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "argos-matches-"));
-  const db = createDatabase(join(dir, "argos.db"));
+  db = createDatabase(join(dir, "argos.db"));
   runMigrations(db);
   repository = new MatchesRepository(db);
 });
@@ -80,6 +83,41 @@ describe("MatchesRepository", () => {
 
     it("returns an empty array when nothing is cached for that key", () => {
       expect(repository.findAllForProfile("hash1", "b-v1")).toEqual([]);
+    });
+  });
+
+  describe("corrupted cache rows (docs/audit AC-031)", () => {
+    it("find treats truncated JSON as a cache miss instead of throwing", () => {
+      repository.upsert("fp1", "hash1", "b-v1", matchList(), new Date());
+      // A real restore/manual-edit scenario, not a mock -- write truncated
+      // JSON directly into the column, bypassing upsert's own JSON.stringify.
+      db.run(
+        sql`UPDATE matches SET matches = '[{"requirement"' WHERE fingerprint = 'fp1'`,
+      );
+
+      expect(() => repository.find("fp1", "hash1", "b-v1")).not.toThrow();
+      expect(repository.find("fp1", "hash1", "b-v1")).toBeNull();
+    });
+
+    it("find treats valid JSON that is not an array as a cache miss", () => {
+      repository.upsert("fp1", "hash1", "b-v1", matchList(), new Date());
+      db.run(
+        sql`UPDATE matches SET matches = '{"not": "an array"}' WHERE fingerprint = 'fp1'`,
+      );
+
+      expect(repository.find("fp1", "hash1", "b-v1")).toBeNull();
+    });
+
+    it("findAllForProfile skips a corrupted row instead of failing the whole scan", () => {
+      repository.upsert("fp1", "hash1", "b-v1", matchList(), new Date());
+      repository.upsert("fp2", "hash1", "b-v1", matchList(), new Date());
+      db.run(
+        sql`UPDATE matches SET matches = 'not json at all' WHERE fingerprint = 'fp1'`,
+      );
+
+      expect(() => repository.findAllForProfile("hash1", "b-v1")).not.toThrow();
+      const all = repository.findAllForProfile("hash1", "b-v1");
+      expect(all.map((r) => r.fingerprint)).toEqual(["fp2"]);
     });
   });
 });

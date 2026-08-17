@@ -131,6 +131,25 @@ describe("PostingsRepository.upsert", () => {
     );
     expect(result.posting.rawPayload).toEqual({ id: 123, note: "original" });
   });
+
+  it("hydrates with a marker rawPayload instead of throwing when the stored JSON is corrupted (docs/audit AC-031)", () => {
+    const inserted = repository.upsert(posting()).posting;
+    // A real restore/manual-edit scenario, not a mock -- write truncated
+    // JSON directly into the column, bypassing upsert's own JSON.stringify.
+    db.update(postings)
+      .set({ rawPayload: '{"truncated' })
+      .where(eq(postings.fingerprint, inserted.fingerprint))
+      .run();
+
+    expect(() =>
+      repository.findByFingerprint(inserted.fingerprint),
+    ).not.toThrow();
+    const found = repository.findByFingerprint(inserted.fingerprint);
+    expect(found?.rawPayload).toEqual({ corrupted: true });
+    // The rest of the row still hydrates normally -- corruption in this one
+    // opaque field must not take the whole posting down with it.
+    expect(found?.company).toBe("Empresa X");
+  });
 });
 
 describe("PostingsRepository.findByFingerprint / findByCompany", () => {
