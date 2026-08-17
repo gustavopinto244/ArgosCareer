@@ -6,7 +6,10 @@ import {
   createDatabase,
   runMigrations,
 } from "../../src/persistence/infrastructure/db";
-import { RunsRepository } from "../../src/persistence/infrastructure/runs-repository";
+import {
+  RunsRepository,
+  parseFailedSources,
+} from "../../src/persistence/infrastructure/runs-repository";
 
 let dir: string;
 let repository: RunsRepository;
@@ -85,5 +88,50 @@ describe("RunsRepository", () => {
     repository.finish(runId, new Date(), "failed");
 
     expect(repository.findById(runId)?.outcome).toBe("failed");
+  });
+
+  it("records tooOldCount, unnormalizableCount and failureReason (docs/11 B2)", () => {
+    const runId = repository.start("collect", new Date());
+    repository.finish(runId, new Date(), "failed", {
+      tooOldCount: 4,
+      unnormalizableCount: 2,
+      failureReason: "Gupy responded 500",
+    });
+
+    const row = repository.findById(runId);
+    expect(row?.tooOldCount).toBe(4);
+    expect(row?.unnormalizableCount).toBe(2);
+    expect(row?.failureReason).toBe("Gupy responded 500");
+  });
+
+  it("leaves failureReason null when not supplied, not the string 'null'", () => {
+    const runId = repository.start("collect", new Date());
+    repository.finish(runId, new Date(), "success", {});
+
+    expect(repository.findById(runId)?.failureReason).toBeNull();
+  });
+
+  it("serializes failedSources to JSON, read back via parseFailedSources", () => {
+    const runId = repository.start("collect", new Date());
+    repository.finish(runId, new Date(), "failed", {
+      failedSources: ["indeed", "catho"],
+    });
+
+    const row = repository.findById(runId);
+    expect(row).not.toBeNull();
+    expect(parseFailedSources(row!)).toEqual(["indeed", "catho"]);
+  });
+
+  it("parseFailedSources returns an empty array when nothing failed", () => {
+    const runId = repository.start("collect", new Date());
+    repository.finish(runId, new Date(), "success", {});
+
+    const row = repository.findById(runId);
+    expect(row).not.toBeNull();
+    expect(parseFailedSources(row!)).toEqual([]);
+  });
+
+  it("parseFailedSources tolerates malformed JSON rather than throwing", () => {
+    expect(parseFailedSources({ failedSources: "not json" })).toEqual([]);
   });
 });

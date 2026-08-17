@@ -167,4 +167,22 @@ export const runs = sqliteTable("runs", {
   filteredCount: integer("filtered_count").notNull().default(0),
   scoredCount: integer("scored_count").notNull().default(0),
   deliveredCount: integer("delivered_count").notNull().default(0),
+  // The rest (docs/11-known-issues.md B2): a `collect` run with
+  // `collectedCount: N, normalizedCount: 0` used to be unexplainable after
+  // the fact — recency window, a missing normalizer and a source that
+  // returned nothing all looked identical. These four columns are exactly
+  // what `executeCollect` already computed in memory and previously
+  // discarded once the run row was written.
+  tooOldCount: integer("too_old_count").notNull().default(0),
+  unnormalizableCount: integer("unnormalizable_count").notNull().default(0),
+  // The first error message seen this run, collector-reported or a caught
+  // exception — null on a clean run. Free text, not structured: the sources
+  // of an error message are too varied (an HTTP status line, a Zod issue, a
+  // driver exception) to usefully type any tighter than `Error.message`.
+  failureReason: text("failure_reason"),
+  // JSON-serialized string[] of source names that failed this run — parse
+  // with `parseFailedSources` (runs-repository.ts), the same manual
+  // serialize/parse precedent `requirements`/`matches` already use rather
+  // than drizzle's json column mode. Null, not "[]", when nothing failed.
+  failedSources: text("failed_sources"),
 });

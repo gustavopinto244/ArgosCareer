@@ -30,7 +30,10 @@ import {
   runMigrations,
 } from "../persistence/infrastructure/db";
 import { PostingsRepository } from "../persistence/infrastructure/postings-repository";
-import { RunsRepository } from "../persistence/infrastructure/runs-repository";
+import {
+  RunsRepository,
+  parseFailedSources,
+} from "../persistence/infrastructure/runs-repository";
 import { applyPreFilter } from "../prefilter/domain/pre-filter";
 import { Criteria } from "../prefilter/domain/criteria";
 import { loadCriteria } from "../prefilter/infrastructure/criteria-loader";
@@ -142,6 +145,11 @@ export async function executeCollect(
   let tooOld = 0;
   let unnormalizable = 0;
   let firstError: string | undefined;
+  // Which source(s) actually failed this run (docs/11-known-issues.md B2) —
+  // a Set because the same source can appear in several queries
+  // (config/criteria.yaml's per-city Gupy queries) and should only be
+  // reported once.
+  const failedSources = new Set<string>();
 
   // Same bookkeeping guarantee `executeDeliver` documents: a throw between
   // `start` and `finish` must not leave the row open. Collectors cannot throw
@@ -164,6 +172,7 @@ export async function executeCollect(
       const collector = collectors(source);
       if (!collector) {
         failures += 1;
+        failedSources.add(source);
         firstError ??= `No collector registered for source "${source}"`;
         continue;
       }
@@ -173,6 +182,7 @@ export async function executeCollect(
 
       if (result.error) {
         failures += 1;
+        failedSources.add(source);
         firstError ??= result.error.message;
         continue;
       }
@@ -185,6 +195,7 @@ export async function executeCollect(
         const normalize = normalizerFor(raw.source);
         if (!normalize) {
           firstError ??= `No normalizer registered for source "${raw.source}"`;
+          failedSources.add(raw.source);
           unnormalizable += 1;
           continue;
         }
@@ -208,11 +219,16 @@ export async function executeCollect(
       }
     }
   } catch (cause) {
+    const message = cause instanceof Error ? cause.message : String(cause);
     runsRepo.finish(runId, now(), "failed", {
       collectedCount: collected,
       normalizedCount: normalized,
       newCount: isNew,
       alreadySeenCount: alreadySeen,
+      tooOldCount: tooOld,
+      unnormalizableCount: unnormalizable,
+      failureReason: firstError ?? message,
+      failedSources: [...failedSources],
     });
     throw cause;
   }
@@ -223,6 +239,10 @@ export async function executeCollect(
     normalizedCount: normalized,
     newCount: isNew,
     alreadySeenCount: alreadySeen,
+    tooOldCount: tooOld,
+    unnormalizableCount: unnormalizable,
+    failureReason: firstError ?? null,
+    failedSources: [...failedSources],
   });
 
   return {
@@ -451,12 +471,12 @@ export async function executeDeliver(
       0,
     );
     const deduplicated = Math.max(0, newCount - duplicateCount);
-    // Only one collector exists in M6 (Gupy) and runs carry no per-source
-    // breakdown yet — a failed collect run in the window is reported as
-    // "gupy" until a multi-source run records which source actually failed.
-    const failedSources = collectRuns.some((r) => r.outcome === "failed")
-      ? ["gupy"]
-      : [];
+    // Real per-source breakdown (docs/11-known-issues.md B2) — each collect
+    // run now records which source(s) actually failed it, so this is a
+    // union over the window rather than a guess.
+    const failedSources = [
+      ...new Set(collectRuns.flatMap((r) => parseFailedSources(r))),
+    ];
 
     const profileKeywords = deriveProfileKeywords(profile);
     const profileHash = hashProfile(profile);

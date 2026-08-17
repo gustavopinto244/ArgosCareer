@@ -72,6 +72,35 @@ function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
   });
 }
 
+function rateLimited(retryAfterSeconds?: number): Response {
+  return jsonResponse(
+    {
+      ok: false,
+      error_code: 429,
+      description: "Too Many Requests: retry after " + retryAfterSeconds,
+      ...(retryAfterSeconds === undefined
+        ? {}
+        : { parameters: { retry_after: retryAfterSeconds } }),
+    },
+    { status: 429 },
+  );
+}
+
+// No test lets real pacing/retry delays elapse — either pacingMs: 0 for
+// tests that don't care about it, or fake timers for tests that do.
+const NO_PACING = { pacingMs: 0 };
+
+function manyScoredEntries(count: number): ScoredPosting[] {
+  const scored: ScoredPosting = { posting: posting(), outcome: outcome() };
+  return Array.from({ length: count }, (_, i) => ({
+    ...scored,
+    posting: posting({
+      sourceId: String(i),
+      sourceUrl: `https://example.org/${i}`,
+    }),
+  }));
+}
+
 describe("splitForTelegram", () => {
   it("returns a single chunk when the whole text fits under the limit", () => {
     const chunks = splitForTelegram("a\n\n---\n\nb\n\n---\n\nc");
@@ -133,21 +162,168 @@ describe("TelegramNotifier — success", () => {
   });
 
   it("sends one request per chunk for a digest large enough to need several", async () => {
-    const scored: ScoredPosting = { posting: posting(), outcome: outcome() };
-    const many = Array.from({ length: 80 }, (_, i) => ({
-      ...scored,
-      posting: posting({
-        sourceId: String(i),
-        sourceUrl: `https://example.org/${i}`,
-      }),
-    }));
     const fetchImpl = vi.fn(async () => jsonResponse({ ok: true }));
-    const notifier = new TelegramNotifier(CONFIG, fetchImpl);
+    const notifier = new TelegramNotifier(CONFIG, fetchImpl, NO_PACING);
 
-    const result = await notifier.notify(emptyDigest({ review: many }));
+    const result = await notifier.notify(
+      emptyDigest({ review: manyScoredEntries(80) }),
+    );
 
     expect(result.ok).toBe(true);
     expect(fetchImpl.mock.calls.length).toBeGreaterThan(1);
+  });
+});
+
+describe("TelegramNotifier — pacing between chunks (docs/11 B3)", () => {
+  it("waits pacingMs before sending each chunk after the first", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi.fn(async () => jsonResponse({ ok: true }));
+      const notifier = new TelegramNotifier(CONFIG, fetchImpl, {
+        pacingMs: 1_100,
+      });
+
+      const promise = notifier.notify(
+        emptyDigest({ review: manyScoredEntries(80) }),
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      const afterFirstChunk = fetchImpl.mock.calls.length;
+      expect(afterFirstChunk).toBeGreaterThanOrEqual(1);
+
+      // Still paced, not yet fired: fetchImpl's call count hasn't grown just
+      // from letting microtasks flush.
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchImpl.mock.calls.length).toBe(afterFirstChunk);
+
+      await vi.advanceTimersByTimeAsync(1_100);
+      expect(fetchImpl.mock.calls.length).toBeGreaterThan(afterFirstChunk);
+
+      await vi.runAllTimersAsync();
+      const result = await promise;
+      expect(result.ok).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not wait before the very first chunk", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi.fn(async () => jsonResponse({ ok: true }));
+      const notifier = new TelegramNotifier(CONFIG, fetchImpl, {
+        pacingMs: 60_000,
+      });
+
+      const promise = notifier.notify(emptyDigest());
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+      await vi.runAllTimersAsync();
+      await promise;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("TelegramNotifier — 429 retry, honoring retry_after (docs/11 B3)", () => {
+  it("retries once retry_after elapses, then succeeds", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi
+        .fn()
+        .mockResolvedValueOnce(rateLimited(5))
+        .mockResolvedValueOnce(jsonResponse({ ok: true }));
+      const notifier = new TelegramNotifier(CONFIG, fetchImpl, NO_PACING);
+
+      const promise = notifier.notify(emptyDigest());
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+      // Not yet retried at less than the stated 5s.
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1);
+      const result = await promise;
+      expect(result.ok).toBe(true);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("gives up and reports failure after exhausting maxRetries on persistent 429", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi.fn(async () => rateLimited(0));
+      const notifier = new TelegramNotifier(CONFIG, fetchImpl, {
+        ...NO_PACING,
+        maxRetries: 2,
+      });
+
+      const promise = notifier.notify(emptyDigest());
+      const result = await vi.waitFor(async () => {
+        await vi.advanceTimersByTimeAsync(1_000);
+        return promise;
+      });
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain("429");
+        expect(result.error.message).toContain("2 retries");
+      }
+      // Initial attempt + 2 retries, never more.
+      expect(fetchImpl).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("falls back to a default wait when retry_after is missing", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi
+        .fn()
+        .mockResolvedValueOnce(rateLimited(undefined))
+        .mockResolvedValueOnce(jsonResponse({ ok: true }));
+      const notifier = new TelegramNotifier(CONFIG, fetchImpl, NO_PACING);
+
+      const promise = notifier.notify(emptyDigest());
+      await vi.runAllTimersAsync();
+      const result = await promise;
+
+      expect(result.ok).toBe(true);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("caps an excessive retry_after at retryAfterCapMs rather than waiting the full stated time", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi
+        .fn()
+        .mockResolvedValueOnce(rateLimited(3_600)) // an hour, stated
+        .mockResolvedValueOnce(jsonResponse({ ok: true }));
+      const notifier = new TelegramNotifier(CONFIG, fetchImpl, {
+        ...NO_PACING,
+        retryAfterCapMs: 10_000,
+      });
+
+      const promise = notifier.notify(emptyDigest());
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+      // Capped well under the stated hour.
+      await vi.advanceTimersByTimeAsync(10_000);
+      const result = await promise;
+      expect(result.ok).toBe(true);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -183,24 +359,30 @@ describe("TelegramNotifier — failure, never throws", () => {
   });
 
   it("stops sending further chunks once one chunk fails", async () => {
-    const scored: ScoredPosting = { posting: posting(), outcome: outcome() };
-    const many = Array.from({ length: 80 }, (_, i) => ({
-      ...scored,
-      posting: posting({
-        sourceId: String(i),
-        sourceUrl: `https://example.org/${i}`,
-      }),
-    }));
     const fetchImpl = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse({ ok: true }))
       .mockResolvedValueOnce(new Response("Server Error", { status: 500 }));
-    const notifier = new TelegramNotifier(CONFIG, fetchImpl);
+    const notifier = new TelegramNotifier(CONFIG, fetchImpl, NO_PACING);
 
-    const result = await notifier.notify(emptyDigest({ review: many }));
+    const result = await notifier.notify(
+      emptyDigest({ review: manyScoredEntries(80) }),
+    );
 
     expect(result.ok).toBe(false);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry a plain 5xx the way it retries a 429", async () => {
+    const fetchImpl = vi.fn(
+      async () => new Response("Server Error", { status: 500 }),
+    );
+    const notifier = new TelegramNotifier(CONFIG, fetchImpl, NO_PACING);
+
+    const result = await notifier.notify(emptyDigest());
+
+    expect(result.ok).toBe(false);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });
 

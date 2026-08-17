@@ -15,6 +15,29 @@ export interface RunCounts {
   readonly filteredCount?: number;
   readonly scoredCount?: number;
   readonly deliveredCount?: number;
+  readonly tooOldCount?: number;
+  readonly unnormalizableCount?: number;
+  readonly failureReason?: string | null;
+  /** Serialized to JSON text by `finish` — read back with
+   * `parseFailedSources`. */
+  readonly failedSources?: readonly string[];
+}
+
+/** `RunRow.failedSources` is raw JSON text (schema.ts's note on why: same
+ * manual serialize/parse precedent as `requirements`/`matches`). Empty array
+ * on null/unparseable rather than a throw — a run row is read far more often
+ * than it is written, and a malformed value here must not break `/health` or
+ * `executeDeliver`'s failed-source summary. */
+export function parseFailedSources(
+  row: Pick<RunRow, "failedSources">,
+): string[] {
+  if (!row.failedSources) return [];
+  try {
+    const parsed: unknown = JSON.parse(row.failedSources);
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -42,9 +65,17 @@ export class RunsRepository {
     outcome: RunOutcome,
     counts: RunCounts = {},
   ): void {
+    const { failedSources, ...rest } = counts;
     this.db
       .update(runs)
-      .set({ finishedAt, outcome, ...counts })
+      .set({
+        finishedAt,
+        outcome,
+        ...rest,
+        ...(failedSources === undefined
+          ? {}
+          : { failedSources: JSON.stringify(failedSources) }),
+      })
       .where(eq(runs.runId, runId))
       .run();
   }
