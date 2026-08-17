@@ -11,6 +11,11 @@ import { z } from "zod";
 import { MarketService } from "./market.service";
 import { PostingsService } from "./postings.service";
 import { RunsService } from "./runs.service";
+import {
+  principalFromRequest,
+  requirePrincipalKind,
+  AuthPrincipal,
+} from "./auth-principal";
 
 function jsonResult(value: unknown): CallToolResult {
   return { content: [{ type: "text", text: JSON.stringify(value) }] };
@@ -63,7 +68,7 @@ export class McpController {
   @Post()
   async handle(@Req() req: Request, @Res() res: Response): Promise<void> {
     const server = new McpServer({ name: "argos-career", version: "1.0.0" });
-    this.registerTools(server);
+    this.registerTools(server, principalFromRequest(req));
 
     // Explicit `undefined` is stateless mode (the SDK's own documented way
     // to request it) — a cast is needed only because the project's
@@ -92,7 +97,7 @@ export class McpController {
     await transport.handleRequest(req, res, req.body);
   }
 
-  private registerTools(server: McpServer): void {
+  private registerTools(server: McpServer, principal: AuthPrincipal): void {
     server.registerTool(
       "get_health",
       {
@@ -134,13 +139,13 @@ export class McpController {
           maxResults: z.number().int().positive().optional(),
         },
       },
-      (params) => safely(() => this.runs.collect(params)),
+      (params) => safely(() => this.runs.collect(params, principal.id)),
     );
 
     server.registerTool(
       "run_dedup",
       { description: "Re-scan the corpus for near-duplicates now." },
-      () => safely(() => this.runs.dedup()),
+      () => safely(() => this.runs.dedup(principal.id)),
     );
 
     server.registerTool(
@@ -151,7 +156,7 @@ export class McpController {
           "SCORER_ADAPTER=stub, and sends a real Telegram message — the same " +
           "thing the nightly cron does, callable early.",
       },
-      () => safely(() => this.runs.deliver()),
+      () => safely(() => this.runs.deliver(principal.id)),
     );
 
     server.registerTool(
@@ -181,7 +186,10 @@ export class McpController {
         },
       },
       ({ fingerprint, reason }) =>
-        safely(() => this.postings.discard(fingerprint, reason)),
+        safely(() => {
+          requirePrincipalKind(principal, ["admin"]);
+          return this.postings.discard(fingerprint, reason);
+        }),
     );
   }
 }

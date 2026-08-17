@@ -52,8 +52,8 @@ import { runLockProvider } from "../../scheduling/infrastructure/run-lock.provid
  * controllers actually call. `RunLock` already stops two `deliver` runs
  * from overlapping; it says nothing about a leaked key calling either
  * protocol in a tight sequential loop. See `throttler-limits.ts` for the
- * actual numbers and why a full per-caller credential scope is
- * deliberately not what this is.
+ * actual numbers. ADR-047 partitions this budget by the authenticated
+ * principal's non-secret identifier.
  */
 @Module({
   imports: [

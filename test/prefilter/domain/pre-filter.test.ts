@@ -268,6 +268,7 @@ describe("applyPreFilter — maxFutureSkewDays (docs/audit AC-029)", () => {
       NOW,
     );
     expect(outcome.reason).toBe("too_old");
+    expect(outcome.anomalies).toEqual(["published_at_future"]);
   });
 
   it("falls back to a fresh firstSeenAt when publishedAt is implausibly future, so it still passes", () => {
@@ -281,6 +282,7 @@ describe("applyPreFilter — maxFutureSkewDays (docs/audit AC-029)", () => {
       NOW,
     );
     expect(outcome.passed).toBe(true);
+    expect(outcome.anomalies).toEqual(["published_at_future"]);
   });
 });
 

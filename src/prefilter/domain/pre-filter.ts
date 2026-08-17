@@ -23,7 +23,14 @@ export interface PreFilterOutcome {
   readonly passed: boolean;
   readonly reason: PreFilterRejectionReason | null;
   readonly tracks: readonly Track[];
+  /** Source-data anomalies that affected this decision but are not, by
+   * themselves, rejection reasons. Kept separate from `reason` so the
+   * conservative firstSeenAt fallback remains observable even when the
+   * posting otherwise passes every rule. */
+  readonly anomalies: readonly PreFilterAnomaly[];
 }
+
+export type PreFilterAnomaly = "published_at_future";
 
 function isCompanyBlocked(posting: Posting, criteria: Criteria): boolean {
   const normalizedCompany = normalize(posting.company);
@@ -93,15 +100,27 @@ function isTooOld(
   ) {
     return true;
   }
-  const futureSkewMs = maxFutureSkewDays * 24 * 60 * 60 * 1000;
-  const isImplausiblyFuture =
-    posting.publishedAt !== null &&
-    posting.publishedAt.getTime() - now.getTime() > futureSkewMs;
-  const reference = isImplausiblyFuture
+  const reference = hasImplausiblyFuturePublishedAt(
+    posting,
+    maxFutureSkewDays,
+    now,
+  )
     ? posting.firstSeenAt
     : (posting.publishedAt ?? posting.firstSeenAt);
   const ageMs = now.getTime() - reference.getTime();
   return ageMs > maxAgeDays * 24 * 60 * 60 * 1000;
+}
+
+function hasImplausiblyFuturePublishedAt(
+  posting: Posting,
+  maxFutureSkewDays: number,
+  now: Date,
+): boolean {
+  const futureSkewMs = maxFutureSkewDays * 24 * 60 * 60 * 1000;
+  return (
+    posting.publishedAt !== null &&
+    posting.publishedAt.getTime() - now.getTime() > futureSkewMs
+  );
 }
 
 /**
@@ -182,21 +201,29 @@ export function applyPreFilter(
     criteria.tracks,
     criteria.trackExclusions,
   );
+  const anomalies: readonly PreFilterAnomaly[] =
+    hasImplausiblyFuturePublishedAt(posting, criteria.maxFutureSkewDays, now)
+      ? ["published_at_future"]
+      : [];
+  const outcome = (
+    passed: boolean,
+    reason: PreFilterRejectionReason | null,
+  ): PreFilterOutcome => ({ passed, reason, tracks, anomalies });
 
   // Whole-word matching (`title-match.ts`), not substring: the blocklist's
   // "IV" was matching inside "nível", "universitário" and "afirmativa",
   // silently killing real internships.
   if (titleMatchesAny(posting.title, criteria.titleBlocklist)) {
-    return { passed: false, reason: "title_blocked", tracks };
+    return outcome(false, "title_blocked");
   }
   if (!titleMatchesAny(posting.title, criteria.titleRequired)) {
-    return { passed: false, reason: "title_missing_required_term", tracks };
+    return outcome(false, "title_missing_required_term");
   }
   if (isCompanyBlocked(posting, criteria)) {
-    return { passed: false, reason: "company_blocked", tracks };
+    return outcome(false, "company_blocked");
   }
   if (isExpired(posting, now)) {
-    return { passed: false, reason: "expired", tracks };
+    return outcome(false, "expired");
   }
   // After `expired`, before `location`: both are single-field date checks and
   // a closed posting is the more decisive rejection of the two.
@@ -209,10 +236,10 @@ export function applyPreFilter(
       now,
     )
   ) {
-    return { passed: false, reason: "too_old", tracks };
+    return outcome(false, "too_old");
   }
   if (!isLocationAllowed(posting, criteria)) {
-    return { passed: false, reason: "location_not_allowed", tracks };
+    return outcome(false, "location_not_allowed");
   }
   if (
     !hasMinKeywordAdherence(
@@ -221,8 +248,8 @@ export function applyPreFilter(
       criteria.minKeywordAdherence,
     )
   ) {
-    return { passed: false, reason: "insufficient_keyword_adherence", tracks };
+    return outcome(false, "insufficient_keyword_adherence");
   }
 
-  return { passed: true, reason: null, tracks };
+  return outcome(true, null);
 }

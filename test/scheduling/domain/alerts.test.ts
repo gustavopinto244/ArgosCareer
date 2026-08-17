@@ -11,6 +11,7 @@ function run(overrides: Partial<RunRow> = {}): RunRow {
   return {
     runId: "run-1",
     kind: "collect",
+    triggeredBy: "internal",
     startedAt: new Date("2026-08-15T10:00:00Z"),
     finishedAt: new Date("2026-08-15T10:01:00Z"),
     outcome: "success",
@@ -30,9 +31,15 @@ function run(overrides: Partial<RunRow> = {}): RunRow {
     failedSources: null,
     truncatedSources: null,
     attemptedSources: null,
+    sourceQueryStats: null,
     llmAttempts: 0,
     llmCostUsd: 0,
     llmAttemptsWithoutUsage: 0,
+    llmPromptTokens: 0,
+    llmCompletionTokens: 0,
+    llmCachedPromptTokens: 0,
+    llmBlockedByCircuit: 0,
+    llmOutcomeCounts: null,
     ...overrides,
   };
 }

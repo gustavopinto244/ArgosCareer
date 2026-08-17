@@ -153,6 +153,7 @@ describe("CieeCollector — client-side filtering", () => {
     // The fixture holds one SU posting and three EM ones: ensino médio is
     // ineligible for a university course, not merely a worse fit.
     expect(result.postings).toHaveLength(1);
+    expect(result.businessRejectedCount).toBe(3);
     expect(result.error).toBeUndefined();
   });
 

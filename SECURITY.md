@@ -78,13 +78,16 @@ then into a Telegram message. Two consequences the implementation must respect:
   every `met`/`partial` evidence quote against before it ever reaches
   `createMatch`. A repository audit (docs/audit AC-008) found this claim
   stated here but not actually checked in code until it was added.
-  **What this does not guarantee** (docs/audit PR-005, ADR-037): a genuine,
-  verbatim quote can still be attached to the wrong requirement — a prompt
-  injection cannot invent evidence, but it can still steer the model toward
-  real evidence that does not actually support the requirement it is being
-  used for. Both prompts now delimit untrusted content and instruct the model
-  not to treat it as instructions, which raises the bar; it is a mitigation,
-  not a proof, and closing this fully is open work (ADR-037's Consequences).
+  A second guard requires that the requirement name the quoted competency, an
+  alias, or the controlled vocabulary for a declared profile field; rejected
+  quotes are coerced to `not_met` and counted in `evidenceRejectedCount`.
+  **What this still does not guarantee** (docs/audit PR-005, ADR-049): lexical
+  applicability is not semantic proof. Hostile text can repeat a relevant term
+  while directing the model to use unrelated evidence. Both prompts also
+  delimit untrusted content and instruct the model not to treat it as
+  instructions. Together these controls raise the bar and expose rejection,
+  but a complete guarantee still requires a taxonomy or an independently
+  trusted verification pass.
 - **Posting text is escaped before delivery.** It reaches Telegram as data, not
   as markup.
 
@@ -97,15 +100,20 @@ Atlas is a personal server behind Cloudflare Tunnel with no inbound ports open.
 The M9 HTTP API is not exposed publicly without authentication, and the M8
 scheduled pipeline listens on nothing.
 
-**One `API_KEY` authorizes every caller** — n8n, host-side collectors and
-Hermes alike (ADR-017's documented starting point; Cloudflare Access/JWT is
-the named upgrade path, not built until a second consumer or public
-exposure actually arrives). A leaked key is a real risk this boundary does
-not eliminate, only bounds: every route is rate-limited (`ThrottlerGuard`),
-and `collect`/`deliver`/`ingestExternal` — the three that spend real
-OpenRouter budget or send a real Telegram message — carry a tighter,
-shared limit enforced once in `RunsService` so it holds regardless of
-whether the caller reaches them via REST or MCP (docs/audit AC-021).
+**Bearer credentials are separated by capability and caller** (ADR-047):
+`API_ADMIN_KEY` has full access; `API_AUTOMATION_KEY` can inspect and trigger
+ordinary operational work but cannot externally ingest or permanently discard;
+and each `INGEST_<SOURCE>_API_KEY` can only call external ingest for that exact
+source. Values must be distinct, are compared through fixed-size SHA-256 digests,
+and are never persisted. `runs.triggeredBy` stores only the role/source plus a
+short credential digest, which makes activity attributable without storing the
+secret. Legacy `API_KEY` is only an admin migration fallback.
+
+Every route is rate-limited (`ThrottlerGuard`). Operations that spend or create
+side effects have a tighter limit in `RunsService`, keyed by authenticated
+principal and operation so REST and MCP share the same budget without one
+legitimate caller consuming another caller's allowance. The limiter remains
+in-memory and resets on process restart; it is burst containment, not billing.
 
 Secrets reach the container through environment variables from a `.env` file
 readable only by its owner — never baked into an image, never in a

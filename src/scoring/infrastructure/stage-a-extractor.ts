@@ -2,7 +2,11 @@ import { z } from "zod";
 import { Posting, Seniority } from "../../posting/domain/posting";
 import { ExtractionsRepository } from "../../persistence/infrastructure/extractions-repository";
 import { normalizePostingContent } from "../domain/posting-content-hash";
-import { Requirement } from "../domain/types";
+import {
+  MAX_REQUIREMENT_CATEGORY_CHARS,
+  MAX_REQUIREMENT_TEXT_CHARS,
+  Requirement,
+} from "../domain/types";
 import { AskModel, parseModelOutputWithRetries } from "./llm-output";
 import { buildStageAPrompt, STAGE_A_PROMPT_VERSION } from "./prompts";
 
@@ -15,8 +19,7 @@ import { buildStageAPrompt, STAGE_A_PROMPT_VERSION } from "./prompts";
  * requirement blow up Stage B's per-requirement prompt (`REQUIREMENT_TEXT`,
  * `prompts.ts`) and the log label built from it (`stage-b-matcher.ts`).
  */
-export const MAX_REQUIREMENT_TEXT_CHARS = 500;
-export const MAX_REQUIREMENT_CATEGORY_CHARS = 100;
+export { MAX_REQUIREMENT_CATEGORY_CHARS, MAX_REQUIREMENT_TEXT_CHARS };
 
 const RequirementSchema = z.object({
   text: z.string().min(1).max(MAX_REQUIREMENT_TEXT_CHARS),
@@ -82,6 +85,7 @@ export type ExtractionResult =
        * `maxDescriptionChars` (docs/audit AC-017) — the model saw less than
        * the real posting said. Always present, never silent. */
       readonly inputTruncated: boolean;
+      readonly cacheHit: boolean;
     }
   | {
       readonly ok: false;
@@ -169,6 +173,7 @@ export class StageAExtractor {
         seniority: cached.seniority,
         experienceYears: cached.experienceYears,
         inputTruncated,
+        cacheHit: true,
       };
     }
 
@@ -185,7 +190,8 @@ export class StageAExtractor {
         requirements: [],
         seniority: null,
         experienceYears: null,
-        inputTruncated: false,
+        inputTruncated,
+        cacheHit: false,
       };
     }
 
@@ -217,7 +223,7 @@ export class StageAExtractor {
         ok: false,
         reason: "extraction_failed",
         attempts: result.attempts,
-        permanent: result.reason === "permanent_error",
+        permanent: result.reason === "permanent_error" && result.batchFatal,
       };
     }
 
@@ -229,6 +235,6 @@ export class StageAExtractor {
       result.data,
       now(),
     );
-    return { ok: true, ...result.data, inputTruncated };
+    return { ok: true, ...result.data, inputTruncated, cacheHit: false };
   }
 }

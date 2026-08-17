@@ -51,9 +51,17 @@ function decodeEntities(input: string): string {
         isHex ? code.slice(2) : code.slice(1),
         isHex ? 16 : 10,
       );
-      return Number.isFinite(codePoint)
-        ? String.fromCodePoint(codePoint)
-        : match;
+      // `String.fromCodePoint` throws for values above U+10FFFF. Numeric
+      // entities come from untrusted posting HTML, so one malformed entity
+      // must degrade to the Unicode replacement character rather than abort
+      // the whole score-and-deliver run. Surrogate code points are not valid
+      // Unicode scalar values either, even though JS accepts them here.
+      const isUnicodeScalar =
+        Number.isFinite(codePoint) &&
+        codePoint >= 0 &&
+        codePoint <= 0x10ffff &&
+        !(codePoint >= 0xd800 && codePoint <= 0xdfff);
+      return isUnicodeScalar ? String.fromCodePoint(codePoint) : "\uFFFD";
     }
     return NAMED_ENTITIES[code] ?? match;
   });

@@ -198,6 +198,7 @@ export class SolidesCollector implements CollectorPort {
         // `maxResults` are scanned/kept from this page, even though the
         // full page was already downloaded.
         const remaining = maxResults - receivedCount;
+        if (items.length > remaining) truncated = true;
         const itemsToProcess =
           items.length > remaining ? items.slice(0, remaining) : items;
 

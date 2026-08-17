@@ -37,10 +37,10 @@ export interface CircuitBreakerOptions {
 
 /**
  * A standard closed/open/half-open breaker. Only *transient* failures
- * (`isTransientFailure` in `openrouter-client.ts`) count toward opening it —
- * a single posting's bad API key is a config problem local to that request,
- * not evidence the provider is down for everyone, so `onFailure(false)` is a
- * no-op rather than something that should ever be able to trip the breaker.
+ * (`isBreakerTrippingFailure` in `openrouter-client.ts`) count toward opening
+ * it. A request-local failure does not increment the threshold. If it is the
+ * half-open trial, however, it proves the transport answered and therefore
+ * closes the breaker; otherwise the breaker would remain half-open forever.
  */
 export class CircuitBreaker {
   private state: CircuitState = "closed";
@@ -95,7 +95,13 @@ export class CircuitBreaker {
   }
 
   onFailure(transient: boolean): void {
-    if (!transient) return;
+    if (!transient) {
+      if (this.state === "half_open") {
+        this.consecutiveFailures = 0;
+        this.state = "closed";
+      }
+      return;
+    }
 
     if (this.state === "half_open") {
       // The trial call also failed -- the provider is still down. Re-open

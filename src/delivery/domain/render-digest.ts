@@ -76,6 +76,11 @@ export function renderPostingEntry(entry: ScoredPosting): string {
       "⚠ Confiança baixa — poucos requisitos verificáveis extraídos da vaga",
     );
   }
+  if (outcome.inputTruncated) {
+    lines.push(
+      "⚠ Conteúdo da vaga foi reduzido ao limite de segurança antes da avaliação",
+    );
+  }
   if (outcome.recommendedVariant) {
     lines.push(`Currículo recomendado: ${outcome.recommendedVariant}`);
   }

@@ -228,6 +228,25 @@ describe("dedupSimilarPostings", () => {
     expect(repository.count()).toBe(2);
     expect(repository.findActive()).toHaveLength(2);
   });
+
+  it("bounds comparisons per posting and reports when diagnostic candidates were truncated", () => {
+    for (let index = 0; index < 4; index += 1) {
+      insert({
+        sourceId: String(index),
+        title: `Estágio Backend nível ${index}`,
+        firstSeenAt: new Date(`2026-08-${10 + index}T00:00:00Z`),
+      });
+    }
+
+    const outcome = dedupSimilarPostings(repository, {
+      ...DEFAULT_DEDUP_CONFIG,
+      maxComparisonsPerPosting: 1,
+    });
+
+    expect(outcome.scanned).toBe(4);
+    expect(outcome.comparisonTruncatedCount).toBe(2);
+    expect(repository.findActive()).toHaveLength(4);
+  });
 });
 
 describe("dedupSimilarPostings — locations must not contradict", () => {

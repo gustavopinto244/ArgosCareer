@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { Profile } from "../../profile/domain/profile";
 import {
   buildEvidenceCatalog,
@@ -14,20 +15,29 @@ import { Requirement } from "../domain/types";
 export const STAGE_A_PROMPT_VERSION = "a-v4";
 export const STAGE_A_PROMPT_PATH = "./prompts/stage-a-extraction.v4.md";
 
-export const STAGE_B_PROMPT_VERSION = "b-v3";
-export const STAGE_B_PROMPT_PATH = "./prompts/stage-b-matching.v3.md";
+export const STAGE_B_PROMPT_VERSION = "b-v4";
+export const STAGE_B_PROMPT_PATH = "./prompts/stage-b-matching.v4.md";
 
 /**
  * The prompt files are Markdown documentation with one fenced code block
  * holding the actual template — everything above and below the fence is
  * commentary for a human reader, not sent to the model.
  */
+const templateCache = new Map<string, string>();
+
 function loadTemplate(filePath: string): string {
-  const content = readFileSync(filePath, "utf8");
+  // Cache the file that was actually resolved, not its relative spelling.
+  // A process may change cwd (tests do; workers and launchers can too), and
+  // `./prompts/x.md` before and after that change are different files.
+  const resolvedPath = resolve(filePath);
+  const cached = templateCache.get(resolvedPath);
+  if (cached !== undefined) return cached;
+  const content = readFileSync(resolvedPath, "utf8");
   const match = /```\n([\s\S]*?)\n```/.exec(content);
   if (!match?.[1]) {
     throw new Error(`No fenced template block found in ${filePath}`);
   }
+  templateCache.set(resolvedPath, match[1]);
   return match[1];
 }
 
@@ -87,13 +97,26 @@ export function buildStageBPrompt(
   promptPath: string = STAGE_B_PROMPT_PATH,
   today: Date = new Date(),
 ): string {
+  return createStageBPromptBuilder(profile, promptPath, today)(requirement);
+}
+
+/** Precomputes the invariant template and profile-evidence prefix once for
+ * all requirements of one posting. Stage B used to repeat both synchronous
+ * disk I/O and the full catalog render once per model call. */
+export function createStageBPromptBuilder(
+  profile: Profile,
+  promptPath: string = STAGE_B_PROMPT_PATH,
+  today: Date = new Date(),
+): (requirement: Requirement) => string {
   const template = loadTemplate(promptPath);
-  return substitute(template, {
-    REQUIREMENT_TEXT: requirement.text,
-    REQUIREMENT_CATEGORY: requirement.category,
-    REQUIREMENT_WEIGHT: requirement.weight,
-    PROFILE_EVIDENCE: formatEvidenceCatalog(
-      buildEvidenceCatalog(profile, today),
-    ),
-  });
+  const profileEvidence = formatEvidenceCatalog(
+    buildEvidenceCatalog(profile, today),
+  );
+  return (requirement) =>
+    substitute(template, {
+      REQUIREMENT_TEXT: requirement.text,
+      REQUIREMENT_CATEGORY: requirement.category,
+      REQUIREMENT_WEIGHT: requirement.weight,
+      PROFILE_EVIDENCE: profileEvidence,
+    });
 }

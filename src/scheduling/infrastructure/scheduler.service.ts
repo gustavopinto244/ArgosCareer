@@ -16,6 +16,7 @@ import { Profile } from "../../profile/domain/profile";
 import { loadProfile } from "../../profile/infrastructure/profile-loader";
 import { buildScorer } from "../../scoring/infrastructure/build-scorer";
 import { TelegramNotifier } from "../../delivery/infrastructure/telegram-notifier";
+import { DeliveryOperationsRepository } from "../../persistence/infrastructure/delivery-operations-repository";
 import { loadTelegramConfig } from "../../delivery/infrastructure/telegram-config";
 import {
   Alert,
@@ -94,7 +95,9 @@ export class SchedulerService implements OnModuleInit {
     this.profile = loadProfile(
       process.env.PROFILE_PATH ?? "./config/profile.yaml",
     );
-    this.notifier = new TelegramNotifier(loadTelegramConfig());
+    this.notifier = new TelegramNotifier(loadTelegramConfig(), fetch, {
+      deliveryStore: new DeliveryOperationsRepository(this.db),
+    });
 
     const { collection, scoreAndDeliver } = this.criteria.schedule;
 

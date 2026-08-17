@@ -6,7 +6,10 @@ import {
   createDatabase,
   runMigrations,
 } from "../../src/persistence/infrastructure/db";
-import { PostingEventsRepository } from "../../src/persistence/infrastructure/posting-events-repository";
+import {
+  parsePostingEventMetadata,
+  PostingEventsRepository,
+} from "../../src/persistence/infrastructure/posting-events-repository";
 
 let dir: string;
 let repository: PostingEventsRepository;
@@ -59,6 +62,31 @@ describe("PostingEventsRepository", () => {
     const [row] = repository.findByRun("run-1");
     expect(row?.reason).toBeNull();
     expect(row?.criteriaHash).toBeNull();
+  });
+
+  it("records raw rejection identity and structured metadata before a fingerprint exists", () => {
+    repository.record({
+      runId: "run-1",
+      source: "indeed",
+      sourceId: "raw-17",
+      stage: "normalize",
+      outcome: "rejected",
+      reason: "invalid_publication_date",
+      metadata: { schemaVersion: 1, queryIndex: 2 },
+      occurredAt: new Date(),
+    });
+
+    const [row] = repository.findByRun("run-1");
+    expect(row).toMatchObject({
+      fingerprint: null,
+      source: "indeed",
+      sourceId: "raw-17",
+    });
+    expect(parsePostingEventMetadata(row!)).toEqual({
+      schemaVersion: 1,
+      queryIndex: 2,
+    });
+    expect(parsePostingEventMetadata({ metadata: "not json" })).toBeNull();
   });
 
   it("findByRun only returns events for that run", () => {

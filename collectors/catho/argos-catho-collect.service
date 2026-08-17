@@ -13,5 +13,5 @@ ExecStart=/usr/bin/docker run --rm \
   -e TITLE_PATTERN \
   -e STATE_PATH \
   -e ARGOS_API_URL \
-  -e ARGOS_API_KEY \
+  -e ARGOS_INGEST_API_KEY \
   argos-catho-collector:local

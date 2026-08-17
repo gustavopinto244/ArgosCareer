@@ -10,7 +10,7 @@
 # pre-installed — the whole reason to use it instead of a plain node:*
 # image and running `npx playwright install-deps` by hand. Version pinned
 # to match the `playwright` npm dependency in package.json exactly.
-FROM mcr.microsoft.com/playwright:v1.62.1-jammy
+FROM mcr.microsoft.com/playwright:v1.62.1-jammy@sha256:b3251f7ff1a9fa559a28d1c67eaa15fc1a9800f7845e82756caea7842967f615
 
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -21,6 +21,6 @@ COPY package.json package-lock.json ./
 # could silently produce a different image on every rebuild.
 RUN npm ci
 
-COPY state.ts collect.ts ./
+COPY state.ts safe-fetch.ts collect.ts requeue.ts ./
 
 ENTRYPOINT ["npx", "tsx", "collect.ts"]

@@ -19,26 +19,34 @@ export interface NormalizedPostingContent {
   readonly title: string;
   readonly description: string | null;
   readonly contentHash: string;
-  /** True when `description` had to be cut to fit `maxDescriptionChars`
-   * (docs/audit AC-017). */
+  /** True when either title or description had to be cut to its input bound. */
   readonly inputTruncated: boolean;
 }
+
+/** Titles are normally under 200 characters. This generous ceiling closes
+ * the remaining unbounded Stage A input without affecting legitimate data. */
+export const DEFAULT_MAX_TITLE_CHARS = 500;
 
 export function normalizePostingContent(
   title: string,
   description: string | null,
   maxDescriptionChars: number,
+  maxTitleChars: number = DEFAULT_MAX_TITLE_CHARS,
 ): NormalizedPostingContent {
-  const normalizedTitle = htmlToText(title).text;
+  const boundedTitle = truncateDescription(
+    htmlToText(title).text,
+    maxTitleChars,
+  );
+  const normalizedTitle = boundedTitle.text;
   let normalizedDescription: string | null = null;
-  let inputTruncated = false;
+  let inputTruncated = boundedTitle.truncated;
   if (description) {
     const bounded = truncateDescription(
       htmlToText(description).text,
       maxDescriptionChars,
     );
     normalizedDescription = bounded.text;
-    inputTruncated = bounded.truncated;
+    inputTruncated ||= bounded.truncated;
   }
   return {
     title: normalizedTitle,

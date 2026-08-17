@@ -1,5 +1,6 @@
 import { Profile } from "../../profile/domain/profile";
 import { buildEvidenceCatalog } from "./evidence-catalog";
+import { Requirement } from "./types";
 
 /**
  * The prompt renders each evidence line as `- [Competency] text` so the model
@@ -60,16 +61,10 @@ export function buildProfileEvidenceIndex(
  * loosening this to "sounds similar" would reopen the same hole with extra
  * steps.
  *
- * This proves the quote is *real* — it does not prove the quote is
- * *relevant to the requirement being judged* (docs/audit PR-005): a
- * genuine, verbatim profile line can still be attached to the wrong
- * requirement by a model that a prompt injection in the posting talked
- * into it. That is a second, independent invariant this function does not
- * and cannot check on its own — see ADR-037's discussion of why closing it
- * fully would require either a second, independently-trustworthy
- * verification pass or a requirement-to-competency taxonomy this project
- * does not have yet, and why the delimiting `buildStageAPrompt`/
- * `buildStageBPrompt` now do is a mitigation, not a proof.
+ * This proves the quote is *real* — it does not by itself prove relevance.
+ * `StageBMatcher` pairs it with `isEvidenceApplicableToRequirement`, the
+ * conservative lexical guard below. ADR-049 records why even both checks
+ * together remain mitigation rather than semantic proof.
  */
 export function isKnownProfileEvidence(
   evidence: string,
@@ -78,5 +73,80 @@ export function isKnownProfileEvidence(
 ): boolean {
   return buildProfileEvidenceIndex(profile, today).has(
     stripEvidenceTag(evidence),
+  );
+}
+
+function normalizedWords(value: string): string {
+  return ` ${value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9+#.]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()} `;
+}
+
+function includesTerm(haystack: string, term: string): boolean {
+  const normalized = normalizedWords(term).trim();
+  return normalized.length >= 2 && haystack.includes(` ${normalized} `);
+}
+
+const FIXED_TAG_TERMS: Readonly<Record<string, readonly string[]>> = {
+  "Academic enrollment": [
+    "curso",
+    "cursando",
+    "faculdade",
+    "graduacao",
+    "periodo",
+    "semestre",
+    "formacao",
+    "conclusao",
+  ],
+  "English level": ["ingles", "english"],
+  Availability: [
+    "disponibilidade",
+    "horas semanais",
+    "carga horaria",
+    "horario",
+    "availability",
+  ],
+  Compensation: ["bolsa", "remuneracao", "salario", "stipend", "compensation"],
+};
+
+/**
+ * Lexical semantic guard for PR-005. Provenance alone answers “is this a real
+ * quote?”; this additionally requires the quoted catalog entry's competency
+ * name/alias or declared-field vocabulary to appear in the requirement being
+ * judged. It is intentionally conservative, but it is not a proof of meaning:
+ * a malicious requirement can repeat a relevant token while directing the
+ * model to use unrelated evidence. That limitation is regression-tested and
+ * remains documented in ADR-049.
+ */
+export function isEvidenceApplicableToRequirement(
+  evidence: string,
+  requirement: Requirement,
+  profile: Profile,
+  today: Date = new Date(),
+): boolean {
+  const quote = stripEvidenceTag(evidence);
+  const entry = buildEvidenceCatalog(profile, today).find(
+    (candidate) => candidate.text === quote,
+  );
+  if (!entry) return false;
+
+  const requirementText = normalizedWords(
+    `${requirement.text} ${requirement.category}`,
+  );
+  const fixedTerms = FIXED_TAG_TERMS[entry.tag];
+  if (fixedTerms) {
+    return fixedTerms.some((term) => includesTerm(requirementText, term));
+  }
+
+  const competency = profile.competencies.find(
+    (candidate) => candidate.name === entry.tag,
+  );
+  if (!competency) return false;
+  return [competency.name, ...competency.aliases].some((term) =>
+    includesTerm(requirementText, term),
   );
 }

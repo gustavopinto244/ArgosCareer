@@ -54,6 +54,12 @@ describe("htmlToText (docs/audit AC-017)", () => {
     expect(text).toBe("Café com leite — grátis");
   });
 
+  it("replaces invalid Unicode numeric entities instead of throwing", () => {
+    expect(htmlToText("bad: &#x110000; and &#xD800;").text).toBe(
+      "bad: � and �",
+    );
+  });
+
   it("leaves an entity-like sequence that isn't a real entity alone", () => {
     const { text } = htmlToText("R&D team");
     expect(text).toBe("R&D team");

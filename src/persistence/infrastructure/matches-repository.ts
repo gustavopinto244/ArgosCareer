@@ -1,8 +1,8 @@
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { Match, MatchSchema } from "../../scoring/domain/types";
+import { Match, MatchSchema, Requirement } from "../../scoring/domain/types";
 import { Db } from "./db";
-import { matches } from "./schema";
+import { matches, partialMatches } from "./schema";
 
 const CachedMatchesSchema = z.array(MatchSchema);
 
@@ -110,5 +110,87 @@ export class MatchesRepository {
     if (!row) return null;
 
     return parseMatches(row.matches);
+  }
+
+  findPartial(
+    fingerprint: string,
+    profileHash: string,
+    promptVersion: string,
+    model: string,
+    requirementsHash: string,
+    requirements: readonly Requirement[],
+  ): readonly (Match | null)[] {
+    const result: (Match | null)[] = requirements.map(() => null);
+    const rows = this.db
+      .select()
+      .from(partialMatches)
+      .where(
+        and(
+          eq(partialMatches.fingerprint, fingerprint),
+          eq(partialMatches.profileHash, profileHash),
+          eq(partialMatches.promptVersion, promptVersion),
+          eq(partialMatches.model, model),
+          eq(partialMatches.requirementsHash, requirementsHash),
+        ),
+      )
+      .all();
+    for (const row of rows) {
+      const requirement = requirements[row.requirementIndex];
+      if (!requirement) continue;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(row.match);
+      } catch {
+        continue;
+      }
+      const validated = MatchSchema.safeParse(parsed);
+      if (!validated.success) continue;
+      const match = validated.data as Match;
+      if (
+        match.requirement.text === requirement.text &&
+        match.requirement.category === requirement.category &&
+        match.requirement.weight === requirement.weight &&
+        match.requirement.verifiable === requirement.verifiable
+      ) {
+        result[row.requirementIndex] = match;
+      }
+    }
+    return result;
+  }
+
+  upsertPartial(
+    fingerprint: string,
+    profileHash: string,
+    promptVersion: string,
+    model: string,
+    requirementsHash: string,
+    requirementIndex: number,
+    match: Match,
+    matchedAt: Date,
+  ): void {
+    this.db
+      .insert(partialMatches)
+      .values({
+        fingerprint,
+        profileHash,
+        promptVersion,
+        model,
+        requirementsHash,
+        requirementIndex,
+        match: JSON.stringify(match),
+        matchedAt,
+      })
+      .onConflictDoUpdate({
+        target: [
+          partialMatches.fingerprint,
+          partialMatches.profileHash,
+          partialMatches.promptVersion,
+          partialMatches.model,
+          partialMatches.requirementsHash,
+          partialMatches.requirementIndex,
+        ],
+        set: { match: JSON.stringify(match), matchedAt },
+      })
+      .run();
   }
 }

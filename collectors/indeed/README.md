@@ -35,13 +35,13 @@ docker build -t argos-indeed-collector:local .
 # 2. Configure
 cp .env.example .env
 # edit .env: ARGOS_API_URL (Atlas's Tailscale address, argos-career's port),
-# ARGOS_API_KEY (the same key in ../../.env's API_KEY)
+# ARGOS_INGEST_API_KEY (matches ../../.env's INGEST_INDEED_API_KEY)
 
 # 3. Try one run by hand before scheduling anything
 set -a && source .env && set +a
 docker run --rm \
   -e SEARCH_TERM -e LOCATION -e COUNTRY_INDEED -e RESULTS_WANTED \
-  -e ARGOS_API_URL -e ARGOS_API_KEY \
+  -e ARGOS_API_URL -e ARGOS_INGEST_API_KEY \
   argos-indeed-collector:local
 
 # 4. Install the systemd user units

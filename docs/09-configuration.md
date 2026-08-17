@@ -29,11 +29,16 @@ SCORER_ADAPTER=           # stub | api
 LLM_API_KEY=              # required when SCORER_ADAPTER=api (OpenRouter, ADR-012)
 LLM_BASE_URL=             # default https://openrouter.ai/api/v1
 LLM_MODEL=                # OpenRouter model slug, e.g. deepseek/deepseek-v4-flash-0731
-JOOBLE_API_KEY=           # optional — free key; without it the Jooble source stays off
-N8N_WEBHOOK_URL=          # required when an n8n-backed source is enabled
-N8N_WEBHOOK_TOKEN=        # shared secret for that webhook
+JOOBLE_API_KEY=           # parked/inert — no production collector reads it
+N8N_WEBHOOK_URL=          # parked/inert — no production adapter reads it
+N8N_WEBHOOK_TOKEN=        # parked/inert — no production adapter reads it
 DATABASE_PATH=            # default ./data/argos.db
-API_KEY=                  # required (M9) — Bearer token every HTTP route needs
+API_ADMIN_KEY=            # required — full-access Bearer credential (ADR-047)
+API_KEY=                  # deprecated fallback for API_ADMIN_KEY during migration only
+API_AUTOMATION_KEY=       # optional — operational REST/MCP caller, no ingest/discard
+INGEST_CATHO_API_KEY=     # optional — external ingest for source=catho only
+INGEST_INDEED_API_KEY=    # optional — external ingest for source=indeed only
+INGEST_LINKEDIN_API_KEY=  # optional — external ingest for source=linkedin only
 API_PORT=                 # default 3000 — Tailscale-bound at the compose level
 ATLAS_TAILSCALE_IP=       # compose-only (M9) — Atlas's `tailscale ip -4`, never read by the app
 CRITERIA_PATH=            # default ./config/criteria.yaml
@@ -44,6 +49,28 @@ BACKUPS_DIR=              # default ./backups
 
 `.env.example` carries every key with a fictional or empty value and a comment.
 It is the setup documentation, and it is committed.
+
+### API credential capabilities and rotation
+
+Every configured value must be unique. `ApiKeyGuard` refuses to start when two
+principals share a credential, preventing an apparently source-scoped key from
+silently inheriting a broader role.
+
+| Credential                | Allowed capabilities                                                         |
+| ------------------------- | ---------------------------------------------------------------------------- |
+| `API_ADMIN_KEY`           | Every REST route and MCP tool, including permanent discard                   |
+| `API_AUTOMATION_KEY`      | Reads, collect, dedup, deliver and study plan; no external ingest or discard |
+| `INGEST_CATHO_API_KEY`    | Only `POST /runs/collect/external` with `source: "catho"`                    |
+| `INGEST_INDEED_API_KEY`   | Only `POST /runs/collect/external` with `source: "indeed"`                   |
+| `INGEST_LINKEDIN_API_KEY` | Only `POST /runs/collect/external` with `source: "linkedin"`                 |
+
+Rotation is coordinated because the process accepts one current value per
+principal: pause that caller's timer/workflow, generate a new value, update the
+application and caller secret stores, restart the application, verify one
+allowed request and one expected `403`, then resume the caller. A rotation
+changes the short digest in `runs.triggeredBy`; that is expected and does not
+expose either credential. Remove legacy `API_KEY` after all administrative
+callers have moved to `API_ADMIN_KEY`.
 
 ## Profile — `config/profile.yaml`
 

@@ -171,4 +171,21 @@ describe("CircuitBreaker", () => {
     clock = 20_000;
     expect(() => breaker.beforeCall()).not.toThrow();
   });
+
+  it("closes after a half-open trial gets a request-local failure", () => {
+    let clock = 0;
+    const breaker = new CircuitBreaker({
+      failureThreshold: 1,
+      cooldownMs: 10_000,
+      now: () => clock,
+    });
+
+    breaker.onFailure(true);
+    clock = 10_000;
+    breaker.beforeCall();
+    breaker.onFailure(false);
+
+    expect(breaker.getState()).toBe("closed");
+    expect(() => breaker.beforeCall()).not.toThrow();
+  });
 });

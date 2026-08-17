@@ -40,6 +40,7 @@ export interface RunCounts {
    * distinguishes "this source was queried and failed" from "this source
    * was never queried at all", which `failedSources` alone cannot. */
   readonly attemptedSources?: readonly string[];
+  readonly sourceQueryStats?: readonly Readonly<Record<string, unknown>>[];
   /** `scoreAndDeliver` runs only, from `OpenRouterClient.getUsage()` read
    * once after scoring completes — every attempt that reached the network,
    * regardless of outcome (docs/audit AC-015). */
@@ -48,6 +49,11 @@ export interface RunCounts {
   /** Of `llmAttempts`, how many never got a usable `usage` block back — a
    * nonzero value here means `llmCostUsd` is a floor, not the real total. */
   readonly llmAttemptsWithoutUsage?: number;
+  readonly llmPromptTokens?: number;
+  readonly llmCompletionTokens?: number;
+  readonly llmCachedPromptTokens?: number;
+  readonly llmBlockedByCircuit?: number;
+  readonly llmOutcomeCounts?: Readonly<Record<string, number>>;
 }
 
 /** Both `failedSources` and `truncatedSources` are raw JSON text (schema.ts's
@@ -83,6 +89,48 @@ export function parseAttemptedSources(
   return parseStringArrayColumn(row.attemptedSources);
 }
 
+export function parseSourceQueryStats(
+  row: Pick<RunRow, "sourceQueryStats">,
+): Readonly<Record<string, unknown>>[] {
+  if (!row.sourceQueryStats) return [];
+  try {
+    const parsed: unknown = JSON.parse(row.sourceQueryStats);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (value): value is Readonly<Record<string, unknown>> =>
+        typeof value === "object" && value !== null && !Array.isArray(value),
+    );
+  } catch {
+    return [];
+  }
+}
+
+export function parseLlmOutcomeCounts(
+  row: Pick<RunRow, "llmOutcomeCounts">,
+): Readonly<Record<string, number>> {
+  if (!row.llmOutcomeCounts) return {};
+  try {
+    const parsed: unknown = JSON.parse(row.llmOutcomeCounts);
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      Array.isArray(parsed)
+    ) {
+      return {};
+    }
+    return Object.fromEntries(
+      Object.entries(parsed).filter(
+        (entry): entry is [string, number] =>
+          typeof entry[1] === "number" &&
+          Number.isFinite(entry[1]) &&
+          entry[1] >= 0,
+      ),
+    );
+  } catch {
+    return {};
+  }
+}
+
 /**
  * One row per pipeline execution (docs/08-observability.md), the audit trail
  * behind principle 2 — "what did Tuesday's run actually do?" `kind` is
@@ -93,11 +141,11 @@ export function parseAttemptedSources(
 export class RunsRepository {
   constructor(private readonly db: Db) {}
 
-  start(kind: string, startedAt: Date): string {
+  start(kind: string, startedAt: Date, triggeredBy = "internal"): string {
     const runId = ulid();
     this.db
       .insert(runs)
-      .values({ runId, kind, startedAt, outcome: null })
+      .values({ runId, kind, triggeredBy, startedAt, outcome: null })
       .run();
     return runId;
   }
@@ -108,8 +156,14 @@ export class RunsRepository {
     outcome: RunOutcome,
     counts: RunCounts = {},
   ): void {
-    const { failedSources, truncatedSources, attemptedSources, ...rest } =
-      counts;
+    const {
+      failedSources,
+      truncatedSources,
+      attemptedSources,
+      sourceQueryStats,
+      llmOutcomeCounts,
+      ...rest
+    } = counts;
     this.db
       .update(runs)
       .set({
@@ -125,6 +179,12 @@ export class RunsRepository {
         ...(attemptedSources === undefined
           ? {}
           : { attemptedSources: JSON.stringify(attemptedSources) }),
+        ...(sourceQueryStats === undefined
+          ? {}
+          : { sourceQueryStats: JSON.stringify(sourceQueryStats) }),
+        ...(llmOutcomeCounts === undefined
+          ? {}
+          : { llmOutcomeCounts: JSON.stringify(llmOutcomeCounts) }),
       })
       .where(eq(runs.runId, runId))
       .run();

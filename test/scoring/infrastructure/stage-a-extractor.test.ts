@@ -80,6 +80,7 @@ describe("StageAExtractor.extract", () => {
       seniority: "internship",
       experienceYears: null,
       inputTruncated: false,
+      cacheHit: false,
     });
     expect(ask).toHaveBeenCalledTimes(1);
     expect(
@@ -137,6 +138,7 @@ describe("StageAExtractor.extract", () => {
       seniority: "trainee",
       experienceYears: 1,
       inputTruncated: false,
+      cacheHit: true,
     });
     expect(ask).not.toHaveBeenCalled();
   });
@@ -173,6 +175,7 @@ describe("StageAExtractor.extract", () => {
       seniority: null,
       experienceYears: null,
       inputTruncated: false,
+      cacheHit: false,
     });
   });
 
@@ -483,6 +486,7 @@ describe("StageAExtractor.extract — posting with no description", () => {
       seniority: null,
       experienceYears: null,
       inputTruncated: false,
+      cacheHit: false,
     });
   });
 

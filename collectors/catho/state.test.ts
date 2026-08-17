@@ -19,6 +19,7 @@ import {
   loadState,
   markIngested,
   needsPageFetch,
+  refreshLock,
   releaseLock,
   requeueQuarantined,
   saveStateAtomic,
@@ -326,7 +327,7 @@ describe("requeueQuarantined (docs/audit PR-011 — an operable retry control)",
 
     const result = requeueQuarantined(state);
 
-    expect(result.requeued.sort()).toEqual(["1", "2"]);
+    expect([...result.requeued].sort()).toEqual(["1", "2"]);
     expect(result.state.entries["1"]).toBeUndefined();
     expect(result.state.entries["2"]).toBeUndefined();
     // Not quarantined -- untouched.
@@ -453,6 +454,19 @@ describe("loadState / saveStateAtomic", () => {
     expect(loadState(path)).toEqual(emptyState());
   });
 
+  it("falls back to empty state when a version-2 entry is structurally invalid", () => {
+    const path = join(dir, "state.json");
+    writeFileSync(
+      path,
+      JSON.stringify({
+        version: 2,
+        entries: { "37070531": { state: "collected", payload: null } },
+      }),
+      "utf8",
+    );
+    expect(loadState(path)).toEqual(emptyState());
+  });
+
   it("leaves the previous file intact if a save is interrupted before rename", () => {
     // saveStateAtomic writes to a temp file then renames — simulate reading
     // mid-write by checking the real file is only ever the last *complete*
@@ -503,15 +517,50 @@ describe("acquireLock / releaseLock (docs/audit PR-012 — single-writer mutual 
 
   it("allows re-acquiring after release", () => {
     const lockPath = join(dir, "state.json.lock");
-    acquireLock(lockPath);
-    releaseLock(lockPath);
+    const first = acquireLock(lockPath);
+    releaseLock(lockPath, first.token!);
 
+    expect(acquireLock(lockPath).acquired).toBe(true);
+  });
+
+  it("refreshes only the current owner's lease", () => {
+    const lockPath = join(dir, "state.json.lock");
+    const acquired = acquireLock(lockPath);
+    const refreshedAt = new Date("2026-08-17T04:00:00Z");
+
+    expect(refreshLock(lockPath, "not-the-owner", refreshedAt)).toBe(false);
+    expect(refreshLock(lockPath, acquired.token!, refreshedAt)).toBe(true);
+    expect(
+      acquireLock(lockPath, new Date(refreshedAt.getTime() + 500), 1_000)
+        .acquired,
+    ).toBe(false);
+  });
+
+  it("an old owner cannot release a lock after stale takeover", () => {
+    const lockPath = join(dir, "state.json.lock");
+    const created = new Date("2026-08-17T03:00:00Z");
+    const oldOwner = acquireLock(lockPath, created, 1_000);
+    utimesSync(lockPath, created, created);
+    const newOwner = acquireLock(
+      lockPath,
+      new Date(created.getTime() + 2_000),
+      1_000,
+    );
+    expect(newOwner.acquired).toBe(true);
+
+    releaseLock(lockPath, oldOwner.token!);
+    expect(
+      acquireLock(lockPath, new Date(created.getTime() + 2_100), 1_000)
+        .acquired,
+    ).toBe(false);
+
+    releaseLock(lockPath, newOwner.token!);
     expect(acquireLock(lockPath).acquired).toBe(true);
   });
 
   it("releasing an already-released (or never-acquired) lock is a no-op, not a throw", () => {
     const lockPath = join(dir, "state.json.lock");
-    expect(() => releaseLock(lockPath)).not.toThrow();
+    expect(() => releaseLock(lockPath, "not-the-owner")).not.toThrow();
   });
 
   it("takes over a lock older than staleAfterMs, treating it as abandoned", () => {
