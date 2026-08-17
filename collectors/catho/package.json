@@ -4,12 +4,14 @@
   "private": true,
   "description": "Ephemeral, host-side Catho collector (ADR-032) — never part of argos-career's own container.",
   "scripts": {
-    "start": "tsx collect.ts"
+    "start": "tsx collect.ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "playwright": "1.62.1"
   },
   "devDependencies": {
-    "tsx": "^4.23.12"
+    "tsx": "^4.23.12",
+    "vitest": "^4.1.10"
   }
 }

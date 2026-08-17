@@ -449,7 +449,7 @@ One per pull request, each meeting the M3 criteria:
       records for Gupy before its own vertical-slice run; a real collection
       cycle, and the Gupy/Sólides overlap measurement `docs/02` flags as
       pending, are the natural next check
-- [x] Catho, via a real headless browser (ADR-032; `catho-schema.ts`,
+- [ ] Catho, via a real headless browser (ADR-032/033; `catho-schema.ts`,
       `catho-normalizer.ts`, `collectors/catho/`). No public API and no
       server-side search reaches this project (`robots.txt` disallows
       exactly that path) — sitemap-only candidate discovery
@@ -459,15 +459,20 @@ One per pull request, each meeting the M3 criteria:
       rule, unlike Indeed's ADR-028 exception. Registered in
       `normalizer-registry.ts` only — ingestion is external
       (`POST /runs/collect/external`), same shape as Indeed/LinkedIn, never
-      a `CollectorPort` entry. **Not yet run for real** — no Docker or
-      browser available in this session to exercise `collect.ts` end to
-      end; the TypeScript typechecks clean against the real `playwright`
-      package, and the extraction logic (JSON-LD shape, the
-      expired-posting redirect, the title-parsing regex for city) was each
-      confirmed against real Catho pages via manual browser inspection
-      first. A real first backlog-drain run, per
-      `collectors/catho/README.md`'s setup section, is the actual
-      validation step
+      a `CollectorPort` entry.
+      **Run for real and confirmed non-functional, 2026-08-17**
+      (`docs/audit/AUDIT-PRE-DEPLOY-2026-08-17.md`): Catho blocks
+      Playwright's default headless Chromium with the same `403`
+      non-browser clients get — 0 of 10 real pages collected in a live
+      test. Not a rule-honesty problem (a headless Chromium's UA is still
+      genuine, ADR-020); a fingerprint-level block this collector does not
+      yet get past. **Do not build/schedule on Atlas.** A separate repo
+      audit (`docs/audit/AUDIT_REPORT.md` AC-001/AC-002) also found two
+      real checkpoint bugs — an ID marked done before ingest was confirmed,
+      and transient failures recorded as permanent expiration — fixed
+      regardless of the block (ADR-033, `collectors/catho/state.ts`, 27
+      tests), since they're correct to have whenever this collector does
+      get unblocked
 - [ ] `N8nCollector` behind `CollectorPort`, with one long-tail source proving
       it (ADR-008). Workflow exported and committed to `n8n/`; core verified
       unaffected with n8n stopped

@@ -3,3 +3,8 @@ dist/
 coverage/
 package-lock.json
 test/fixtures/
+
+# Imported audit artifacts (docs/audit/AUDIT_REPORT.md, REMEDIATION_PLAN.md)
+# are kept byte-for-byte as authored, not reformatted to this project's
+# house style — they are evidence, not maintained documentation.
+docs/audit/

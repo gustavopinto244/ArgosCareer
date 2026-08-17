@@ -44,6 +44,7 @@ revisited on its merits instead of re-argued from memory.
 | [030](adr/030-cloudflare-tunnel-for-the-n8n-cloud-caller.md)          | A Cloudflare Tunnel route, Bearer-only, for the n8n.cloud caller           | Accepted | 2026-08-16 |
 | [031](adr/031-solides-collector.md)                                   | Add Sólides Vagas as a source, via its own undocumented public API         | Accepted | 2026-08-17 |
 | [032](adr/032-catho-collector-headless-browser.md)                    | Add Catho as a source, via a real headless browser                         | Accepted | 2026-08-17 |
+| [033](adr/033-catho-checkpoint-state-machine.md)                      | A durable, five-state checkpoint for the Catho collector                   | Accepted | 2026-08-17 |
 
 ## When an ADR is required
 
