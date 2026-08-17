@@ -51,6 +51,7 @@ revisited on its merits instead of re-argued from memory.
 | [037](adr/037-unify-evidence-catalog-and-delimit-untrusted-prompt-content.md) | Unify the evidence catalog, and delimit untrusted content in both prompts           | Accepted | 2026-08-17 |
 | [038](adr/038-recoverable-scoring-failures-bounded-retry.md)                  | A scoring failure is reported, not notified, and retries up to a bounded ceiling    | Accepted | 2026-08-17 |
 | [039](adr/039-batch-fatal-permanent-errors-and-breaker-scope.md)              | Stop the batch on a permanent transport failure, narrow the circuit breaker's scope | Accepted | 2026-08-17 |
+| [040](adr/040-persisted-claim-as-scoring-admission-barrier.md)                | A persisted, atomic claim as the scoring admission barrier                          | Accepted | 2026-08-17 |
 
 ## When an ADR is required
 

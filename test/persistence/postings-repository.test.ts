@@ -289,6 +289,156 @@ describe("PostingsRepository.recordScoreFailure / clearScoreFailures / getScoreF
   });
 });
 
+/** Claim columns are deliberately absent from `Posting` (persistence-only
+ * concept, same reasoning as `rawDiscardFields`) — reads the raw row so a
+ * test can assert on them directly. */
+function rawClaimFields(fingerprint: string) {
+  const row = db
+    .select({
+      scoringClaimedAt: postings.scoringClaimedAt,
+      scoringClaimRunId: postings.scoringClaimRunId,
+    })
+    .from(postings)
+    .where(eq(postings.fingerprint, fingerprint))
+    .get();
+  return row ?? null;
+}
+
+describe("PostingsRepository.claimForScoring / releaseUnresolvedClaims (docs/audit PR-004)", () => {
+  const NOW = new Date("2026-08-17T03:00:00Z");
+
+  it("claims every active, unnotified, undiscarded, unclaimed posting", () => {
+    repository.upsert(posting({ sourceId: "1" }));
+    repository.upsert(posting({ sourceId: "2", title: "Estágio Frontend" }));
+
+    const claimed = repository.claimForScoring("run-1", NOW);
+
+    expect(claimed).toHaveLength(2);
+    const [first] = claimed;
+    expect(rawClaimFields(first!.fingerprint)).toEqual({
+      scoringClaimedAt: NOW,
+      scoringClaimRunId: "run-1",
+    });
+  });
+
+  it("excludes a posting already claimed by a still-live run", () => {
+    const { posting: stored } = repository.upsert(posting());
+    repository.claimForScoring("run-1", NOW);
+
+    const secondClaim = repository.claimForScoring(
+      "run-2",
+      new Date(NOW.getTime() + 1_000),
+    );
+
+    expect(secondClaim).toHaveLength(0);
+    // Still held by run-1 -- run-2's attempt must not have stolen it.
+    expect(rawClaimFields(stored.fingerprint)?.scoringClaimRunId).toBe("run-1");
+  });
+
+  it("excludes a duplicate, a discarded posting, and an already-notified posting", () => {
+    const a = repository.upsert(posting({ sourceId: "1" }));
+    const b = repository.upsert(
+      posting({ sourceId: "2", title: "Estágio Frontend" }),
+    );
+    const c = repository.upsert(
+      posting({ sourceId: "3", title: "Estágio Segurança" }),
+    );
+    repository.markDuplicate(a.posting.fingerprint, b.posting.fingerprint);
+    // b is a's canonical -- discarding it too is what makes it excluded on
+    // its own account, rather than leaving one perfectly eligible posting
+    // in the mix and making this test pass for the wrong reason.
+    repository.discard(b.posting.fingerprint, NOW, null);
+    repository.discard(c.posting.fingerprint, NOW, null);
+    const d = repository.upsert(
+      posting({ sourceId: "4", title: "Estágio Dados" }),
+    );
+    repository.markNotified(d.posting.fingerprint, NOW);
+
+    const claimed = repository.claimForScoring("run-1", NOW);
+
+    expect(claimed).toHaveLength(0);
+  });
+
+  it("treats a claim older than staleClaimMs as abandoned and reclaimable", () => {
+    const { posting: stored } = repository.upsert(posting());
+    repository.claimForScoring("run-1", NOW);
+
+    const muchLater = new Date(NOW.getTime() + 10_000);
+    const reclaimed = repository.claimForScoring("run-2", muchLater, 5_000);
+
+    expect(reclaimed).toHaveLength(1);
+    expect(rawClaimFields(stored.fingerprint)).toEqual({
+      scoringClaimedAt: muchLater,
+      scoringClaimRunId: "run-2",
+    });
+  });
+
+  it("does not treat a claim as stale before staleClaimMs elapses", () => {
+    repository.upsert(posting());
+    repository.claimForScoring("run-1", NOW);
+
+    const soonAfter = new Date(NOW.getTime() + 1_000);
+    const reclaimed = repository.claimForScoring("run-2", soonAfter, 5_000);
+
+    expect(reclaimed).toHaveLength(0);
+  });
+
+  it("releaseUnresolvedClaims clears the claim for an unnotified posting held by that run", () => {
+    const { posting: stored } = repository.upsert(posting());
+    repository.claimForScoring("run-1", NOW);
+
+    repository.releaseUnresolvedClaims("run-1");
+
+    expect(rawClaimFields(stored.fingerprint)).toEqual({
+      scoringClaimedAt: null,
+      scoringClaimRunId: null,
+    });
+    // Immediately reclaimable -- no need to wait out staleClaimMs.
+    expect(repository.claimForScoring("run-2", NOW)).toHaveLength(1);
+  });
+
+  it("releaseUnresolvedClaims leaves a notified posting's claim alone", () => {
+    // Notified means resolved -- releasing it would be pointless, and
+    // clearing scoringClaimRunId would make a future audit of "which run
+    // actually scored this" impossible to answer.
+    const { posting: stored } = repository.upsert(posting());
+    repository.claimForScoring("run-1", NOW);
+    repository.markNotified(stored.fingerprint, NOW);
+
+    repository.releaseUnresolvedClaims("run-1");
+
+    expect(rawClaimFields(stored.fingerprint)).toEqual({
+      scoringClaimedAt: NOW,
+      scoringClaimRunId: "run-1",
+    });
+  });
+
+  it("releaseUnresolvedClaims only releases claims held by the given run", () => {
+    const a = repository.upsert(posting({ sourceId: "1" }));
+    repository.claimForScoring("run-1", NOW);
+    const b = repository.upsert(
+      posting({ sourceId: "2", title: "Estágio Frontend" }),
+    );
+    // b was never claimed by run-1 (it didn't exist yet); claim it under a
+    // different run entirely to prove run-1's release does not touch it.
+    repository.claimForScoring("run-2", new Date(NOW.getTime() + 100));
+
+    repository.releaseUnresolvedClaims("run-1");
+
+    expect(rawClaimFields(a.posting.fingerprint)?.scoringClaimRunId).toBeNull();
+    expect(rawClaimFields(b.posting.fingerprint)?.scoringClaimRunId).toBe(
+      "run-2",
+    );
+  });
+
+  it("is idempotent -- releasing an already-released or never-claimed posting is a no-op", () => {
+    repository.upsert(posting());
+    expect(() =>
+      repository.releaseUnresolvedClaims("no-such-run"),
+    ).not.toThrow();
+  });
+});
+
 describe("PostingsRepository.discard", () => {
   it("returns true and records the timestamp and reason", () => {
     const { posting: stored } = repository.upsert(posting());

@@ -4,6 +4,8 @@
 
 Accepted — amended 2026-08-17, see
 [Amendment 1](#amendment-1--2026-08-17-re-examined-against-docsaudit-ac-020-decision-unchanged)
+and
+[Amendment 2](#amendment-2--2026-08-17-the-cross-process-gap-is-now-closed-decision-reversed)
 
 ## Date
 
@@ -166,3 +168,28 @@ covers a second process starting the same pipeline mid-flight. That gap is
 real and is exactly what a persisted lock would close. It remains
 deliberately unclosed, per this ADR's original Considered Options section,
 until it is an observed problem.
+
+## Amendment 2 — 2026-08-17: the cross-process gap is now closed, decision reversed
+
+Amendment 1 left the cross-process gap open deliberately: "no observed
+incident, a single-operator personal project, and real added complexity...
+for a risk that remains hypothetical." Two things changed. First,
+`docs/audit/POST_REMEDIATION_CHANGE_AUDIT_2026-08-17.md` re-raised the same
+gap as PR-004 with **CONFIRMED** confidence (not "LIKELY not CONFIRMED," as
+AC-020 was rated) and a concrete impact — duplicate paid Stage A/B scoring
+via a concurrent external-ingest process, not a hypothetical race. Second,
+the complexity estimate this ADR weighed against that risk turned out to be
+wrong: closing it did not need a new `run_locks` table or a
+separately-designed lease/expiry protocol, the two things Amendment 1 named
+as the reason to defer. `PostingsRepository.claimForScoring`/
+`releaseUnresolvedClaims` (ADR-040) add two nullable columns to the table
+already representing the contended resource (`postings`) and one more step
+inside the dedup transaction `executeDeliver` already ran. The actual cost
+was a fraction of what this ADR originally priced the fix at.
+
+**Decision reversed for the scoring-candidate-selection case specifically.**
+`RunLock` and this ADR's core decision (in-memory, single-process, cheap) are
+otherwise unchanged — `RunLock` still exists, still guards other stage
+overlaps within one process, and is still the right tool for that. See
+ADR-040 for the full mechanism and its own honestly-stated residual gap (a
+hard process crash can strand a claim for up to a bounded staleness window).

@@ -89,6 +89,20 @@ export const postings = sqliteTable(
     lastScoreFailedAt: integer("last_score_failed_at", {
       mode: "timestamp_ms",
     }),
+    // Persisted admission barrier for paid scoring (docs/audit PR-004). Null
+    // means "not currently claimed by any run." Set atomically, in the same
+    // transaction as the dedup pass that precedes it, by whichever
+    // scoreAndDeliver run picks this posting as a scoring candidate — so a
+    // second process (a concurrent CLI invocation, or the API triggering a
+    // run while a scheduled one is still in flight) sees it as unavailable
+    // rather than independently selecting it too. `RunLock`
+    // (`scheduling/domain/run-lock.ts`) already prevents this within one
+    // process; this is what closes the same gap across two.
+    scoringClaimedAt: integer("scoring_claimed_at", { mode: "timestamp_ms" }),
+    // Which run holds the claim above — needed to release only *this* run's
+    // claims (a posting still claimed by a still-running concurrent process
+    // must not have its claim cleared out from under it).
+    scoringClaimRunId: text("scoring_claim_run_id"),
   },
   (table) => [
     uniqueIndex("postings_fingerprint_unique").on(table.fingerprint),
