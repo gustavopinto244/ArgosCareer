@@ -47,4 +47,27 @@ describe("hashProfile", () => {
     );
     expect(a).not.toBe(b);
   });
+
+  describe("academic period sensitivity (docs/audit AC-018)", () => {
+    // courseStart 2026-03-01 -> period 1 through 2026-06, period 2 from
+    // 2026-07 on (computeAcademicPeriod's semester-boundary math).
+    const p = profile({ courseStart: new Date("2026-03-01") });
+
+    it("changes when the derived academic period crosses a semester boundary", () => {
+      const beforeBoundary = hashProfile(p, new Date("2026-06-30T00:00:00Z"));
+      const afterBoundary = hashProfile(p, new Date("2026-07-01T00:00:00Z"));
+      expect(beforeBoundary).not.toBe(afterBoundary);
+    });
+
+    it("stays the same for two dates within the same academic period", () => {
+      const early = hashProfile(p, new Date("2026-03-01T00:00:00Z"));
+      const late = hashProfile(p, new Date("2026-06-15T00:00:00Z"));
+      expect(early).toBe(late);
+    });
+
+    it("is deterministic for the same profile and the same today", () => {
+      const today = new Date("2026-08-14T00:00:00Z");
+      expect(hashProfile(p, today)).toBe(hashProfile(p, today));
+    });
+  });
 });
