@@ -4,6 +4,8 @@
 
 Accepted — amended 2026-08-16, see
 [Amendment 1](#amendment-1--2026-08-16-the-illustrative-weights-are-stale)
+and
+[Amendment 2](#amendment-2--2026-08-17-the-verbatim-quote-requirement-actually-enforced)
 
 ## Date
 
@@ -115,3 +117,40 @@ no longer current. `docs/04-scoring-model.md` and `config/criteria.yaml`
 are the authoritative current values, as this ADR's Decision section already
 said before this amendment ("Full formula, thresholds and calibration
 protocol: `docs/04-scoring-model.md`").
+
+## Amendment 2 — 2026-08-17: the verbatim quote requirement, actually enforced
+
+This ADR's own Decision section states the requirement plainly: Stage B
+needs "a **mandatory verbatim evidence quote** from the profile." What
+was actually enforced, until now, was narrower: `evidence: null` forces
+`not_met`. Any _non-null_ string — including one the model invented
+outright, possibly under a prompt-injected instruction in the posting
+text this ADR's own reasoning names as the threat model — passed straight
+through and counted toward `mandatoryCoverage`. A repository audit
+(`docs/audit/AUDIT_REPORT.md` AC-008, HIGH, CONFIRMED) found the gap
+between what this ADR claims and what the code checks, and `SECURITY.md`
+made the same claim just as unenforced.
+
+**Decision:** `isKnownProfileEvidence`
+(`src/scoring/domain/evidence-provenance.ts`) checks a `met`/`partial`
+evidence quote against every real evidence line in the profile
+(tag-stripped, exact match — no fuzzy matching, deliberately, since a
+quote that is merely _close_ to a real line is exactly as unverifiable as
+one invented outright). `StageBMatcher` runs this check on every model
+response before calling `createMatch`; a quote that fails it is treated
+exactly like `evidence: null` — coerced to `not_met`. The same index now
+backs `recommendation.ts`'s existing reverse lookup too, so both consumers
+of "is this evidence real" agree by construction.
+
+**Consequence:** the verbatim-quote requirement this ADR always claimed is
+now actually load-bearing. A prompt-injection attempt that returns
+syntactically valid JSON with fabricated evidence no longer manufactures a
+`met` — it degrades to `not_met`, the same outcome a genuine gap in the
+candidate's profile would produce. This closes AC-008's real-world
+scenario without adding a new LLM call, a new cache dimension, or any
+change to the prompts themselves — the check runs entirely against data
+this project already trusts (the profile) and already has in memory.
+
+**Reversal cost:** low. `isKnownProfileEvidence` has one call site
+(`StageBMatcher`); removing it restores the previous (incorrect)
+behavior with no schema or cache-key change.

@@ -1,6 +1,10 @@
 import { normalize } from "../../posting/domain/fingerprint";
 import { deriveProfileKeywords } from "../../profile/domain/profile-keywords";
 import { Profile } from "../../profile/domain/profile";
+import {
+  buildProfileEvidenceIndex,
+  stripEvidenceTag,
+} from "./evidence-provenance";
 import { Match } from "./types";
 
 /**
@@ -22,19 +26,7 @@ export const EMPTY_RECOMMENDATION: Recommendation = {
   missingTerms: [],
 };
 
-/**
- * The prompt renders each evidence line as `- [Competency] text` so the model
- * knows which competency it belongs to, and the model quotes back what it was
- * shown — sometimes including that decoration, sometimes not. Stripping it
- * before the lookup is what makes both forms resolve to the same profile
- * line; measured against the first real calibration run, 15 of 22 quotes
- * carried the tag and silently failed to resolve without this.
- */
-const EVIDENCE_TAG_PATTERN = /^\s*-?\s*\[[^\]]+\]\s*/;
-
-export function stripEvidenceTag(evidence: string): string {
-  return evidence.replace(EVIDENCE_TAG_PATTERN, "").trim();
-}
+export { stripEvidenceTag } from "./evidence-provenance";
 
 /**
  * Reverse-looks-up which competency a match's evidence quote belongs to, by
@@ -43,17 +35,16 @@ export function stripEvidenceTag(evidence: string): string {
  * itself carries only the quote, not which competency it came from — the
  * prompt tags evidence by competency for the model's benefit
  * (`prompts/stage-b-matching.v2.md`), not the domain type's.
+ *
+ * Same index `evidence-provenance.ts`'s `isKnownProfileEvidence` builds —
+ * by construction, a match this function resolves to a competency is
+ * exactly a match Stage B's own provenance check would also have accepted.
  */
 function matchedCompetencyNames(
   matches: readonly Match[],
   profile: Profile,
 ): ReadonlySet<string> {
-  const evidenceToCompetency = new Map<string, string>();
-  for (const competency of profile.competencies) {
-    for (const evidence of competency.evidence) {
-      evidenceToCompetency.set(stripEvidenceTag(evidence), competency.name);
-    }
-  }
+  const evidenceToCompetency = buildProfileEvidenceIndex(profile);
 
   const names = new Set<string>();
   for (const match of matches) {

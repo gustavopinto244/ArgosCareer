@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { Profile } from "../../profile/domain/profile";
 import { MatchesRepository } from "../../persistence/infrastructure/matches-repository";
+import { isKnownProfileEvidence } from "../domain/evidence-provenance";
 import { createMatch, Match, Requirement } from "../domain/types";
 import { AskModel, parseModelOutputWithRetries } from "./llm-output";
 import { buildStageBPrompt, STAGE_B_PROMPT_VERSION } from "./prompts";
@@ -130,13 +131,24 @@ export class StageBMatcher {
       );
       if (!result.ok) return { ok: false, attempts: result.attempts };
 
+      // Evidence provenance (docs/audit AC-008, SECURITY.md's claim that
+      // "it cannot manufacture evidence that is not in the profile" —
+      // previously unenforced): `MatchOutputSchema` only checks that
+      // `evidence` is a non-empty string, so a prompt-injected instruction
+      // returning syntactically valid JSON with fabricated evidence text
+      // would otherwise pass straight through to `createMatch` and count
+      // toward `mandatoryCoverage`. A quote that does not verbatim-match a
+      // real profile evidence line is treated exactly like `evidence: null`
+      // — `createMatch` already coerces that to `not_met`.
+      const evidence =
+        result.data.evidence !== null &&
+        isKnownProfileEvidence(result.data.evidence, profile)
+          ? result.data.evidence
+          : null;
+
       return {
         ok: true,
-        match: createMatch(
-          requirement,
-          result.data.status,
-          result.data.evidence,
-        ),
+        match: createMatch(requirement, result.data.status, evidence),
       };
     };
 

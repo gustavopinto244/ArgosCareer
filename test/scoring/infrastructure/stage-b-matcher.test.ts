@@ -143,7 +143,9 @@ describe("StageBMatcher.match — cache", () => {
   it("returns matches for multiple requirements, one model call each", async () => {
     const ask = vi
       .fn()
-      .mockResolvedValueOnce('{"status":"met","evidence":"x"}')
+      .mockResolvedValueOnce(
+        '{"status":"met","evidence":"Built atlas-manager\'s HTTP layer in Node.js."}',
+      )
       .mockResolvedValueOnce('{"status":"not_met","evidence":null}');
     const matcher = new StageBMatcher(ask, matchesRepo);
 
@@ -213,6 +215,97 @@ describe("StageBMatcher.match — ADR-005: evidence:null forces not_met", () => 
 
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.matches[0]?.status).toBe("not_met");
+  });
+});
+
+describe("StageBMatcher.match — evidence provenance (docs/audit AC-008)", () => {
+  it("coerces a met with fabricated evidence to not_met, exactly like evidence:null", async () => {
+    // The real-world scenario the finding names: a prompt-injected
+    // instruction in the posting returns syntactically valid JSON with
+    // invented evidence. MatchOutputSchema only checks that evidence is a
+    // non-empty string, so this must be caught downstream, not by the
+    // schema -- SECURITY.md's claim that fabricated evidence "cannot"
+    // manufacture a match was previously not enforced anywhere in the code.
+    const ask = vi.fn(
+      async () =>
+        '{"status":"met","evidence":"Led a team of 50 engineers at a Fortune 500 company."}',
+    );
+    const matcher = new StageBMatcher(ask, matchesRepo);
+
+    const result = await matcher.match(
+      "fp1",
+      [requirement()],
+      profile(),
+      "hash1",
+      () => NOW,
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.matches[0]?.status).toBe("not_met");
+      expect(result.matches[0]?.evidence).toBeNull();
+    }
+  });
+
+  it("keeps a met with a real, verbatim profile quote as met — guards against a blanket false negative", async () => {
+    const ask = vi.fn(
+      async () =>
+        '{"status":"met","evidence":"Built atlas-manager\'s HTTP layer in Node.js."}',
+    );
+    const matcher = new StageBMatcher(ask, matchesRepo);
+
+    const result = await matcher.match(
+      "fp1",
+      [requirement()],
+      profile(),
+      "hash1",
+      () => NOW,
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.matches[0]?.status).toBe("met");
+      expect(result.matches[0]?.evidence).toBe(
+        "Built atlas-manager's HTTP layer in Node.js.",
+      );
+    }
+  });
+
+  it("accepts a real quote even with the prompt's '- [Competency] ' tag still attached", async () => {
+    const ask = vi.fn(
+      async () =>
+        '{"status":"met","evidence":"- [Node.js] Built atlas-manager\'s HTTP layer in Node.js."}',
+    );
+    const matcher = new StageBMatcher(ask, matchesRepo);
+
+    const result = await matcher.match(
+      "fp1",
+      [requirement()],
+      profile(),
+      "hash1",
+      () => NOW,
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.matches[0]?.status).toBe("met");
+      expect(result.matches[0]?.evidence).toContain(
+        "Built atlas-manager's HTTP layer in Node.js.",
+      );
+    }
+  });
+
+  it("does not cache a match built from fabricated evidence as if it were a real met", async () => {
+    const ask = vi.fn(
+      async () => '{"status":"met","evidence":"Invented credential."}',
+    );
+    const matcher = new StageBMatcher(ask, matchesRepo);
+
+    await matcher.match("fp1", [requirement()], profile(), "hash1", () => NOW);
+
+    const cached = matchesRepo.find("fp1", "hash1", "b-v2");
+    expect(cached?.[0]?.status).toBe("not_met");
+    expect(cached?.[0]?.evidence).toBeNull();
   });
 });
 
@@ -354,20 +447,43 @@ describe("StageBMatcher.match — bounded concurrency (ADR-022)", () => {
     // the requirement list, so a reordering here would silently mis-attribute
     // every answer.
     const order = ["2", "0", "3", "1"];
+    // Four distinct, real evidence lines — one per requirement index — so
+    // this test can still prove ordering by evidence content without
+    // tripping the evidence-provenance check (docs/audit AC-008): a
+    // fabricated "answer for N" string is now correctly rejected as
+    // unverifiable, which would have made every match's evidence null
+    // regardless of order.
+    const evidenceForIndex = [
+      "Built atlas-manager's HTTP layer in Node.js.",
+      "Wrote Vitest integration tests for the API.",
+      "Deployed the service with Docker Compose.",
+      "Set up GitHub Actions CI for the project.",
+    ];
+    const profileWithFourEvidenceLines: Profile = {
+      ...profile(),
+      competencies: [
+        {
+          name: "Node.js",
+          tracks: ["dev"],
+          aliases: [],
+          evidence: evidenceForIndex,
+        },
+      ],
+    };
     let call = 0;
     const ask = vi.fn(async (prompt: string) => {
       const index = prompt.split("REQ-")[1]![0]!;
       const delay = order.indexOf(index) * 5;
       call += 1;
       await new Promise((r) => setTimeout(r, delay));
-      return `{"status":"met","evidence":"answer for ${index}"}`;
+      return `{"status":"met","evidence":"${evidenceForIndex[Number(index)]}"}`;
     });
 
     const matcher = new StageBMatcher(ask, matchesRepo, "b-v2", 4);
     const result = await matcher.match(
       "fp1",
       requirements(4),
-      profile(),
+      profileWithFourEvidenceLines,
       "h",
       () => NOW,
     );
@@ -381,12 +497,7 @@ describe("StageBMatcher.match — bounded concurrency (ADR-022)", () => {
         "REQ-2 Node.js experience",
         "REQ-3 Node.js experience",
       ]);
-      expect(result.matches.map((m) => m.evidence)).toEqual([
-        "answer for 0",
-        "answer for 1",
-        "answer for 2",
-        "answer for 3",
-      ]);
+      expect(result.matches.map((m) => m.evidence)).toEqual(evidenceForIndex);
     }
   });
 
