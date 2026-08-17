@@ -176,7 +176,7 @@ for a pair that will never need it.
 
 | Kind                            | How a posting gets there                                             | Overlap with other kinds                                     |
 | ------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------ |
-| **ATS** (Gupy)                  | The employer publishes on its own careers page, which the ATS powers | Low — the posting lives at the employer                      |
+| **ATS** (Gupy, Sólides)         | The employer publishes on its own careers page, which the ATS powers | Low — the posting lives at the employer                      |
 | **Agency** (CIEE)               | The employer delegates hiring; candidates apply _through_ the agency | Low — a vacancy takes one route or the other, not both       |
 | **Aggregator** (Jooble, Adzuna) | Scraped or fed from other boards, including the two above            | **High by construction** — its whole product is republishing |
 
@@ -184,6 +184,14 @@ Measured on the real corpus, 2026-08-16, with 386 distinct Gupy employers and
 1,552 distinct CIEE employers: **zero** companies in common. The only name
 appearing on both was `Confidencial`, which is a placeholder rather than an
 employer.
+
+**Gupy vs. Sólides is the same reasoning, not yet the same measurement.** Both
+are ATSs — an employer picks one platform to power its own careers page, not
+both at once — so the expectation is the same low overlap just measured for
+Gupy vs. CIEE. Recorded as an expectation, not a fact: added 2026-08-17
+(ADR-031), no real corpus has been collected from Sólides yet to check
+company names against. Re-measure the way the Gupy/CIEE table above was, once
+Sólides has run for real.
 
 That is the expected result, not a surprise — an ATS and an agency divide the
 market rather than competing for the same advert. It is recorded here because
@@ -468,6 +476,53 @@ curated, committed sample: `test/fixtures/gupy-jobs.md`.
 — neither exists (404).** Nothing to respect because nothing is declared;
 recorded here rather than left as a silent gap in the polite-collector
 checklist.
+
+## Verified: the Sólides response shape (ADR-031)
+
+Undocumented and unlisted anywhere — found by opening
+`vagas.solides.com.br`'s own job-search page in a real browser and reading
+the network request it makes. The page is a Next.js SPA whose HTML and
+`_next/data/*.json` payload both carry no job data; `npm run fixture:solides`
+captured the real response from the API underneath it on 2026-08-17.
+
+```
+GET https://apigw.solides.com.br/jobs/v3/portal-vacancies-new
+  ?title=<free text>&locations=<"Cidade - UF">&take=10&page=<n>
+
+200 { success: bool, errors: [], data: { data: JobItem[], count, totalPages, currentPage } }
+```
+
+`title` and `locations` both filter server-side — verified against the live
+endpoint. `title` does **not** appear to match literally the way Gupy's
+`jobName` does: `title=estagio` (no accent, no gender suffix) returned both
+"Estágio" and "ESTAGIÁRIO(A)" titles in the same result set during discovery,
+one sample, not measured with `npm run probe:terms` the way Gupy's term list
+was (ADR-018) — `config/criteria.yaml` still lists all three literal terms
+per city rather than trusting this un-measured finding.
+
+**`take` is not configurable in practice.** Any value other than `10` was
+verified to silently return `{ data: { count: 0, data: [] } }` — no error,
+no clamp, no page-size hint anywhere in the response. `SolidesCollector`
+hardcodes it.
+
+`JobItem` carries `id`, `title`, `companyName`, `description` (raw HTML, seen
+ranging from under 100 to several thousand characters — and, once, polluted
+with what looked like an accidentally-pasted ChatGPT conversation page, a
+real data-quality fact about this source, not a fixture concern),
+`city`/`state` (nested objects, not bare strings), `homeOffice` (boolean),
+`jobType` (an open string — only `"presencial"` observed across every sample
+pulled during discovery, city-scoped and ~80 nationwide), `createdAt` (a bare
+date, no time), and `redirectLink` (the real application URL).
+
+Full schema: `src/posting/infrastructure/solides-schema.ts`. Provenance for
+the curated, committed sample: `test/fixtures/solides-jobs.md`.
+
+**`robots.txt` checked on `apigw.solides.com.br` — returns 403
+`{"message":"Forbidden"}`, the generic AWS API Gateway response for an
+undefined route, not a robots-specific block: this host serves only the one
+JSON endpoint above, nothing to crawl and nothing declared.** Separately,
+`vagas.solides.com.br` (the page the API sits behind, never queried by this
+collector) has an open `robots.txt` (`Allow: /`).
 
 ## Unverified assumptions
 

@@ -91,6 +91,54 @@ collection:
     # reaches Stage A, so the paid work is unchanged -- and it gives M10's
     # market analysis a national picture instead of a Rio-shaped one.
     - source: ciee
+    # --- Sólides (discovery 2026-08-17, ADR-031) ---------------------------
+    # Public JSON API found by inspecting vagas.solides.com.br's own network
+    # requests -- the site is a Next.js SPA that embeds no job data in its
+    # HTML, so this endpoint is undocumented, same situation as Gupy's.
+    #
+    # `jobName` here becomes Sólides's `title` param and `city` becomes
+    # `locations` (SolidesCollector appends " - UF"); unlike Gupy this search
+    # appears NOT to match the query string literally -- `title=estagio`
+    # (no accent, no gender suffix) already returned "Estágio" and
+    # "ESTAGIÁRIO(A)" titles in the same result set during discovery. All
+    # three terms are still listed explicitly, one per city, matching Gupy's
+    # own pattern: that finding was observed on one sample, not measured with
+    # `npm run probe:terms` the way Gupy's term list was (ADR-018) -- trusting
+    # it silently for a term this search profile depends on would be exactly
+    # the un-measured guess ADR-018 exists to avoid.
+    - source: solides
+      jobName: estágio
+      city: Rio de Janeiro
+    - source: solides
+      jobName: estagiário
+      city: Rio de Janeiro
+    - source: solides
+      jobName: estagiária
+      city: Rio de Janeiro
+    - source: solides
+      jobName: estágio
+      city: Niterói
+    - source: solides
+      jobName: estagiário
+      city: Niterói
+    - source: solides
+      jobName: estagiária
+      city: Niterói
+    - source: solides
+      jobName: estágio
+      city: São Gonçalo
+    - source: solides
+      jobName: estagiário
+      city: São Gonçalo
+    - source: solides
+      jobName: estagiária
+      city: São Gonçalo
+    # No remote query: `title=estagio` with no `locations` filter returned
+    # 3,638 nationwide results (728 pages at Sólides's fixed take=10) during
+    # discovery -- filtering that down to the `homeOffice: true` subset would
+    # mean walking the whole thing to throw most of it away, the same
+    # low-signal-volume trade ADR-018 already rejected for Gupy's bare
+    # "estagio tecnologia"-style terms. Deferred, not forgotten.
   # Pause between queries. The collector's own ~1.5s interval only spaces out
   # pages within one query (CLAUDE.md 6).
   queryIntervalMs: 1500

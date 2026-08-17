@@ -432,6 +432,23 @@ One per pull request, each meeting the M3 criteria:
       infrastructure, not tracked here. A real, permanent limit, not a gap:
       the alert email carries no description, so a LinkedIn posting always
       trips `lowConfidence` and caps at `review`, never `apply`
+- [x] Sólides Vagas, via its own undocumented public JSON API (ADR-031;
+      `solides-schema.ts`, `solides-normalizer.ts`, `solides-collector.ts`).
+      Found by inspecting `vagas.solides.com.br`'s real network requests, not
+      published anywhere — same "public JSON, no auth" shape as Gupy, meeting
+      every M3 criterion: `npm run fixture:solides` against the real API,
+      tolerant Zod schema, curated fixture with provenance
+      (`solides-jobs.md`), contract tests for non-200/timeout/malformed/
+      empty/connection-reset, `robots.txt` checked (the API host has none —
+      a generic API-gateway 403, not a block), honest User-Agent, ~1.5s
+      interval, backoff, explicit timeout. Registered in both
+      `collector-registry.ts` and `normalizer-registry.ts`; nine queries
+      added to `config/criteria.yaml` (three terms × the same three RJ-metro
+      cities Gupy already queries). **Not yet run for real** — wired and
+      unit-tested against a curated fixture, same honest status M3 itself
+      records for Gupy before its own vertical-slice run; a real collection
+      cycle, and the Gupy/Sólides overlap measurement `docs/02` flags as
+      pending, are the natural next check
 - [ ] `N8nCollector` behind `CollectorPort`, with one long-tail source proving
       it (ADR-008). Workflow exported and committed to `n8n/`; core verified
       unaffected with n8n stopped

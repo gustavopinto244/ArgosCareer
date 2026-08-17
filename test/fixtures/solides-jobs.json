@@ -1,0 +1,592 @@
+{
+  "success": true,
+  "errors": [],
+  "data": {
+    "totalPages": 16,
+    "currentPage": 1,
+    "count": 153,
+    "data": [
+      {
+        "affirmative": [],
+        "killerQuestions": [],
+        "id": 903478,
+        "title": "Estagiário Jurídico ",
+        "description": "<p>Estamos contratando um(a) estagiário(a) para atuar na área jurídica da nossa empresa. Se você está cursando a partir do 5º período de Direito e possui interesse em adquirir experiência prática em diversas atividades jurídicas e administrativas, esta oportunidade é para você</p>\n<p> </p>\n<p><strong>Atividades a serem desenvolvidas:</strong></p>\n<ul>\n<li>Acompanhamento de processos judiciais e administrativos em órgãos públicos;</li>\n<li>Realização de diligências em órgãos públicos municipais, estaduais e federais, bem como em tribunais</li>\n<li>Elaboração de peças processuais;</li>\n<li>Pesquisa e análise de doutrina e jurisprudência;</li>\n<li>Apoio na gestão das atividades administrativas e na rotina da área Jurídica.</li>\n</ul>\n<p><strong>Requisitos:</strong></p>\n<ul>\n<li>Estar cursando a partir do 5º período de Direito.</li>\n<li>Conhecimentos técnicos em Direito Civil, Direito Administrativo e Gestão Jurídica.</li>\n<li>Inglês Intermediário | Avançado</li>\n</ul>",
+        "currentState": "em_andamento",
+        "companyName": "CONDOR S/A INDUSTRIA QUIMICA",
+        "companyLogo": "https://c5gwmsmjx1.execute-api.us-east-1.amazonaws.com/prod/empresa/logo/121105/logo_C_Estilizado_Laranja.png",
+        "state": {
+          "id": 19,
+          "name": "Rio de Janeiro",
+          "code": "RJ"
+        },
+        "city": {
+          "id": 3243,
+          "name": "Rio de Janeiro",
+          "state_id": 19
+        },
+        "slug": "vagascondornaoletal",
+        "redirectLink": "https://vagascondornaoletal.solides.jobs/vacancies/903478?origem=portal",
+        "type": "externa",
+        "isHiddenJob": false,
+        "homeOffice": false,
+        "jobType": "presencial",
+        "openPositions": 1,
+        "salary": {
+          "type": "simple",
+          "showRangeToApplicant": true,
+          "initialRange": 0,
+          "finalRange": 0,
+          "negotiable": false
+        },
+        "hasSpecialNeeds": false,
+        "peopleWithDisabilities": false,
+        "disabilityType": null,
+        "pcdOnly": false,
+        "videoUrl": null,
+        "seniority": [
+          {
+            "id": 371223,
+            "name": "Estagiário",
+            "level": null
+          }
+        ],
+        "recruitmentContractType": [
+          {
+            "id": 167694,
+            "name": "Estágio",
+            "level": null
+          }
+        ],
+        "benefits": [
+          {
+            "id": 301308,
+            "name": "Assistência médica",
+            "level": null
+          },
+          {
+            "id": 301309,
+            "name": "Assistência odontológica",
+            "level": null
+          },
+          {
+            "id": 301333,
+            "name": "Seguro de vida",
+            "level": null
+          },
+          {
+            "id": 301337,
+            "name": "Vale refeição",
+            "level": null
+          },
+          {
+            "id": 301338,
+            "name": "Vale transporte",
+            "level": null
+          },
+          {
+            "id": 301334,
+            "name": "Vale alimentação",
+            "level": null
+          },
+          {
+            "id": 731459,
+            "name": "Totalpass",
+            "level": null
+          }
+        ],
+        "language": [],
+        "hardSkills": [],
+        "education": [],
+        "createdAt": "2026-08-14",
+        "availablePositions": 1,
+        "showModality": true,
+        "showSkillsLevel": true,
+        "occupationAreas": [
+          {
+            "id": 349581,
+            "name": "Administrativo",
+            "level": null
+          },
+          {
+            "id": 349595,
+            "name": "Jurídico",
+            "level": null
+          }
+        ],
+        "isGoogleForJobsEnabled": true,
+        "date": {
+          "show": false
+        },
+        "address": {
+          "id": 108708048,
+          "zip_code": "20010-020",
+          "street_address": "Rua São José",
+          "neighborhood": "Centro",
+          "foreign_city": null,
+          "foreign_state": null,
+          "number": "7",
+          "latitude": null,
+          "longitude": null,
+          "additional_information": "11",
+          "city": {
+            "id": 3243,
+            "name": "Rio de Janeiro",
+            "state_id": 19
+          },
+          "state": {
+            "id": 19,
+            "name": "Rio de Janeiro",
+            "code": "RJ"
+          },
+          "country": {
+            "id": 30,
+            "name": "Brasil",
+            "code": "BR"
+          }
+        },
+        "publishers": null,
+        "referenceId": 121105,
+        "startSolidesEnabled": false,
+        "isDisabled": true
+      },
+      {
+        "affirmative": [],
+        "killerQuestions": [],
+        "id": 900088,
+        "title": "Estagiário de Publicidade e Propaganda ",
+        "description": "<p>Planejamento de ações estratégica</p>\n<p> Criação de artes gráficas (digitais e impressas)</p>",
+        "currentState": "em_andamento",
+        "companyName": "Cell Preserve Laboratório de Biotecnologia LTDA",
+        "companyLogo": "https://c5gwmsmjx1.execute-api.us-east-1.amazonaws.com/prod/dados_processo_seletivo/logo_empresa/139630/logo - Fundo transparente.png",
+        "state": {
+          "id": 19,
+          "name": "Rio de Janeiro",
+          "code": "RJ"
+        },
+        "city": {
+          "id": 3243,
+          "name": "Rio de Janeiro",
+          "state_id": 19
+        },
+        "slug": "cellpreserve",
+        "redirectLink": "https://cellpreserve.solides.jobs/vacancies/900088?origem=portal",
+        "type": "externa",
+        "isHiddenJob": false,
+        "homeOffice": false,
+        "jobType": "presencial",
+        "openPositions": 1,
+        "salary": {
+          "type": "simple",
+          "showRangeToApplicant": true,
+          "initialRange": 0,
+          "finalRange": 1035,
+          "negotiable": false
+        },
+        "hasSpecialNeeds": false,
+        "peopleWithDisabilities": false,
+        "disabilityType": null,
+        "pcdOnly": false,
+        "videoUrl": null,
+        "seniority": [
+          {
+            "id": 371223,
+            "name": "Estagiário",
+            "level": null
+          }
+        ],
+        "recruitmentContractType": [
+          {
+            "id": 167694,
+            "name": "Estágio",
+            "level": null
+          }
+        ],
+        "benefits": [
+          {
+            "id": 301334,
+            "name": "Vale alimentação",
+            "level": null
+          },
+          {
+            "id": 301337,
+            "name": "Vale refeição",
+            "level": null
+          },
+          {
+            "id": 301338,
+            "name": "Vale transporte",
+            "level": null
+          },
+          {
+            "id": 2053021,
+            "name": "convenio faculdade",
+            "level": null
+          },
+          {
+            "id": 2053022,
+            "name": "totalpass",
+            "level": null
+          }
+        ],
+        "language": [],
+        "hardSkills": [
+          {
+            "id": 2062538,
+            "name": "adobe ",
+            "level": 2
+          },
+          {
+            "id": 2062540,
+            "name": "Illustrator ",
+            "level": 1
+          },
+          {
+            "id": 2062541,
+            "name": "Canva ",
+            "level": 2
+          }
+        ],
+        "education": [
+          {
+            "id": 45,
+            "name": "Graduação",
+            "level": null
+          }
+        ],
+        "createdAt": "2026-08-09",
+        "availablePositions": 1,
+        "showModality": true,
+        "showSkillsLevel": true,
+        "occupationAreas": [
+          {
+            "id": 349591,
+            "name": "Comunicação",
+            "level": null
+          }
+        ],
+        "isGoogleForJobsEnabled": true,
+        "date": {
+          "show": false
+        },
+        "address": {
+          "id": 108516884,
+          "zip_code": "20730-000",
+          "street_address": "Rua Adolfo Bergamini",
+          "neighborhood": "Engenho de Dentro",
+          "foreign_city": null,
+          "foreign_state": null,
+          "number": "156",
+          "latitude": null,
+          "longitude": null,
+          "additional_information": null,
+          "city": {
+            "id": 3243,
+            "name": "Rio de Janeiro",
+            "state_id": 19
+          },
+          "state": {
+            "id": 19,
+            "name": "Rio de Janeiro",
+            "code": "RJ"
+          },
+          "country": {
+            "id": 30,
+            "name": "Brasil",
+            "code": "BR"
+          }
+        },
+        "publishers": null,
+        "referenceId": 131648,
+        "startSolidesEnabled": false,
+        "isDisabled": true
+      },
+      {
+        "affirmative": [],
+        "killerQuestions": [],
+        "id": 904171,
+        "title": "Recém-graduado(a) em Administração, Engenharia ou Finanças | Log-In Logística ",
+        "description": "<h1>Programa Primeira Geração Log-In 2026</h1>\n<h2>Sua graduação abriu uma porta. Agora, é hora de transformar conhecimento em experiência e construir sua carreira.</h2>\n<p>Você foi a primeira pessoa da sua família a concluir o ensino superior. Essa conquista diz muito sobre você: determinação, capacidade de superar desafios e vontade de construir um caminho diferente.</p>\n<p>Agora, chegou o momento de transformar tudo isso em experiência profissional.</p>\n<p>A <strong>Log-In</strong> é referência em soluções logísticas integradas, conectando portos, regiões e empresas por meio da cabotagem, do transporte rodoviário e de uma ampla operação intermodal. Com atuação no Brasil e no Mercosul, a empresa combina <strong>tecnologia, inteligência, eficiência e pessoas</strong> para tornar a logística cada vez mais integrada e competitiva.</p>\n<p>É nesse contexto que, em parceria com o <strong>Instituto de Inclusão da Primeira Geração (InPriG)</strong>, a Log-In abre as inscrições para o <strong>Programa Primeira Geração – Log-In 2026</strong>.</p>\n<p>O programa foi desenvolvido para <strong>pessoas que são a primeira geração de suas famílias a concluir o ensino superior</strong> e que desejam transformar sua formação em experiência e crescimento profissional.</p>\n<h2>A oportunidade</h2>\n<p><strong>Cargo:</strong> Estagiário(a) de Pós-Graduação — Inteligência de Mercado<br /><strong>Local:</strong> Rio de Janeiro/RJ<br /><strong>Modelo:</strong> Híbrido — 3 dias presenciais e 2 dias em home office<br /><strong>Jornada:</strong> 6 horas por dia, com horário flexível<br /><strong>Modalidade:</strong> Estágio remunerado</p>\n<h3>Áreas de formação</h3>\n<ul>\n<li>\n<p>Engenharias;</p>\n</li>\n<li>\n<p>Administração;</p>\n</li>\n<li>\n<p>Economia;</p>\n</li>\n<li>\n<p>Contabilidade.</p>\n</li>\n</ul>\n<h2>O que você fará?</h2>\n<p>Na área de <strong>Inteligência de Mercado</strong>, você terá contato com informações, indicadores e análises que apoiam a tomada de decisões do negócio.</p>\n<p>Entre suas principais atividades:</p>\n<ul>\n<li>\n<p>Apoiar o desenvolvimento e a divulgação de <strong>relatórios da área</strong>;</p>\n</li>\n<li>\n<p>Contribuir para a atualização de relatórios e informações;</p>\n</li>\n<li>\n<p>Apoiar a elaboração e o acompanhamento de <strong>indicadores e resultados</strong>;</p>\n</li>\n<li>\n<p>Participar do desenvolvimento de <strong>precificação dos serviços de transporte para clientes</strong>;</p>\n</li>\n<li>\n<p>Apoiar a análise de resultados da companhia;</p>\n</li>\n<li>\n<p>Desenvolver a capacidade de transformar dados e informações em <strong>insights para o negócio</strong>.</p>\n</li>\n</ul>\n<h2>Quem estamos buscando?</h2>\n<p>Mais do que um currículo perfeito, buscamos <strong>pessoas com potencial, curiosidade e vontade de construir</strong>.</p>\n<h3>Requisitos</h3>\n<ul>\n<li>\n<p>Ser a <strong>primeira geração da família a concluir o ensino superior</strong>, ou seja, ter pais e avós sem graduação;</p>\n</li>\n<li>\n<p>Ter concluído o ensino superior há, no máximo, <strong>5 anos</strong> — a partir de 2021;</p>\n</li>\n<li>\n<p>Estar com o <strong>diploma de graduação em mãos</strong>;</p>\n</li>\n<li>\n<p>Ter boa comunicação verbal e escrita;</p>\n</li>\n<li>\n<p>Demonstrar <strong>proatividade, dinamismo e iniciativa</strong>;</p>\n</li>\n<li>\n<p>Ter perfil <strong>hands on</strong> e disposição para aprender;</p>\n</li>\n<li>\n<p>Possuir bom relacionamento interpessoal;</p>\n</li>\n<li>\n<p>Ter <strong>raciocínio lógico e visão analítica;</strong></p>\n</li>\n<li>Conhecimento em <strong>Excel.</strong></li>\n</ul>\n<h3>Será um diferencial</h3>\n<ul>\n<li>\n<p>Conhecimento em <strong>Power BI</strong>;</p>\n</li>\n<li>\n<p>Conhecimento de <strong>inglês</strong>.</p>\n</li>\n</ul>\n<h2>O que a Log-In e o InPriG oferecem?</h2>\n<h3>Log-In</h3>\n<ul>\n<li>\n<p>Bolsa de estágio;</p>\n</li>\n<li>\n<p>Vale-alimentação e/ou vale-refeição com valor atrativo;</p>\n</li>\n<li>\n<p>Vale-transporte;</p>\n</li>\n<li>\n<p>Parceria Gympass;</p>\n</li>\n<li>\n<p>Espaço de conveniência;</p>\n</li>\n<li>\n<p>Experiência prática em uma empresa referência em soluções logísticas integradas.</p>\n</li>\n</ul>\n<h3>InPriG</h3>\n<ul>\n<li>\n<p>🎓 <strong>MBA</strong> como parte da formação ao longo do programa;</p>\n</li>\n<li>\n<p>📚 <strong>Formação Belt</strong>, ampliando seu repertório em melhoria contínua;</p>\n</li>\n<li>\n<p>💬 <strong>Programa de Desenvolvimento InPriG</strong>, com conteúdos e experiências voltados ao desenvolvimento profissional;</p>\n</li>\n<li>\n<p>🤝 Acompanhamento e uma rede de apoio durante a jornada.</p>\n</li>\n</ul>\n<h2>Você chegou até aqui. Agora, vamos construir o próximo passo.</h2>\n<p><strong>Venha fazer parte do Programa Primeira Geração – Log-In 2026.</strong></p>\n<p><strong>Log-In + InPriG: conectando talentos, oportunidades e novos caminhos para a primeira geração.</strong></p>",
+        "currentState": "em_andamento",
+        "companyName": "InPriG - Instituto de Inclusão da Primeira Geração",
+        "companyLogo": "https://c5gwmsmjx1.execute-api.us-east-1.amazonaws.com/prod/dados_processo_seletivo/logo_empresa/223518/Contorno Grosso Sem fundo.png",
+        "state": {
+          "id": 19,
+          "name": "Rio de Janeiro",
+          "code": "RJ"
+        },
+        "city": {
+          "id": 3243,
+          "name": "Rio de Janeiro",
+          "state_id": 19
+        },
+        "slug": "inprig",
+        "redirectLink": "https://inprig.solides.jobs/vacancies/904171?origem=portal",
+        "type": "externa",
+        "isHiddenJob": false,
+        "homeOffice": false,
+        "jobType": "presencial",
+        "openPositions": 1,
+        "salary": {
+          "type": "simple",
+          "showRangeToApplicant": false,
+          "initialRange": null,
+          "finalRange": null,
+          "negotiable": false
+        },
+        "hasSpecialNeeds": false,
+        "peopleWithDisabilities": false,
+        "disabilityType": null,
+        "pcdOnly": false,
+        "videoUrl": null,
+        "seniority": [
+          {
+            "id": 4,
+            "name": "Junior",
+            "level": null
+          },
+          {
+            "id": 5,
+            "name": "Pleno",
+            "level": null
+          },
+          {
+            "id": 371223,
+            "name": "Estagiário",
+            "level": null
+          }
+        ],
+        "recruitmentContractType": [
+          {
+            "id": 167694,
+            "name": "Estágio",
+            "level": null
+          }
+        ],
+        "benefits": [
+          {
+            "id": 301334,
+            "name": "Vale alimentação",
+            "level": null
+          },
+          {
+            "id": 301337,
+            "name": "Vale refeição",
+            "level": null
+          },
+          {
+            "id": 2073756,
+            "name": "Gympass",
+            "level": null
+          },
+          {
+            "id": 301338,
+            "name": "Vale transporte",
+            "level": null
+          },
+          {
+            "id": 2073757,
+            "name": "Espaço de Conveniência",
+            "level": null
+          }
+        ],
+        "language": [],
+        "hardSkills": [
+          {
+            "id": 2073760,
+            "name": "Microsoft Excel",
+            "level": 1
+          }
+        ],
+        "education": [
+          {
+            "id": 45,
+            "name": "Graduação",
+            "level": null
+          },
+          {
+            "id": 46,
+            "name": "Tecnólogo",
+            "level": null
+          }
+        ],
+        "createdAt": "2026-08-13",
+        "availablePositions": 1,
+        "showModality": false,
+        "showSkillsLevel": true,
+        "occupationAreas": [
+          {
+            "id": 349582,
+            "name": "Financeiro",
+            "level": null
+          },
+          {
+            "id": 349581,
+            "name": "Administrativo",
+            "level": null
+          },
+          {
+            "id": 349596,
+            "name": "Comercial",
+            "level": null
+          }
+        ],
+        "isGoogleForJobsEnabled": true,
+        "date": {
+          "show": false
+        },
+        "address": {
+          "id": 108736677,
+          "zip_code": "20021-130",
+          "street_address": "Avenida General Justo",
+          "neighborhood": "Centro",
+          "foreign_city": null,
+          "foreign_state": null,
+          "number": "375",
+          "latitude": null,
+          "longitude": null,
+          "additional_information": "6º andar",
+          "city": {
+            "id": 3243,
+            "name": "Rio de Janeiro",
+            "state_id": 19
+          },
+          "state": {
+            "id": 19,
+            "name": "Rio de Janeiro",
+            "code": "RJ"
+          },
+          "country": {
+            "id": 30,
+            "name": "Brasil",
+            "code": "BR"
+          }
+        },
+        "publishers": null,
+        "referenceId": 215628,
+        "startSolidesEnabled": false,
+        "isDisabled": true
+      },
+      {
+        "affirmative": [],
+        "killerQuestions": [],
+        "id": 899836,
+        "title": "ESTAGIÁRIO(A) HOTELARIA Restaurante- Ipanema  ",
+        "description": "<p><span><span> </span></span><span>Buscamos um(a) estagiária dinâmico(a), comunicativo(a) e proativo(a) para integrar nossa equipe de Hotel. O estagiário será <span> </span>o primeiro ponto de contato do cliente no restaurante do nosso hotel para garantir uma experiência acolhedora e eficiente. Se você tem paixão por atendimento ao público, organização e busca oferecer um serviço de excelência, venha fazer parte do nosso time.</span></p>\n<p> </p>\n<p><span>Principais Responsabilidades</span></p>\n<ul>\n<li><span>Realizar atendimento aos hospedes e clientes de forma rápida e cordial, seguindo os padrões do hotel.</span></li>\n<li><span>Solucionar dúvidas, reclamações e solicitações dos hóspedes de maneira eficiente e cortês, buscando a satisfação total.</span></li>\n<li><span>Zelar pela segurança e sigilo das informações dos hóspedes e do hotel.</span></li>\n</ul>\n<p><span> </span></p>\n<p><span>Requisitos e Qualificações</span></p>\n<ul>\n<li><span>Formação superior <span> </span>em andamento em Turismo , Hotelaria ou áreas correlatas </span></li>\n<li><span>Inglês e Espanhol avançados</span></li>\n<li><span>Excelente habilidade de comunicação interpessoal, escrita e verbal.</span></li>\n<li><span>Proatividade, organização, atenção aos detalhes </span></li>\n<li><span>Atitude</span></li>\n<li><span>Proatividade</span></li>\n<li><span>Postura profissional</span></li>\n</ul>\n<p><span>Horário: 07:00 às 13:15h</span></p>",
+        "currentState": "em_andamento",
+        "companyName": "ARENA IPANEMA HOTEL LTDA",
+        "companyLogo": "https://c5gwmsmjx1.execute-api.us-east-1.amazonaws.com/prod/dados_processo_seletivo/logo_empresa/130510/Logo Rede Arena_cor.png",
+        "state": {
+          "id": 19,
+          "name": "Rio de Janeiro",
+          "code": "RJ"
+        },
+        "city": {
+          "id": 3243,
+          "name": "Rio de Janeiro",
+          "state_id": 19
+        },
+        "slug": "talentosarena",
+        "redirectLink": "https://talentosarena.solides.jobs/vacancies/899836?origem=portal",
+        "type": "externa",
+        "isHiddenJob": false,
+        "homeOffice": false,
+        "jobType": "presencial",
+        "openPositions": 1,
+        "salary": {
+          "type": "simple",
+          "showRangeToApplicant": true,
+          "initialRange": 0,
+          "finalRange": 1159.8,
+          "negotiable": false
+        },
+        "hasSpecialNeeds": false,
+        "peopleWithDisabilities": false,
+        "disabilityType": null,
+        "pcdOnly": false,
+        "videoUrl": null,
+        "seniority": [
+          {
+            "id": 371223,
+            "name": "Estagiário",
+            "level": null
+          }
+        ],
+        "recruitmentContractType": [
+          {
+            "id": 167694,
+            "name": "Estágio",
+            "level": null
+          }
+        ],
+        "benefits": [
+          {
+            "id": 301332,
+            "name": "Refeitório",
+            "level": null
+          },
+          {
+            "id": 301338,
+            "name": "Vale transporte",
+            "level": null
+          }
+        ],
+        "language": [],
+        "hardSkills": [],
+        "education": [
+          {
+            "id": 45,
+            "name": "Graduação",
+            "level": null
+          }
+        ],
+        "createdAt": "2026-08-10",
+        "availablePositions": 1,
+        "showModality": true,
+        "showSkillsLevel": true,
+        "occupationAreas": [
+          {
+            "id": 349598,
+            "name": "Turismo",
+            "level": null
+          }
+        ],
+        "isGoogleForJobsEnabled": true,
+        "date": {
+          "show": false
+        },
+        "address": {
+          "id": 108506998,
+          "zip_code": "22080-040",
+          "street_address": null,
+          "neighborhood": null,
+          "foreign_city": null,
+          "foreign_state": null,
+          "number": null,
+          "latitude": null,
+          "longitude": null,
+          "additional_information": null,
+          "city": {
+            "id": 3243,
+            "name": "Rio de Janeiro",
+            "state_id": 19
+          },
+          "state": {
+            "id": 19,
+            "name": "Rio de Janeiro",
+            "code": "RJ"
+          },
+          "country": {
+            "id": 30,
+            "name": "Brasil",
+            "code": "BR"
+          }
+        },
+        "publishers": null,
+        "referenceId": 122528,
+        "startSolidesEnabled": false,
+        "isDisabled": true
+      }
+    ]
+  }
+}
