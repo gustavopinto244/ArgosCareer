@@ -30,6 +30,11 @@ export interface RunCounts {
    * serialized to JSON text, read back with `parseTruncatedSources`
    * (docs/audit AC-013). */
   readonly truncatedSources?: readonly string[];
+  /** Every source at least one query targeted this run, serialized to JSON
+   * text, read back with `parseAttemptedSources` (docs/audit PR-003) —
+   * distinguishes "this source was queried and failed" from "this source
+   * was never queried at all", which `failedSources` alone cannot. */
+  readonly attemptedSources?: readonly string[];
   /** `scoreAndDeliver` runs only, from `OpenRouterClient.getUsage()` read
    * once after scoring completes — every attempt that reached the network,
    * regardless of outcome (docs/audit AC-015). */
@@ -67,6 +72,12 @@ export function parseTruncatedSources(
   return parseStringArrayColumn(row.truncatedSources);
 }
 
+export function parseAttemptedSources(
+  row: Pick<RunRow, "attemptedSources">,
+): string[] {
+  return parseStringArrayColumn(row.attemptedSources);
+}
+
 /**
  * One row per pipeline execution (docs/08-observability.md), the audit trail
  * behind principle 2 — "what did Tuesday's run actually do?" `kind` is
@@ -92,7 +103,8 @@ export class RunsRepository {
     outcome: RunOutcome,
     counts: RunCounts = {},
   ): void {
-    const { failedSources, truncatedSources, ...rest } = counts;
+    const { failedSources, truncatedSources, attemptedSources, ...rest } =
+      counts;
     this.db
       .update(runs)
       .set({
@@ -105,6 +117,9 @@ export class RunsRepository {
         ...(truncatedSources === undefined
           ? {}
           : { truncatedSources: JSON.stringify(truncatedSources) }),
+        ...(attemptedSources === undefined
+          ? {}
+          : { attemptedSources: JSON.stringify(attemptedSources) }),
       })
       .where(eq(runs.runId, runId))
       .run();
@@ -156,5 +171,42 @@ export class RunsRepository {
       .limit(1)
       .all();
     return rows[0] ?? null;
+  }
+
+  /**
+   * The most recent `collect` run in which `source` was attempted and did
+   * not fail — independent of that run's own aggregate `outcome` (docs/audit
+   * PR-003). A mixed run is marked "success" the moment not every query
+   * failed (`executeCollect`'s `allFailed`), so one healthy source is
+   * already enough to make the whole run look fine while a different
+   * source has been failing for days — `findLatestFinished("collect",
+   * "success")` cannot tell those two situations apart. Scanning
+   * `attemptedSources`/`failedSources` membership directly, per source,
+   * recovers the distinction: this returns null only when `source` has
+   * never once succeeded, not merely when the *run* it last succeeded in
+   * also happened to be reported as an overall failure.
+   *
+   * Reads every `collect` run rather than a bounded window — this
+   * project's scale (a personal batch job, not a fleet) makes an unbounded
+   * scan the same non-issue `findRunsSince(kind, null)` already treats it
+   * as elsewhere in this class.
+   */
+  findLastSuccessfulSourceCollectAt(source: string): Date | null {
+    const rows = this.db
+      .select()
+      .from(runs)
+      .where(eq(runs.kind, "collect"))
+      .orderBy(desc(runs.finishedAt))
+      .all();
+    for (const row of rows) {
+      if (row.finishedAt === null) continue;
+      if (
+        parseAttemptedSources(row).includes(source) &&
+        !parseFailedSources(row).includes(source)
+      ) {
+        return row.finishedAt;
+      }
+    }
+    return null;
   }
 }

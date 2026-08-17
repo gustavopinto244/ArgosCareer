@@ -134,6 +134,13 @@
       "when": 1786973349636,
       "tag": "0018_greedy_sunspot",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1786974248149,
+      "tag": "0019_soft_paper_doll",
+      "breakpoints": true
     }
   ]
 }

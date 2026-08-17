@@ -247,6 +247,12 @@ export const runs = sqliteTable("runs", {
   // upstream source's last page was still full — a "success" run that
   // silently left more results uncollected, previously invisible.
   truncatedSources: text("truncated_sources"),
+  // Same shape as failedSources: every source at least one query targeted
+  // this run, regardless of outcome (docs/audit PR-003). Needed alongside
+  // failedSources to answer "did THIS source succeed", not just "did it
+  // fail" — a source absent from both arrays was never attempted at all,
+  // which is a different fact than it having quietly succeeded.
+  attemptedSources: text("attempted_sources"),
   // scoreAndDeliver runs only, from OpenRouterClient.getUsage() (docs/audit
   // AC-015). llmAttempts counts every network attempt regardless of
   // outcome -- calls that never made it into scoredCount at all (a 429, a

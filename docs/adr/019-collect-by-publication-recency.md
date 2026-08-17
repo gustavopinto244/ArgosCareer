@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted
+Accepted — amended 2026-08-17, see
+[Amendment 1](#amendment-1--2026-08-17-the-gap-aware-window-no-longer-deferred)
+and
+[Amendment 2](#amendment-2--2026-08-17-per-source-recovery-closing-what-amendment-1-deferred)
 
 ## Date
 
@@ -133,3 +136,24 @@ scenario (the whole app down) asked for — deliberately not built here.
 **Reversal cost:** low. `computeRecencyWindowDays` is a pure function with
 its own unit tests, independent of the rest of `executeCollect`; reverting
 means restoring the old `isFirstRun ? backfillDays : recencyDays` branch.
+
+## Amendment 2 — 2026-08-17: per-source recovery, closing what Amendment 1 deferred
+
+Amendment 1 named the per-source gap and deferred it: "per-source recovery
+windows would need per-source success tracking, a bigger change than this
+finding's concrete scenario... asked for — deliberately not built here."
+`docs/audit/POST_REMEDIATION_CHANGE_AUDIT_2026-08-17.md` re-raised it as
+PR-003 with the concrete scenario Amendment 1's text anticipated almost
+exactly: one source down for days while another stays healthy, every cycle
+still reporting "success."
+
+ADR-041 closes it: `runs` gains `attemptedSources` alongside the existing
+`failedSources`, and `RunsRepository.findLastSuccessfulSourceCollectAt(source)`
+derives each source's own last real success from run history.
+`executeCollect` computes a `cutoffForSource` per distinct source instead of
+one global cutoff. The "bigger change" Amendment 1 priced in turned out to
+be one column and one query method, not a new persisted concept — see
+ADR-041 for the full reasoning, cost, and what remains unchanged
+(`computeRecencyWindowDays` itself, and `evaluateCollectionHealth`'s
+alerting, which still matters for telling a human a source is failing in
+the first place).

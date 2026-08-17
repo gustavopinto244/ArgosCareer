@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { postings } from "../../src/persistence/infrastructure/schema";
 import {
+  CollectorResolver,
   computeRecencyWindowDays,
   executeCollect,
   executeDedup,
@@ -433,6 +434,163 @@ describe("executeCollect — recency window (ADR-019)", () => {
 
     expect(outcome.normalized).toBe(1);
     expect(outcome.tooOld).toBe(0);
+  });
+});
+
+describe("executeCollect — per-source recency window (docs/audit PR-003)", () => {
+  const WINDOW = { recencyDays: 1, backfillDays: 10 };
+
+  function indeedPayload(title: string, company: string, datePosted: string) {
+    return { id: title, title, company, date_posted: datePosted };
+  }
+
+  /** gupy always succeeds with whatever postings are given it; indeed
+   * either fails outright or succeeds with the given postings, so a test
+   * can control each source's health independently across several runs. */
+  function collectorFor(
+    indeedOutcome: { failed: true } | { failed: false; postings: unknown[] },
+  ): CollectorResolver {
+    return (source: string) => ({
+      collect: async () => {
+        if (source === "gupy") {
+          return { source: "gupy", collectedAt: new Date(), postings: [] };
+        }
+        return indeedOutcome.failed
+          ? {
+              source: "indeed",
+              collectedAt: new Date(),
+              postings: [],
+              error: { message: "Indeed unreachable" },
+            }
+          : {
+              source: "indeed",
+              collectedAt: new Date(),
+              postings: indeedOutcome.postings.map((payload, i) => ({
+                source: "indeed",
+                sourceId: String(i),
+                payload,
+              })),
+            };
+      },
+    });
+  }
+
+  const day = (n: number) => new Date(`2026-08-1${n}T12:00:00Z`);
+
+  it("recovers a posting from a source down for days, even though another source stayed healthy and kept every run 'success'", async () => {
+    // Day 0: both sources succeed -- establishes each one's own baseline.
+    await executeCollect(
+      db,
+      collectorFor({ failed: false, postings: [] }),
+      [{ source: "gupy" }, { source: "indeed" }],
+      () => day(0),
+      0,
+      WINDOW,
+    );
+
+    // Days 1-3: gupy keeps succeeding (so the run's own aggregate outcome
+    // is "success" every single time -- executeCollect's allFailed is only
+    // true when EVERY query fails), while indeed fails every time. Under
+    // the old global-window bug, findLatestFinished("collect", "success")
+    // would keep advancing on gupy's success alone, hiding indeed's outage
+    // entirely.
+    for (let n = 1; n <= 3; n++) {
+      await executeCollect(
+        db,
+        collectorFor({ failed: true }),
+        [{ source: "gupy" }, { source: "indeed" }],
+        () => day(n),
+        0,
+        WINDOW,
+      );
+    }
+
+    // Day 4: indeed recovers, reporting a posting published on day 1 --
+    // 3 days before now. Outside recencyDays (1), which is all the old
+    // global logic would have granted (the "last successful run" was
+    // yesterday, day 3, since gupy carried it). Inside the real gap since
+    // indeed's own last success (day 0, 4 days ago), which is what a
+    // correct per-source window must grant instead.
+    const outcome = await executeCollect(
+      db,
+      collectorFor({
+        failed: false,
+        postings: [
+          indeedPayload(
+            "Estágio Indeed Publicado no Apagão",
+            "Empresa Y",
+            day(1).toISOString(),
+          ),
+        ],
+      }),
+      [{ source: "gupy" }, { source: "indeed" }],
+      () => day(4),
+      0,
+      WINDOW,
+    );
+
+    expect(outcome.normalized).toBe(1);
+    expect(outcome.tooOld).toBe(0);
+  });
+
+  it("still applies the ordinary short window to the source that stayed healthy throughout", async () => {
+    await executeCollect(
+      db,
+      collectorFor({ failed: false, postings: [] }),
+      [{ source: "gupy" }, { source: "indeed" }],
+      () => day(0),
+      0,
+      WINDOW,
+    );
+    for (let n = 1; n <= 3; n++) {
+      await executeCollect(
+        db,
+        collectorFor({ failed: true }),
+        [{ source: "gupy" }, { source: "indeed" }],
+        () => day(n),
+        0,
+        WINDOW,
+      );
+    }
+
+    // gupy has been succeeding every single run -- its own window on day 4
+    // should still be the ordinary recencyDays (1), not the wide gap
+    // indeed earned. A posting from day 1 (3 days old) must be dropped for
+    // gupy specifically, proving the two sources' windows are independent,
+    // not both accidentally widened together.
+    const collector = (source: string) => ({
+      collect: async () => {
+        if (source === "indeed") {
+          return { source: "indeed", collectedAt: new Date(), postings: [] };
+        }
+        return {
+          source: "gupy",
+          collectedAt: new Date(),
+          postings: [
+            {
+              source: "gupy",
+              sourceId: "1",
+              payload: {
+                ...gupyPayload(1, "Estágio Gupy Antigo"),
+                publishedDate: day(1).toISOString(),
+              },
+            },
+          ],
+        };
+      },
+    });
+
+    const outcome = await executeCollect(
+      db,
+      collector,
+      [{ source: "gupy" }, { source: "indeed" }],
+      () => day(4),
+      0,
+      WINDOW,
+    );
+
+    expect(outcome.normalized).toBe(0);
+    expect(outcome.tooOld).toBe(1);
   });
 });
 

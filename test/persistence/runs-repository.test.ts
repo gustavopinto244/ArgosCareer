@@ -8,6 +8,7 @@ import {
 } from "../../src/persistence/infrastructure/db";
 import {
   RunsRepository,
+  parseAttemptedSources,
   parseFailedSources,
   parseTruncatedSources,
 } from "../../src/persistence/infrastructure/runs-repository";
@@ -166,5 +167,104 @@ describe("RunsRepository", () => {
 
   it("parseFailedSources tolerates malformed JSON rather than throwing", () => {
     expect(parseFailedSources({ failedSources: "not json" })).toEqual([]);
+  });
+
+  it("serializes attemptedSources to JSON, read back via parseAttemptedSources (docs/audit PR-003)", () => {
+    const runId = repository.start("collect", new Date());
+    repository.finish(runId, new Date(), "success", {
+      attemptedSources: ["gupy", "indeed"],
+    });
+
+    const row = repository.findById(runId);
+    expect(row).not.toBeNull();
+    expect(parseAttemptedSources(row!)).toEqual(["gupy", "indeed"]);
+  });
+
+  it("parseAttemptedSources returns an empty array when nothing was recorded", () => {
+    const runId = repository.start("collect", new Date());
+    repository.finish(runId, new Date(), "success", {});
+
+    const row = repository.findById(runId);
+    expect(row).not.toBeNull();
+    expect(parseAttemptedSources(row!)).toEqual([]);
+  });
+});
+
+describe("RunsRepository.findLastSuccessfulSourceCollectAt (docs/audit PR-003)", () => {
+  it("returns null when the source has never been attempted", () => {
+    expect(repository.findLastSuccessfulSourceCollectAt("gupy")).toBeNull();
+  });
+
+  it("returns the finish time of the run in which the source succeeded", () => {
+    const runId = repository.start("collect", new Date("2026-08-14T03:00:00Z"));
+    repository.finish(runId, new Date("2026-08-14T03:05:00Z"), "success", {
+      attemptedSources: ["gupy"],
+      failedSources: [],
+    });
+
+    expect(repository.findLastSuccessfulSourceCollectAt("gupy")).toEqual(
+      new Date("2026-08-14T03:05:00Z"),
+    );
+  });
+
+  it("returns null for a source that was attempted but always failed", () => {
+    const runId = repository.start("collect", new Date());
+    repository.finish(runId, new Date(), "failed", {
+      attemptedSources: ["solides"],
+      failedSources: ["solides"],
+    });
+
+    expect(repository.findLastSuccessfulSourceCollectAt("solides")).toBeNull();
+  });
+
+  it("does not confuse a different source's success with this one's", () => {
+    const runId = repository.start("collect", new Date());
+    repository.finish(runId, new Date(), "success", {
+      attemptedSources: ["gupy"],
+      failedSources: [],
+    });
+
+    expect(repository.findLastSuccessfulSourceCollectAt("solides")).toBeNull();
+  });
+
+  it("finds the source's own last success even when the run that contains it is not the most recent overall (docs/audit PR-003's exact scenario)", () => {
+    // Day 0: solides succeeds.
+    const day0 = repository.start("collect", new Date("2026-08-10T03:00:00Z"));
+    repository.finish(day0, new Date("2026-08-10T03:05:00Z"), "success", {
+      attemptedSources: ["gupy", "solides"],
+      failedSources: [],
+    });
+
+    // Days 1-3: gupy keeps succeeding (so the run's own outcome is
+    // "success" every time), solides fails every time. The bug this
+    // guards: findLatestFinished("collect", "success") would return one of
+    // these runs and make solides look like it recovered days sooner than
+    // it actually did.
+    for (let day = 1; day <= 3; day++) {
+      const runId = repository.start(
+        "collect",
+        new Date(`2026-08-1${day}T03:00:00Z`),
+      );
+      repository.finish(
+        runId,
+        new Date(`2026-08-1${day}T03:05:00Z`),
+        "success",
+        { attemptedSources: ["gupy", "solides"], failedSources: ["solides"] },
+      );
+    }
+
+    expect(repository.findLastSuccessfulSourceCollectAt("gupy")).toEqual(
+      new Date("2026-08-13T03:05:00Z"),
+    );
+    // solides's own last success is still day 0, four runs back.
+    expect(repository.findLastSuccessfulSourceCollectAt("solides")).toEqual(
+      new Date("2026-08-10T03:05:00Z"),
+    );
+  });
+
+  it("ignores a still-in-progress run (finishedAt null)", () => {
+    repository.start("collect", new Date());
+    // Never finished -- must not be treated as a success.
+    expect(repository.findLastSuccessfulSourceCollectAt("gupy")).toBeNull();
   });
 });
