@@ -197,6 +197,43 @@ describe("PostingsRepository — nothing is ever deleted", () => {
   });
 });
 
+describe("PostingsRepository.restoreDuplicate (docs/audit PR-006)", () => {
+  it("clears a flag set by markDuplicate and returns true", () => {
+    const a = repository.upsert(posting({ sourceId: "1" }));
+    const b = repository.upsert(
+      posting({ sourceId: "2", title: "Estágio Frontend" }),
+    );
+    repository.markDuplicate(b.posting.fingerprint, a.posting.fingerprint);
+    expect(repository.findActive()).toHaveLength(1);
+
+    const restored = repository.restoreDuplicate(b.posting.fingerprint);
+
+    expect(restored).toBe(true);
+    expect(repository.findActive()).toHaveLength(2);
+  });
+
+  it("returns false for a posting that was never flagged", () => {
+    const a = repository.upsert(posting({ sourceId: "1" }));
+
+    expect(repository.restoreDuplicate(a.posting.fingerprint)).toBe(false);
+  });
+
+  it("returns false for a fingerprint that does not exist", () => {
+    expect(repository.restoreDuplicate("does-not-exist")).toBe(false);
+  });
+
+  it("is idempotent — restoring an already-restored posting returns false the second time", () => {
+    const a = repository.upsert(posting({ sourceId: "1" }));
+    const b = repository.upsert(
+      posting({ sourceId: "2", title: "Estágio Frontend" }),
+    );
+    repository.markDuplicate(b.posting.fingerprint, a.posting.fingerprint);
+
+    expect(repository.restoreDuplicate(b.posting.fingerprint)).toBe(true);
+    expect(repository.restoreDuplicate(b.posting.fingerprint)).toBe(false);
+  });
+});
+
 describe("PostingsRepository.findUnnotified / markNotified", () => {
   it("includes a freshly upserted posting", () => {
     repository.upsert(posting());

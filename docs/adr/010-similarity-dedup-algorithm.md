@@ -2,10 +2,11 @@
 
 ## Status
 
-Accepted — amended 2026-08-16, see
-[Amendment 1](#amendment-1--2026-08-16-locations-must-not-contradict)
-and
+Accepted — amended 2026-08-16 and 2026-08-17, see
+[Amendment 1](#amendment-1--2026-08-16-locations-must-not-contradict),
 [Amendment 2](#amendment-2--2026-08-17-no-signal-must-never-score-as-a-match)
+and
+[Amendment 3](#amendment-3--2026-08-17-shadow-mode-layer-2-stops-merging-destructively)
 
 ## Date
 
@@ -235,3 +236,97 @@ fingerprint) to catch if it truly is one — never the reverse.
 in `computeTitleSimilarity`, no schema or stored-data implications, same
 as the rest of this ADR's reasoning about why tuning this function is
 cheap.
+
+## Amendment 3 — 2026-08-17: shadow mode — layer 2 stops merging destructively
+
+Amendments 1 and 2 each fixed one measured false positive after it had
+already cost a real posting — a different city silently accepted as
+agreement, then two boilerplate-only titles silently accepted as identical.
+Both times the fix was the same shape: find the specific wrong case, patch
+the rule, `argos dedup --reset` to repair what the old rule had already
+destroyed. A post-remediation audit (`docs/audit`, PR-006) asked the
+question this project's own Consequences section had already raised and
+left open: how many more cases like these exist that have not been found
+yet, given the threshold "has no calibration protocol... this ADR's table
+is a starting point, not a result"?
+
+The audit found more, at the current threshold, without needing new data —
+just the corpus already on Atlas: "Direito Trabalhista" vs. "Direito
+Tributário" scored 0.57, "Engenharia Civil" vs. "Engenharia de Software"
+scored 0.55. Both pairs read, in prose, as two distinct roles at the same
+company — exactly the shape of the "Contencioso Cível" false positive this
+ADR's Consequences section already flagged and deferred in 2026-08-14,
+except these were not deferred: under the old destructive behavior they
+were merged, and one of the two postings was gone.
+
+**The pattern across all three amendments is the actual finding.** Every
+fix so far has been reactive — a wrong merge is caught only when someone
+happens to notice a specific posting missing, or happens to compute
+`computeTitleSimilarity` against the live corpus by hand. There is no
+system currently converting "layer 2 flagged this pair" into "a human
+confirmed this pair is really one job" or "a human confirmed it is not."
+Without that feedback loop, the threshold cannot be calibrated the way
+`docs/04-scoring-model.md`'s M7 process calibrates scoring — there is
+nothing to calibrate _against_.
+
+### Decision
+
+Layer 2 stops calling `markDuplicate`. A match is still computed, at the
+same threshold, with the same company-grouping, window, and location-
+agreement rules Amendments 1 and 2 already established — none of that
+logic changes. What changes is what happens with the result: instead of
+excluding the "loser" from `findActive()` and every stage after it, the
+match is recorded as a `ShadowDuplicateCandidate`
+(`src/persistence/application/dedup-similar-postings.ts`) and logged to
+`posting_events` (`executeDedup`/`executeDedupAndClaim`,
+`src/cli/main.ts`) with `stage: "dedup-similarity"`,
+`outcome: "shadow_candidate"`, and a `reason` carrying the similarity
+score and both titles. Both postings stay fully active — scored,
+scoreable, deliverable, independently. Nothing is excluded.
+
+This is the same principle `docs/02-architecture.md` §7 already states for
+principle 1, applied to a different kind of unreliability: "a broken
+source does not bring down the pipeline" becomes "an uncalibrated
+heuristic does not silently discard a posting." An occasional duplicate
+notification for a genuine repost is a real but bounded cost — one extra
+line in the digest. A genuinely distinct opening silently and permanently
+excluded, discovered only by accident as Amendments 1 and 2 both were, is
+the worse and unbounded one.
+
+**`restoreDuplicate`** (`PostingsRepository.restoreDuplicate`, CLI
+`restore-duplicate <fingerprint>`) is the scoped counterpart to the blunt
+`dedup --reset` Amendment 1 introduced: clears one posting's flag rather
+than every flag in the corpus. It exists for flags a pre-shadow-mode
+`dedup` run already set — shadow mode itself never calls `markDuplicate`,
+so nothing new needs it going forward, but a legacy flag is still a real
+posting silently withheld until someone undoes it.
+
+**What this does not fix.** Shadow mode does not calibrate the threshold —
+it makes calibration possible, by turning every future candidate into a
+reviewable, auditable, reversible record instead of a silent exclusion. If
+enough shadow candidates accumulate that a human labels a batch of them
+"same job" / "different job," that becomes the real calibration data this
+ADR has been missing since 2026-08-14 — genuinely M10 market-analysis
+work, over real labelled data, not attempted here. Until then, this
+project does not act on layer 2's output at all beyond logging it; layer 1
+(the fingerprint's unique index) remains the only dedup mechanism that
+excludes anything automatically.
+
+**Consequence for AC-005's atomic dedup+claim barrier (ADR-040/PR-004).**
+That barrier's atomicity is still real and still matters — it prevents a
+concurrent external ingest from landing mid-transaction, unseen by either
+the dedup scan or the scoring claim. What it no longer does is prevent a
+near-duplicate from _reaching_ scoring: since layer 2 excludes nothing,
+both postings in a near-duplicate pair are claimed and scored, and the
+digest may show both. `executeDeliver` still runs the scan on every call,
+atomically with the claim, and the `posting_events` row it produces is
+still recorded inside that same transaction — auditability, not exclusion,
+is what the atomicity now protects for layer 2's output.
+
+**Reversal cost:** the algorithm and its thresholds are untouched by this
+amendment — reverting to destructive merging is restoring the single
+`repository.markDuplicate(...)` call `dedupSimilarPostings` used to make
+on a match, in place of the `shadowCandidates.push(...)` it makes now. The
+`ShadowDuplicateCandidate` shape, `posting_events` rows, and
+`restoreDuplicate` stay useful either way — as an audit trail if merging
+stays destructive, or as the shadow log if it stays advisory.

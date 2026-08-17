@@ -529,6 +529,7 @@ describe("POST /runs/dedup", () => {
       runId: expect.any(String),
       scanned: 0,
       markedDuplicate: 0,
+      shadowCandidateCount: 0,
     });
     const repo = new RunsRepository(db);
     expect(repo.findById(res.body.runId)?.kind).toBe("dedup");

@@ -219,6 +219,35 @@ export class PostingsRepository {
     return affected;
   }
 
+  /**
+   * Clears one specific posting's duplicate flag — the scoped counterpart
+   * to `clearDuplicateFlags`' blunt "reset everything" (docs/audit PR-006).
+   * Exists for a wrongly-merged posting from before shadow mode: layer 2
+   * only *logs* candidates now (`dedupSimilarPostings`), but a posting
+   * `markDuplicate`d by an earlier run, before this project stopped trusting
+   * the similarity threshold unsupervised, is still flagged and still
+   * excluded from `findUnnotified`/`claimForScoring` until someone restores
+   * it specifically — `--reset` would be the wrong tool, since it also
+   * un-flags every *correct* merge in the same sweep.
+   *
+   * Returns `false` when the fingerprint does not exist or was not flagged,
+   * so a caller (the CLI) can report "nothing to restore" instead of
+   * silently succeeding on a typo — same contract as `discard`.
+   */
+  restoreDuplicate(fingerprint: string): boolean {
+    const result = this.db
+      .update(postings)
+      .set({ duplicateOfFingerprint: null })
+      .where(
+        and(
+          eq(postings.fingerprint, fingerprint),
+          isNotNull(postings.duplicateOfFingerprint),
+        ),
+      )
+      .run();
+    return result.changes > 0;
+  }
+
   markDuplicate(fingerprint: string, duplicateOfFingerprint: string): void {
     this.db
       .update(postings)
