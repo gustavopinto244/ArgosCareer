@@ -82,6 +82,24 @@ describe("dedupSimilarPostings", () => {
     expect(outcome.markedDuplicate).toBe(0);
   });
 
+  it("does not merge two unrelated same-company postings whose titles are both pure stopwords (docs/audit AC-011)", () => {
+    // The real false-positive this guards against: "Estágio" and "Trainee"
+    // both reduce to nothing once stopwords are stripped, and used to score
+    // a perfect 1 (identical) -- merging a technical internship with an
+    // unrelated corporate trainee program at the same company.
+    insert({ sourceId: "1", title: "Estágio" });
+    insert({
+      sourceId: "2",
+      title: "Trainee",
+      firstSeenAt: new Date("2026-08-12T00:00:00Z"),
+    });
+
+    const outcome = dedupSimilarPostings(repository);
+
+    expect(outcome.markedDuplicate).toBe(0);
+    expect(repository.findActive()).toHaveLength(2);
+  });
+
   it("does not mark a similar posting outside the time window as a duplicate", () => {
     insert({
       sourceId: "1",

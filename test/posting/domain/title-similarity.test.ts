@@ -71,8 +71,21 @@ describe("computeTitleSimilarity", () => {
     expect(a).toBe(1);
   });
 
-  it("treats two titles reduced to nothing but stopwords as identical rather than dividing by zero", () => {
-    expect(computeTitleSimilarity("Estágio", "Estagiário")).toBe(1);
-    expect(computeTitleSimilarity("de em", "para na")).toBe(1);
+  it("treats two titles reduced to nothing but stopwords as having no signal, not as identical (docs/audit AC-011)", () => {
+    // Both "Estágio" and "Estagiário" are themselves stopwords, so this pair
+    // strips down to two empty strings. The old behavior (score 1, "division
+    // by zero" avoided by claiming identity) was the actual bug: it merged
+    // "Estágio" and "Trainee" -- unrelated roles that both happen to be pure
+    // boilerplate -- as if they were the same posting. No discriminating
+    // signal must never be treated as confirmation of a match.
+    expect(computeTitleSimilarity("Estágio", "Estagiário")).toBe(0);
+    expect(computeTitleSimilarity("de em", "para na")).toBe(0);
+  });
+
+  it("never merges two unrelated roles that are both pure boilerplate, below the default threshold", () => {
+    // The real case docs/audit AC-011 found: "Estágio" and "Trainee" both
+    // reduce to nothing but stopwords and previously scored a perfect 1.
+    const score = computeTitleSimilarity("Estágio", "Trainee");
+    expect(score).toBeLessThan(0.35);
   });
 });

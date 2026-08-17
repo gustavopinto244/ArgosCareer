@@ -4,6 +4,8 @@
 
 Accepted — amended 2026-08-16, see
 [Amendment 1](#amendment-1--2026-08-16-locations-must-not-contradict)
+and
+[Amendment 2](#amendment-2--2026-08-17-no-signal-must-never-score-as-a-match)
 
 ## Date
 
@@ -198,3 +200,38 @@ dedup bug is a re-run, never a re-collection.
 Measured after the repair: 406 flags → **131**, 275 postings recovered,
 pre-filter passes 291 → **310**, and **zero** remaining duplicates flagged
 across different cities.
+
+## Amendment 2 — 2026-08-17: no signal must never score as a match
+
+A repository audit (`docs/audit/AUDIT_REPORT.md` AC-011, HIGH) found a
+second real false positive, distinct from Amendment 1's location bug:
+`computeTitleSimilarity("Estágio", "Trainee")` scored **1** — a perfect
+match — because both titles are themselves entries in `STOPWORDS` and
+strip down to the empty string. The function's zero-division guard
+(`bigramsA.length + bigramsB.length === 0`) returned 1 for that case,
+treating "there is nothing left to compare" as "confirmed identical," the
+opposite of what it actually means.
+
+**Decision:** that guard now returns 0, not 1. Two titles with no
+discriminating signal left are never merged — 0 sits below every
+threshold this project has used or considered — rather than defaulting to
+the most destructive possible outcome. This does not touch the other
+adversarial case this ADR's own Consequences section already documents
+(the "Contencioso Cível" pair, 0.49, correctly non-empty on both sides but
+still a real false positive from bigram similarity structurally favoring
+long shared substrings) — that one remains open, explicitly deferred
+there until a second example exists to generalize from, and this
+amendment does not change that judgment.
+
+**Consequence:** a company that reposts a role using only boilerplate
+words in a shortened title (`"Estágio"` alone, no team/track name) no
+longer risks being silently merged with an unrelated posting that
+happens to share the same fate. The cost is symmetrical with Amendment
+1's: layer 2 now declines to merge in one more case than before, which
+only ever means a possible duplicate stays visible for layer 1 (exact
+fingerprint) to catch if it truly is one — never the reverse.
+
+**Reversal cost:** trivial — one literal (`return 0` back to `return 1`)
+in `computeTitleSimilarity`, no schema or stored-data implications, same
+as the rest of this ADR's reasoning about why tuning this function is
+cheap.
