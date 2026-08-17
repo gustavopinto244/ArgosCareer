@@ -87,3 +87,21 @@ are **not** in `criteria.yaml` — a deliberate v1 simplification (ADR-027)
 to avoid building cross-language config sharing between this Python script
 and the Node app for a single source. Revisit if a second external
 collector like this one ever exists.
+
+## Discovery coverage gap (docs/audit AC-023)
+
+Each scheduled run issues exactly **one** jobspy search — one `SEARCH_TERM`,
+one `LOCATION`, no rotation across runs. Unlike Gupy/Sólides, there is no
+mechanism here for asking several questions in one cycle (ADR-018's
+gender-variant terms, remote, or the other RJ-metro cities `location.cities`
+in `criteria.yaml` accepts) — Indeed via this one env-configured query is
+the whole of this source's discovery surface. `trainee` and `estagiário`/
+`estagiária` variants, a `remote`-only query, and the other metro cities are
+all structurally unreachable through Indeed today. Accepted, not fixed: a
+second query means a second scheduled container run (this script has no
+internal loop or multi-query concept, unlike the Node collectors), which is
+real added complexity for a source whose main value — per ADR-027/028 — was
+"one more source, cheaply," not comprehensive Indeed coverage. Revisit if
+`SEARCH_TERM`/`LOCATION` rotation across scheduled runs (e.g. a second
+timer with different `.env` values) turns out to be worth the extra
+moving part.

@@ -29,4 +29,56 @@ describe("config/criteria.yaml", () => {
     const { weights } = loadCriteria(filePath).scoring;
     expect(weights.trackAlignment).toBeGreaterThan(weights.mandatory);
   });
+
+  describe("query coverage (docs/audit AC-023)", () => {
+    // Cities `location.cities` accepts but no Gupy query targets by name —
+    // measured live against Gupy 2026-08-17 ("estágio"/"estagiário"/
+    // "estagiária" per city): 13 postings returned across 21 city x term
+    // combinations, 0 on-track. A deliberate, documented gap (see the
+    // comment in criteria.yaml itself), not an oversight — this allowlist
+    // exists so that if `location.cities` ever grows a city that is
+    // *neither* queried *nor* in this known-gap list, that is new,
+    // unreviewed coverage drift and this test fails on it, per the audit's
+    // "matriz de cobertura... alertas por gap" recommendation.
+    const KNOWN_UNQUERIED_CITIES = new Set([
+      "Duque de Caxias",
+      "Nova Iguaçu",
+      "Belford Roxo",
+      "São João de Meriti",
+      "Itaboraí",
+      "Maricá",
+      "Mesquita",
+    ]);
+
+    function gupyQueriedCities(): Set<string> {
+      const filePath = join(process.cwd(), "config", "criteria.yaml");
+      const { queries } = loadCriteria(filePath).collection;
+      return new Set(
+        queries
+          .filter((q) => q.source === "gupy" && q.city !== undefined)
+          .map((q) => q.city!),
+      );
+    }
+
+    it("every accepted city is either queried on Gupy or a documented, measured gap", () => {
+      const filePath = join(process.cwd(), "config", "criteria.yaml");
+      const { cities } = loadCriteria(filePath).location;
+      const queried = gupyQueriedCities();
+
+      const unaccountedFor = cities.filter(
+        (city) => !queried.has(city) && !KNOWN_UNQUERIED_CITIES.has(city),
+      );
+      expect(unaccountedFor).toEqual([]);
+    });
+
+    it("the known-gap allowlist contains no city that is actually queried", () => {
+      // Catches the allowlist going stale in the other direction — a city
+      // added to criteria.yaml's Gupy queries without being dropped here.
+      const queried = gupyQueriedCities();
+      const stale = [...KNOWN_UNQUERIED_CITIES].filter((city) =>
+        queried.has(city),
+      );
+      expect(stale).toEqual([]);
+    });
+  });
 });

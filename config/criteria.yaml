@@ -51,6 +51,19 @@ collection:
     - source: gupy
       jobName: estagiário
       city: São Gonçalo
+    # The remaining 7 cities `location.cities` accepts (Duque de Caxias, Nova
+    # Iguaçu, Belford Roxo, São João de Meriti, Itaboraí, Maricá, Mesquita)
+    # get no query of their own (docs/audit AC-023) -- measured deliberately,
+    # not an oversight. Probed live against Gupy 2026-08-17, "estágio" /
+    # "estagiário" / "estagiária" per city, same method probe:terms uses:
+    # 13 postings returned across all 21 city x term combinations, 2 passed
+    # the pre-filter, 0 classified on-track. Adding these queries would add
+    # 21 requests (~30s of politeness delay) per cycle for zero measured
+    # discovery benefit today. Accepted as a query gap, not a filter gap --
+    # a real posting in these cities still passes the pre-filter (`location`
+    # already accepts them) if a future query or another source ever
+    # surfaces one; only live discovery is missing. Revisit if a real
+    # posting in one of these cities is ever seen from another source.
     # Tech terms, measured with `npm run probe:terms` before being added --
     # the number that decided each one is how many postings survive the
     # pre-filter AND classify onto a real track, not the raw count:
