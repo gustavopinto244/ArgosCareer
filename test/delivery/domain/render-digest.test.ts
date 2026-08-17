@@ -162,6 +162,19 @@ describe("renderPostingEntry", () => {
     expect(text).not.toContain("Confiança baixa");
   });
 
+  it("renders a distinct label once a posting has exhausted its retry budget (docs/audit PR-002)", () => {
+    const text = renderPostingEntry(
+      scored({
+        outcome: outcome({
+          lowConfidence: true,
+          scoreFailureReason: "max_retries_exceeded",
+        }),
+      }),
+    );
+    expect(text).toContain("falhou repetidamente");
+    expect(text).toContain("não será mais tentada automaticamente");
+  });
+
   it("omits the recommendation lines entirely for a stubbed run (EMPTY_RECOMMENDATION)", () => {
     const text = renderPostingEntry(scored());
     expect(text).not.toContain("Currículo recomendado");

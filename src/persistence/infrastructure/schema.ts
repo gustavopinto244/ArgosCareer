@@ -75,6 +75,20 @@ export const postings = sqliteTable(
     // Free text, optional. Not read by any scoring or matching path — a
     // note for the human who made the call, not an input to the pipeline.
     discardReason: text("discard_reason"),
+    // How many consecutive scoreAndDeliver runs have failed to score this
+    // posting (docs/audit PR-002) — 0 means never failed, or reset by a
+    // subsequent success. Read before every scoring attempt so a posting
+    // stuck failing forever (a permanently broken description, not a
+    // transient provider issue) eventually stops being retried, rather than
+    // spending a model call on it every single night indefinitely.
+    scoreFailureCount: integer("score_failure_count").notNull().default(0),
+    // Null until the first scoring failure. Observability only — nothing
+    // reads this to make a decision, `scoreFailureCount` does that; this is
+    // what lets a human answer "when did this start failing" without
+    // reconstructing it from posting_events.
+    lastScoreFailedAt: integer("last_score_failed_at", {
+      mode: "timestamp_ms",
+    }),
   },
   (table) => [
     uniqueIndex("postings_fingerprint_unique").on(table.fingerprint),

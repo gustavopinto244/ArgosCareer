@@ -240,6 +240,55 @@ describe("PostingsRepository.findUnnotified / markNotified", () => {
   });
 });
 
+describe("PostingsRepository.recordScoreFailure / clearScoreFailures / getScoreFailureCount (docs/audit PR-002)", () => {
+  it("is zero for a posting that has never failed scoring", () => {
+    const { posting: stored } = repository.upsert(posting());
+    expect(repository.getScoreFailureCount(stored.fingerprint)).toBe(0);
+  });
+
+  it("increments on each recorded failure", () => {
+    const { posting: stored } = repository.upsert(posting());
+    repository.recordScoreFailure(stored.fingerprint, new Date());
+    expect(repository.getScoreFailureCount(stored.fingerprint)).toBe(1);
+
+    repository.recordScoreFailure(stored.fingerprint, new Date());
+    expect(repository.getScoreFailureCount(stored.fingerprint)).toBe(2);
+  });
+
+  it("resets to zero once clearScoreFailures runs", () => {
+    const { posting: stored } = repository.upsert(posting());
+    repository.recordScoreFailure(stored.fingerprint, new Date());
+    repository.recordScoreFailure(stored.fingerprint, new Date());
+
+    repository.clearScoreFailures(stored.fingerprint);
+
+    expect(repository.getScoreFailureCount(stored.fingerprint)).toBe(0);
+  });
+
+  it("tracks failures independently per posting", () => {
+    const a = repository.upsert(posting({ sourceId: "1" }));
+    const b = repository.upsert(
+      posting({ sourceId: "2", title: "Estágio Frontend" }),
+    );
+    repository.recordScoreFailure(a.posting.fingerprint, new Date());
+
+    expect(repository.getScoreFailureCount(a.posting.fingerprint)).toBe(1);
+    expect(repository.getScoreFailureCount(b.posting.fingerprint)).toBe(0);
+  });
+
+  it("re-upserting a posting does not reset its failure count", () => {
+    // A source re-sighting a posting (an ordinary collection cycle) must
+    // not accidentally give a persistently-broken posting a fresh retry
+    // budget just because it was seen again.
+    const { posting: stored } = repository.upsert(posting());
+    repository.recordScoreFailure(stored.fingerprint, new Date());
+
+    repository.upsert(posting({ workMode: "remote" }));
+
+    expect(repository.getScoreFailureCount(stored.fingerprint)).toBe(1);
+  });
+});
+
 describe("PostingsRepository.discard", () => {
   it("returns true and records the timestamp and reason", () => {
     const { posting: stored } = repository.upsert(posting());

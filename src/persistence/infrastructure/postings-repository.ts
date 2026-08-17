@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import {
   Location,
   Posting,
@@ -260,6 +260,56 @@ export class PostingsRepository {
     this.db
       .update(postings)
       .set({ notifiedAt })
+      .where(eq(postings.fingerprint, fingerprint))
+      .run();
+  }
+
+  /**
+   * How many consecutive `scoreAndDeliver` runs have failed to score this
+   * posting (docs/audit PR-002). `executeDeliver` reads this before spending
+   * a model call, so a posting stuck failing indefinitely (a permanently
+   * malformed description, not a transient provider hiccup) eventually stops
+   * being retried. 0 for a fingerprint with no row — defensive, not expected
+   * in practice, since every caller reads this only for a posting it already
+   * has from `findUnnotified`.
+   */
+  getScoreFailureCount(fingerprint: string): number {
+    const row = this.db
+      .select({ scoreFailureCount: postings.scoreFailureCount })
+      .from(postings)
+      .where(eq(postings.fingerprint, fingerprint))
+      .get();
+    return row?.scoreFailureCount ?? 0;
+  }
+
+  /**
+   * Increments the failure counter and records when it last happened
+   * (docs/audit PR-002). An atomic `SET x = x + 1` rather than read-then-write
+   * — this repository already documents (see the class doc comment) that
+   * cross-transaction races are RunLock's job, not this one's, but an
+   * increment is cheap to make race-safe on its own regardless.
+   */
+  recordScoreFailure(fingerprint: string, failedAt: Date): void {
+    this.db
+      .update(postings)
+      .set({
+        scoreFailureCount: sql`${postings.scoreFailureCount} + 1`,
+        lastScoreFailedAt: failedAt,
+      })
+      .where(eq(postings.fingerprint, fingerprint))
+      .run();
+  }
+
+  /**
+   * Resets the failure counter after a scoring attempt actually succeeds
+   * (docs/audit PR-002) — a posting that failed twice and then scored
+   * cleanly should not carry a stale near-ceiling count forward into
+   * whatever reads it next.
+   */
+  clearScoreFailures(fingerprint: string): void {
+    this.db
+      .update(postings)
+      .set({ scoreFailureCount: 0, lastScoreFailedAt: null })
       .where(eq(postings.fingerprint, fingerprint))
       .run();
   }

@@ -480,6 +480,19 @@ export interface DeliverOutcome {
 }
 
 /**
+ * A posting whose scoring keeps failing run after run stops being retried
+ * automatically once it has failed this many consecutive times (docs/audit
+ * PR-002) — the same "give up after five" ceiling this project already uses
+ * for Catho's checkpoint quarantine, chosen for the same reason: enough
+ * attempts to absorb a multi-day transient provider outage, not so many that
+ * a permanently malformed posting spends a model call every night forever.
+ * A posting that hits the ceiling is marked notified with
+ * `max_retries_exceeded` rather than retried again automatically — recovery
+ * from there is manual (fix the underlying problem and re-run, or discard).
+ */
+export const DEFAULT_MAX_SCORE_FAILURES = 5;
+
+/**
  * The testable core of `deliver`: pre-filter → score → compose → notify,
  * over every active, not-yet-notified posting (`findUnnotified`). A posting
  * that fails the pre-filter or scores `discard` is not marked notified — it
@@ -487,6 +500,16 @@ export interface DeliverOutcome {
  * discipline the rest of the pipeline follows (ADR-007). Only postings that
  * actually appear in a *successfully sent* digest are marked, so a failed
  * send never causes a silent skip (ADR-007's re-run test).
+ *
+ * A posting whose scoring *fails* is the one deliberate exception to "in the
+ * digest means notified" (docs/audit PR-002, ADR-038): failure is reported,
+ * but `notifiedAt` is left null so the posting stays in `findUnnotified`'s
+ * pool and gets a fresh attempt next run — up to `maxScoreFailures`, after
+ * which it is marked notified with `max_retries_exceeded` so it stops being
+ * retried automatically. Before this, every entry in the digest was marked
+ * notified unconditionally, so a transient provider failure permanently
+ * removed a posting from future scoring the moment its one failure message
+ * was delivered.
  *
  * `collected`/`deduplicated` in the run summary are read from `collect` and
  * `dedup` runs since the last successful delivery, not from this run
@@ -517,6 +540,10 @@ export async function executeDeliver(
    * barrier immediately before scoring, regardless of how the posting
    * arrived. */
   dedupConfig: DedupConfig = DEFAULT_DEDUP_CONFIG,
+  /** docs/audit PR-002 — see `DEFAULT_MAX_SCORE_FAILURES`. A parameter,
+   * not only a constant, so a test can reach the ceiling without seeding
+   * five real runs' worth of failures. */
+  maxScoreFailures: number = DEFAULT_MAX_SCORE_FAILURES,
 ): Promise<DeliverOutcome> {
   const postingsRepo = new PostingsRepository(db);
   const runsRepo = new RunsRepository(db);
@@ -625,6 +652,35 @@ export async function executeDeliver(
 
     const scoredEntries: ScoredPosting[] = [];
     for (const posting of filtered) {
+      // docs/audit PR-002: a posting that has already failed
+      // `maxScoreFailures` times in a row does not get another model call --
+      // it has had its fair chance at a transient issue resolving itself,
+      // and spending another attempt on what is, by this point, very likely
+      // a permanently malformed description is exactly the unbounded-retry
+      // cost the finding warned against.
+      if (
+        postingsRepo.getScoreFailureCount(posting.fingerprint) >=
+        maxScoreFailures
+      ) {
+        const scoredAt = now();
+        postingEventsRepo.record({
+          runId,
+          fingerprint: posting.fingerprint,
+          stage: "score",
+          outcome: "failed",
+          reason: "max_retries_exceeded",
+          occurredAt: scoredAt,
+        });
+        scoredEntries.push({
+          posting,
+          outcome: {
+            ...scoreFailureOutcome("max_retries_exceeded"),
+            ...EMPTY_RECOMMENDATION,
+          },
+        });
+        continue;
+      }
+
       const result = await scorer.score(posting, profileHash);
       const scoredAt = now();
       postingEventsRepo.record({
@@ -636,6 +692,9 @@ export async function executeDeliver(
         occurredAt: scoredAt,
       });
       if (result.ok) {
+        // A posting that failed before and now scores cleanly should not
+        // carry a stale near-ceiling count into whatever reads it next.
+        postingsRepo.clearScoreFailures(posting.fingerprint);
         scoredEntries.push({ posting, outcome: result });
         scoredCount += 1;
       } else {
@@ -645,6 +704,7 @@ export async function executeDeliver(
         // counted in scoredCount, which evaluateDeliveryOutcome's
         // scoreFailureRateThreshold alert reads as "successfully scored";
         // this posting was not.
+        postingsRepo.recordScoreFailure(posting.fingerprint, scoredAt);
         scoredEntries.push({
           posting,
           outcome: {
@@ -692,7 +752,20 @@ export async function executeDeliver(
     const deliveredAt = now();
     const sent = [...digest.recommended, ...digest.review];
     for (const entry of sent) {
-      postingsRepo.markNotified(entry.posting.fingerprint, deliveredAt);
+      // docs/audit PR-002: a *recoverable* scoring failure (any
+      // scoreFailureReason short of max_retries_exceeded) is reported in
+      // this digest, but deliberately left unnotified -- notifiedAt marks
+      // "this vacancy was evaluated", not "a message about it was sent",
+      // and a failure was never evaluated. Leaving it null is what keeps
+      // the posting in findUnnotified's pool for another attempt next run.
+      // Every other entry (a real apply/review verdict, or a failure that
+      // has already exhausted maxScoreFailures) is marked normally.
+      const failureReason = entry.outcome.scoreFailureReason;
+      const isRecoverableFailure =
+        failureReason != null && failureReason !== "max_retries_exceeded";
+      if (!isRecoverableFailure) {
+        postingsRepo.markNotified(entry.posting.fingerprint, deliveredAt);
+      }
       postingEventsRepo.record({
         runId,
         fingerprint: entry.posting.fingerprint,

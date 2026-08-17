@@ -3,7 +3,8 @@
 ## Status
 
 Accepted — amended 2026-08-17, see
-[Amendment 1](#amendment-1--2026-08-17-rule-5-actually-delivered)
+[Amendment 1](#amendment-1--2026-08-17-rule-5-actually-delivered) and
+[Amendment 2](#amendment-2--2026-08-17-a-failed-posting-is-notified-only-after-exhausting-a-bounded-retry-ceiling)
 
 ## Date
 
@@ -168,3 +169,31 @@ longer invisible to the human reading the digest.
 **Reversal cost:** low. `scoreFailureOutcome` has one call site
 (`executeDeliver`); removing it restores the previous (silently
 discarding) behavior, no schema or cache-key change.
+
+## Amendment 2 — 2026-08-17: a failed posting is notified only after exhausting a bounded retry ceiling
+
+The text above is kept as originally accepted. This section reverses one
+specific decision — "a failed posting is still marked notified once shown"
+— not the rest of this ADR (the placeholder `ScoreOutcome`, the digest
+section it lands in, the distinct failure line).
+
+`docs/audit/POST_REMEDIATION_CHANGE_AUDIT_2026-08-17.md` (PR-002, HIGH)
+found the consequence of the original decision in practice: marking every
+failure notified made a _transient_ failure exactly as permanent as a
+persistent one, and named this ADR's own text as documenting a manual
+re-run path ("a human who sees the failure reason can re-run scoring
+manually") the runtime never actually provided. The concern this ADR raised
+against unconditional retry — "unbounded cost amplification across days"
+for a persistent failure — was real and remains real; it was the choice
+between "retry forever" and "never retry" that was wrong, not the concern
+itself.
+
+ADR-038 resolves both sides at once: a failure is left unnotified (so
+`findUnnotified` picks it up again) for up to `DEFAULT_MAX_SCORE_FAILURES`
+(5) consecutive runs, bounding exactly the cost amplification this ADR
+warned about, then marked notified with a distinct `max_retries_exceeded`
+reason once that ceiling is reached — never retried unconditionally, never
+permanently lost on one blip either. See ADR-038 for the full mechanism,
+its interaction with PR-007 (still open), and what remains unbuilt (an
+explicit manual rescore path for a posting that has already exhausted the
+ceiling).
