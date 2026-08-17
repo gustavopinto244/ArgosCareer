@@ -64,7 +64,7 @@ function criteria(): Criteria {
     },
     titleBlocklist: [],
     titleRequired: ["estágio"],
-    location: { cities: [], allowRemote: true },
+    location: { cities: [], allowRemote: true, nationwideSources: [] },
     blockedCompanies: [],
     minKeywordAdherence: 0,
     maxAgeDays: null,

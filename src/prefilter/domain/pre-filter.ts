@@ -109,10 +109,12 @@ function isTooOld(
  *
  * Leniency is **asymmetric**, and ADR-011 Amendment 3 explains why the
  * original symmetric version had to change. An unknown *location* still
- * passes: the posting cannot be ruled out as being in the target region.
- * An unknown *work mode* no longer rescues a posting whose city is known
- * and outside it — absence of evidence about how the work happens does not
- * outweigh positive evidence about where it happens.
+ * passes for most sources: the posting cannot be ruled out as being in the
+ * target region — `criteria.location.nationwideSources` is the deliberate
+ * exception (docs/audit AC-024). An unknown *work mode* no longer rescues a
+ * posting whose city is known and outside it — absence of evidence about
+ * how the work happens does not outweigh positive evidence about where it
+ * happens.
  *
  * The original rule was written when Gupy was the only source and usually
  * stated `workMode`. CIEE never states it, so under the symmetric rule
@@ -121,8 +123,16 @@ function isTooOld(
  */
 function isLocationAllowed(posting: Posting, criteria: Criteria): boolean {
   if (posting.workMode === "remote") return criteria.location.allowRemote;
-  // An unknown location is still unknown, from any source.
-  if (posting.location.kind === "unknown") return true;
+  if (posting.location.kind === "unknown") {
+    // An unknown location is still unknown, from most sources — but not
+    // from one that crawls nationwide with no server-side location filter
+    // at all (docs/audit AC-024): there, "unknown" means the city-parsing
+    // regex failed to match, not that the posting is plausibly in-region.
+    // Rejecting it here, deterministically and before the LLM, is strictly
+    // cheaper and safer than the alternative of silently scoring whatever
+    // fraction of a national crawl the parser could not read.
+    return !criteria.location.nationwideSources.includes(posting.source);
+  }
 
   const normalizedCity = normalize(posting.location.city);
   return criteria.location.cities.some(

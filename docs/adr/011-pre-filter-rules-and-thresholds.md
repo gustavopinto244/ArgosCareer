@@ -11,6 +11,8 @@ and
 [Amendment 4](#amendment-4--2026-08-16-an-age-limit-deliberately-exempted-from-the-unknown-axis-rule)
 and
 [Amendment 5](#amendment-5--2026-08-16-a-business-rule-for-the-existing-undated-backlog)
+and
+[Amendment 6](#amendment-6--2026-08-17-the-unknown-location-leniency-stops-at-a-source-with-no-location-filter-of-its-own)
 
 ## Date
 
@@ -330,3 +332,50 @@ to move. Set once, to the moment this policy was adopted
 once real time carries the pre-cutover backlog's `firstSeenAt` past
 `maxAgeDays` on its own — at that point Amendment 4's ordinary rule would
 reject the same postings anyway, so there is no cleanup step to schedule.
+
+## Amendment 6 — 2026-08-17: the unknown-location leniency stops at a source with no location filter of its own
+
+The core rule's own reasoning — "the posting cannot be ruled out as being
+in the target region" — is only as good as its premise: that the source
+already narrowed results toward the search profile's region, or serves a
+small enough regional pool that an unparsed city is unlikely to be wrong.
+Gupy (server-side `city` param) and CIEE/Sólides (a manageable, mostly
+regional pool this project's own queries already narrow) both satisfy it.
+Catho does not — it crawls Catho's _entire national_ sitemap (ADR-032) and
+learns the city only by parsing a page `<title>` confirmed against exactly
+two real samples (`catho-normalizer.ts`). A repository audit
+(`docs/audit/AUDIT_REPORT.md` AC-024) named the consequence plainly: if
+that regex ever stops matching — a punctuation change, a new title
+template — every affected posting becomes `unknown`, and the core rule
+would wave all of them through to the LLM regardless of which of Brazil's
+27 states they are actually in.
+
+**Decision:** `criteria.location.nationwideSources` (default `["catho"]`)
+names sources exempt from the unknown-location leniency. For a posting
+from a listed source, `isLocationAllowed` rejects an unknown location
+instead of passing it — deterministically, before the LLM, at zero
+marginal cost, which is strictly better than the alternative this finding
+warned about (the two other recommended mitigations, "use validated
+redundant signals" and "an unknown-rate circuit breaker before scoring,"
+were considered and set aside: the one redundant signal this schema
+carries, JSON-LD's `addressLocality`, is documented in `catho-schema.ts`
+as **actively wrong** on both real samples, not merely unconfirmed, so
+cross-checking against it would validate a parse against a known-bad
+oracle; a circuit breaker tracking a live unknown-rate is real scope this
+finding's core risk — silent nationwide leakage — does not require paying
+for).
+
+**Consequence:** this makes the Catho city parser's fragility _safe to
+leave fragile_ rather than something that must be hardened first — a
+title-template change now degrades Catho collection (fewer eligible
+postings, worth noticing via `docs/08`'s existing collection-health
+alerts) instead of degrading its _filtering_ (wrong-region postings
+reaching paid scoring). It does not fix the parser itself, which remains
+exactly as calibrated as it was: confirmed against two samples, honestly
+documented as such. Catho has no production traffic today regardless
+(403-blocked, ADR-033) — this is a default in place before it is ever
+deployed, not a response to an incident.
+
+**Reversal cost:** trivial. Emptying `nationwideSources` in
+`criteria.yaml` restores the original symmetric-for-unknown-location
+behavior for every source, including Catho.

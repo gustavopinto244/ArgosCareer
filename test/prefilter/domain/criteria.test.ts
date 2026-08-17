@@ -54,6 +54,12 @@ describe("CriteriaSchema", () => {
     expect(CriteriaSchema.parse(validCriteria()).maxFutureSkewDays).toBe(1);
   });
 
+  it("defaults location.nationwideSources to ['catho'] when omitted (docs/audit AC-024)", () => {
+    expect(
+      CriteriaSchema.parse(validCriteria()).location.nationwideSources,
+    ).toEqual(["catho"]);
+  });
+
   it("rejects a tracks table missing one of the three required tracks", () => {
     const criteria = validCriteria();
     // @ts-expect-error deliberately incomplete for the test
@@ -93,7 +99,11 @@ describe("CriteriaSchema", () => {
 
   it("location defaults allowRemote to true and cities to empty when omitted", () => {
     const result = CriteriaSchema.parse({ ...validCriteria(), location: {} });
-    expect(result.location).toEqual({ cities: [], allowRemote: true });
+    expect(result.location).toEqual({
+      cities: [],
+      allowRemote: true,
+      nationwideSources: ["catho"],
+    });
   });
 
   describe("schedule (M8, ADR-009)", () => {
