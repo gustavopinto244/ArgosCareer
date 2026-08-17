@@ -56,6 +56,7 @@ revisited on its merits instead of re-argued from memory.
 | [042](adr/042-composite-cache-identity-and-domain-validated-rows.md)          | Composite cache identity and domain-validated cache rows                            | Accepted | 2026-08-17 |
 | [043](adr/043-nullable-reconciliation-counts.md)                              | `receivedCount`/`schemaRejectedCount` are nullable, not default-zero                | Accepted | 2026-08-17 |
 | [044](adr/044-catho-exact-origin-allowlist-and-redirect-interception.md)      | Exact-origin allowlist and redirect interception for the Catho collector            | Accepted | 2026-08-17 |
+| [045](adr/045-catho-checkpoint-durability-and-quarantine-replay.md)           | Bounded incremental checkpoints, a state-file lock, and quarantine replay           | Accepted | 2026-08-17 |
 
 ## When an ADR is required
 
