@@ -308,6 +308,31 @@ describe("SolidesCollector — successful collection", () => {
     expect(result.truncated).toBe(true);
   });
 
+  it("returns exactly maxResults items, not a whole extra page past it (docs/audit PR-015)", async () => {
+    // The real bug: with take fixed at 10, maxResults: 15 used to fetch two
+    // full pages (the pre-fetch check compared page count against
+    // maxResults, not the running scanned total) and return 20.
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({
+        data: {
+          data: Array.from({ length: 10 }, (_, i) => ({ id: i, title: "x" })),
+        },
+      }),
+    );
+    const collector = new SolidesCollector({
+      fetchImpl,
+      ...FAST_OPTIONS,
+      requestIntervalMs: 0,
+    });
+
+    const result = await collector.collect({ maxResults: 15 });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(result.postings).toHaveLength(15);
+    expect(result.receivedCount).toBe(15);
+    expect(result.truncated).toBe(true);
+  });
+
   it("skips an individual malformed item without failing the whole collection", async () => {
     const fetchImpl = vi.fn(async () =>
       jsonResponse({
