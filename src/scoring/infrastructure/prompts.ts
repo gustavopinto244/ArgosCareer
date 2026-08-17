@@ -1,6 +1,9 @@
 import { readFileSync } from "node:fs";
-import { computeAcademicPeriod } from "../../profile/domain/academic-period";
-import { Profile, UNVERIFIED } from "../../profile/domain/profile";
+import { Profile } from "../../profile/domain/profile";
+import {
+  buildEvidenceCatalog,
+  formatEvidenceCatalog,
+} from "../domain/evidence-catalog";
 import { Requirement } from "../domain/types";
 
 /**
@@ -8,11 +11,11 @@ import { Requirement } from "../domain/types";
  * string — a wording change means a new file (`a-v2`), so the version and
  * the content it names can never drift apart (see `prompts/*.v1.md`'s note).
  */
-export const STAGE_A_PROMPT_VERSION = "a-v3";
-export const STAGE_A_PROMPT_PATH = "./prompts/stage-a-extraction.v3.md";
+export const STAGE_A_PROMPT_VERSION = "a-v4";
+export const STAGE_A_PROMPT_PATH = "./prompts/stage-a-extraction.v4.md";
 
-export const STAGE_B_PROMPT_VERSION = "b-v2";
-export const STAGE_B_PROMPT_PATH = "./prompts/stage-b-matching.v2.md";
+export const STAGE_B_PROMPT_VERSION = "b-v3";
+export const STAGE_B_PROMPT_PATH = "./prompts/stage-b-matching.v3.md";
 
 /**
  * The prompt files are Markdown documentation with one fenced code block
@@ -78,87 +81,6 @@ export function buildStageAPrompt(
   });
 }
 
-/**
- * The academic-enrollment facts, rendered as one more quotable evidence line.
- *
- * Derived from `courseStart` via `computeAcademicPeriod`, never written down
- * as a period number (CLAUDE.md §9: "a hardcoded period silently ages into a
- * lie"). Postings ask "cursando a partir do 3º período" constantly, and
- * before this existed the profile had no quotable text saying which period
- * the candidate is in, so stage B answered `not_met` on every one of them —
- * usually a `blocking` requirement, capping the score (ADR-014).
- *
- * This text changes at each semester boundary — `hashProfile` folds in
- * `computeAcademicPeriod`'s own result specifically so a cached stage B
- * match keyed by the old `profileHash` is never reused past a boundary
- * (docs/audit AC-018 — previously this rendered text could drift out of
- * sync with `profileHash`, which had no way to see it).
- */
-function formatAcademicEvidence(profile: Profile, today: Date): string[] {
-  const period = computeAcademicPeriod(profile.courseStart, today);
-  const completion = `${profile.courseEnd.getUTCFullYear()}.${profile.courseEnd.getUTCMonth() + 1 >= 7 ? 2 : 1}`;
-  const course = `${profile.courseName} na ${profile.institution}`;
-
-  switch (period.status) {
-    case "not_started":
-      return [
-        `- [Academic enrollment] Ingressa em ${course} e ainda não iniciou o curso; conclusão prevista para ${completion}.`,
-      ];
-    case "completed":
-      return [`- [Academic enrollment] Concluiu ${course}.`];
-    case "in_progress":
-      return [
-        `- [Academic enrollment] Cursando o ${period.period}º período de ${course}, com conclusão prevista para ${completion}.`,
-      ];
-  }
-}
-
-/**
- * `englishLevel` and `maxWeeklyHours`/`minimumStipend` (CLAUDE.md §9) as
- * quotable lines. These fields existed on `Profile` since M2 but were never
- * rendered into stage B's evidence — the same class of gap
- * `formatAcademicEvidence` closed for enrollment (ADR-014). "Inglês
- * intermediário" and availability/schedule requirements are common enough
- * that leaving them unrendered meant every posting asking for either scored
- * `not_met` regardless of the actual answer once one was given.
- *
- * A field still `UNVERIFIED` (CLAUDE.md's placeholder for "not answered yet")
- * is skipped rather than rendered — quoting "⚠ VERIFY" back as if it were an
- * answer would be worse than the field staying absent.
- */
-function formatDeclaredFieldsEvidence(profile: Profile): string[] {
-  const lines: string[] = [];
-  if (profile.englishLevel !== UNVERIFIED) {
-    lines.push(`- [English level] Nível de inglês: ${profile.englishLevel}.`);
-  }
-  if (profile.maxWeeklyHours !== UNVERIFIED) {
-    lines.push(
-      `- [Availability] Disponibilidade de até ${profile.maxWeeklyHours} horas semanais.`,
-    );
-  }
-  if (profile.minimumStipend !== UNVERIFIED) {
-    lines.push(
-      `- [Compensation] Bolsa-auxílio mínima aceita: ${profile.minimumStipend}.`,
-    );
-  }
-  return lines;
-}
-
-/**
- * Every competency's evidence, verbatim, tagged by competency name, plus the
- * derived academic-enrollment and declared-field lines — the only text
- * stage B's "evidence" field may legally quote from (ADR-005).
- */
-function formatProfileEvidence(profile: Profile, today: Date): string {
-  return [
-    ...formatAcademicEvidence(profile, today),
-    ...formatDeclaredFieldsEvidence(profile),
-    ...profile.competencies.flatMap((competency) =>
-      competency.evidence.map((line) => `- [${competency.name}] ${line}`),
-    ),
-  ].join("\n");
-}
-
 export function buildStageBPrompt(
   requirement: Requirement,
   profile: Profile,
@@ -170,6 +92,8 @@ export function buildStageBPrompt(
     REQUIREMENT_TEXT: requirement.text,
     REQUIREMENT_CATEGORY: requirement.category,
     REQUIREMENT_WEIGHT: requirement.weight,
-    PROFILE_EVIDENCE: formatProfileEvidence(profile, today),
+    PROFILE_EVIDENCE: formatEvidenceCatalog(
+      buildEvidenceCatalog(profile, today),
+    ),
   });
 }

@@ -127,9 +127,21 @@ export class StageBMatcher {
 
     const askOne = async (requirement: Requirement): Promise<Answer> => {
       // Same disk read, same contract, as stage A — see `StageAExtractor`.
+      // `evaluatedAt` is captured once and reused for both the prompt's
+      // academic-evidence line and the provenance check below, so the two
+      // can never disagree with each other about "what period is it" within
+      // a single call, even though neither is guaranteed to agree with the
+      // separate clock `profileHash` was computed from (docs/audit PR-018,
+      // not addressed by this change).
+      const evaluatedAt = now();
       let prompt: string;
       try {
-        prompt = buildStageBPrompt(requirement, profile);
+        prompt = buildStageBPrompt(
+          requirement,
+          profile,
+          undefined,
+          evaluatedAt,
+        );
       } catch {
         return { ok: false, attempts: 0 };
       }
@@ -158,7 +170,7 @@ export class StageBMatcher {
       // — `createMatch` already coerces that to `not_met`.
       const evidence =
         result.data.evidence !== null &&
-        isKnownProfileEvidence(result.data.evidence, profile)
+        isKnownProfileEvidence(result.data.evidence, profile, evaluatedAt)
           ? result.data.evidence
           : null;
 
