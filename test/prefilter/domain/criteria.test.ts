@@ -50,6 +50,10 @@ describe("CriteriaSchema", () => {
     expect(CriteriaSchema.parse(rest).minKeywordAdherence).toBe(0);
   });
 
+  it("defaults maxFutureSkewDays to 1 when omitted (docs/audit AC-029)", () => {
+    expect(CriteriaSchema.parse(validCriteria()).maxFutureSkewDays).toBe(1);
+  });
+
   it("rejects a tracks table missing one of the three required tracks", () => {
     const criteria = validCriteria();
     // @ts-expect-error deliberately incomplete for the test
