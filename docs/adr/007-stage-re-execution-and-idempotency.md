@@ -3,6 +3,7 @@
 ## Status
 
 Accepted — amended 2026-08-14, see [Amendment](#amendment--2026-08-14-upserts-must-preserve-first-sighting)
+and [Amendment 2](#amendment-2--2026-08-17-stage-as-key-was-missing-the-one-thing-that-actually-varies-its-answer)
 
 ## Date
 
@@ -55,15 +56,15 @@ writing twice is indistinguishable from writing once.**
 
 ### Stage state keys
 
-| Stage      | Keyed by                                    | Re-running it means                                            |
-| ---------- | ------------------------------------------- | -------------------------------------------------------------- |
-| Collect    | `(source, sourceId)`                        | Re-fetch from the source                                       |
-| Normalize  | `fingerprint`                               | Re-derive `Posting` from the retained raw payload — no network |
-| Dedup      | `fingerprint`                               | Recompute; already-seen stays already-seen                     |
-| Pre-filter | `(fingerprint, criteriaHash)`               | Re-apply rules; changed criteria produce a new key             |
-| Score A    | `(fingerprint, promptVersion)`              | Re-extract only if the prompt changed                          |
-| Score B    | `(fingerprint, profileHash, promptVersion)` | Re-match only if profile or prompt changed                     |
-| Deliver    | `(runId, fingerprint)`                      | Nothing — see below                                            |
+| Stage      | Keyed by                                    | Re-running it means                                                          |
+| ---------- | ------------------------------------------- | ---------------------------------------------------------------------------- |
+| Collect    | `(source, sourceId)`                        | Re-fetch from the source                                                     |
+| Normalize  | `fingerprint`                               | Re-derive `Posting` from the retained raw payload — no network               |
+| Dedup      | `fingerprint`                               | Recompute; already-seen stays already-seen                                   |
+| Pre-filter | `(fingerprint, criteriaHash)`               | Re-apply rules; changed criteria produce a new key                           |
+| Score A    | `(fingerprint, promptVersion, contentHash)` | Re-extract if the prompt or the title/description text changed (Amendment 2) |
+| Score B    | `(fingerprint, profileHash, promptVersion)` | Re-match only if profile or prompt changed                                   |
+| Deliver    | `(runId, fingerprint)`                      | Nothing — see below                                                          |
 
 The keys are what make caching and re-execution the same mechanism. A prompt
 change during M7 invalidates stage B without touching stage A, because
@@ -174,3 +175,32 @@ with the schema.
 The two timestamps are cheap to add now and impossible to backfill later. Every
 day M4 runs without them is a day of history that does not exist. That asymmetry
 — trivial cost now, unrecoverable loss otherwise — is the whole argument.
+
+## Amendment 2 — 2026-08-17: Stage A's key was missing the one thing that actually varies its answer
+
+The Stage state keys table above states `Score A` is keyed by `(fingerprint,
+promptVersion)`, "re-extract only if the prompt changed." That statement was
+incomplete in a way that mattered: `fingerprint` is company+title+city only
+(ADR-007's own frozen identity, by design — a description edit is not a new
+posting), but Stage A's actual model input is `title` **and** `description`.
+A repository audit (`docs/audit/AUDIT_REPORT.md` AC-006, HIGH, CONFIRMED)
+found the gap directly: a company editing a posting's description — adding
+"inglês avançado", say — left the fingerprint (and therefore the cache key)
+completely unchanged, so Stage A kept serving the extraction of text that no
+longer existed on the posting.
+
+**Decision:** `hashExtractionInput(title, description)`
+(`src/scoring/domain/extraction-input-hash.ts`) joins `promptVersion` as
+part of Stage A's real key. `ExtractionsRepository.find`/`upsert` both take
+it now; a stored row whose `contentHash` does not match — including every
+row written before this column existed, which stores `null` — is a miss,
+not a stale hit. The `extractions` table gained one nullable column
+(`content_hash`), additive, no backfill: a legacy row simply re-extracts
+once, the same cost as any other cache miss.
+
+**Corrected key:** `Score A` is `(fingerprint, promptVersion, contentHash)`,
+not `(fingerprint, promptVersion)` — the table above understated it.
+
+**Reversal cost:** low. `hashExtractionInput` has one call site
+(`StageAExtractor`); dropping the parameter and the column restores the
+previous (incorrect) behavior.

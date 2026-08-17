@@ -9,6 +9,7 @@ import {
   runMigrations,
 } from "../../../src/persistence/infrastructure/db";
 import { ExtractionsRepository } from "../../../src/persistence/infrastructure/extractions-repository";
+import { hashExtractionInput } from "../../../src/scoring/domain/extraction-input-hash";
 import { StageAExtractor } from "../../../src/scoring/infrastructure/stage-a-extractor";
 
 let dir: string;
@@ -75,7 +76,13 @@ describe("StageAExtractor.extract", () => {
       experienceYears: null,
     });
     expect(ask).toHaveBeenCalledTimes(1);
-    expect(extractionsRepo.find(posting().fingerprint, "a-v3")).toEqual({
+    expect(
+      extractionsRepo.find(
+        posting().fingerprint,
+        "a-v3",
+        hashExtractionInput(posting().title, posting().description),
+      ),
+    ).toEqual({
       requirements: [
         {
           text: "Node.js",
@@ -93,6 +100,7 @@ describe("StageAExtractor.extract", () => {
     extractionsRepo.upsert(
       posting().fingerprint,
       "a-v3",
+      hashExtractionInput(posting().title, posting().description),
       {
         requirements: [
           { text: "SQL", category: "database", weight: "desirable" },
@@ -172,6 +180,63 @@ describe("StageAExtractor.extract", () => {
       attempts: 3,
     });
   });
+
+  it("re-extracts when the description changes, even though the fingerprint stays identical (docs/audit AC-006)", async () => {
+    // The real scenario: a company edits a posting's description (adds
+    // "inglês avançado") without touching company/title/city, so
+    // computeFingerprint (ADR-007: company+title+city only) produces the
+    // same value it always did. Previously the cache keyed only on
+    // (fingerprint, promptVersion) and kept serving the extraction of the
+    // OLD description forever.
+    const ask = vi
+      .fn()
+      .mockResolvedValueOnce(
+        JSON.stringify({
+          requirements: [
+            { text: "Node.js", category: "language", weight: "mandatory" },
+          ],
+          seniority: null,
+          experienceYears: null,
+        }),
+      )
+      .mockResolvedValueOnce(
+        JSON.stringify({
+          requirements: [
+            { text: "Node.js", category: "language", weight: "mandatory" },
+            {
+              text: "Inglês avançado",
+              category: "language",
+              weight: "mandatory",
+            },
+          ],
+          seniority: null,
+          experienceYears: null,
+        }),
+      );
+    const extractor = new StageAExtractor(ask, extractionsRepo);
+
+    const original = posting();
+    const first = await extractor.extract(original, () => NOW);
+    expect(ask).toHaveBeenCalledTimes(1);
+    if (first.ok) expect(first.requirements).toHaveLength(1);
+
+    // Same fingerprint (createPosting derives it from company+title+city
+    // only), different description.
+    const updated = {
+      ...original,
+      description: `${original.description} Inglês avançado necessário.`,
+    };
+    expect(updated.fingerprint).toBe(original.fingerprint);
+
+    const second = await extractor.extract(updated, () => NOW);
+    expect(ask).toHaveBeenCalledTimes(2);
+    if (second.ok) {
+      expect(second.requirements).toHaveLength(2);
+      expect(second.requirements.map((r) => r.text)).toContain(
+        "Inglês avançado",
+      );
+    }
+  });
 });
 
 /**
@@ -228,7 +293,13 @@ describe("StageAExtractor.extract — posting with no description", () => {
 
     await extractor.extract(p, () => NOW);
 
-    expect(extractionsRepo.find(p.fingerprint, "a-v3")).toBeNull();
+    expect(
+      extractionsRepo.find(
+        p.fingerprint,
+        "a-v3",
+        hashExtractionInput(p.title, p.description),
+      ),
+    ).toBeNull();
   });
 });
 

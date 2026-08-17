@@ -127,6 +127,7 @@ describe("MarketRepository.loadCorpus", () => {
     extractionsRepo.upsert(
       p.fingerprint,
       STAGE_A_PROMPT_VERSION,
+      "content-hash",
       {
         requirements: [requirement("Node.js")],
         seniority: null,
@@ -145,6 +146,7 @@ describe("MarketRepository.loadCorpus", () => {
     extractionsRepo.upsert(
       p.fingerprint,
       "a-v0-superseded",
+      "content-hash",
       {
         requirements: [requirement("Node.js")],
         seniority: null,
@@ -163,6 +165,7 @@ describe("MarketRepository.loadCorpus", () => {
     extractionsRepo.upsert(
       p.fingerprint,
       STAGE_A_PROMPT_VERSION,
+      "content-hash",
       {
         requirements: [requirement("Node.js")],
         seniority: null,
