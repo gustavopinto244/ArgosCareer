@@ -505,6 +505,16 @@ export async function executeDeliver(
    * separately-run calibration script (docs/audit AC-015). */
   getUsage?: () => UsageTotals,
   now: () => Date = () => new Date(),
+  /** docs/audit AC-005: external ingest (Indeed/Catho/LinkedIn) upserts
+   * into `postings` without ever running similarity dedup itself — only the
+   * scheduler's own collection cycle does that, on its own schedule. A
+   * posting ingested after the last scheduled dedup could otherwise reach
+   * paid Stage A/B scoring never having been compared against an
+   * already-active near-duplicate. `deliver()` now runs `executeDedup` as
+   * its own first step, so every entry path funnels through the same
+   * barrier immediately before scoring, regardless of how the posting
+   * arrived. */
+  dedupConfig: DedupConfig = DEFAULT_DEDUP_CONFIG,
 ): Promise<DeliverOutcome> {
   const postingsRepo = new PostingsRepository(db);
   const runsRepo = new RunsRepository(db);
@@ -553,6 +563,12 @@ export async function executeDeliver(
   }
 
   async function deliver(): Promise<DeliverOutcome> {
+    // The dedup barrier (AC-005, see the constructor doc comment above) —
+    // run before `findRunsSince("dedup", since)` below is computed, so this
+    // run's own duplicate count is folded into the summary the same way a
+    // scheduled dedup's would be, not double-counted or missed.
+    executeDedup(db, dedupConfig, now);
+
     const lastDelivery = runsRepo.findLatestFinished(
       "scoreAndDeliver",
       "success",
