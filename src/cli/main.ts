@@ -123,6 +123,36 @@ export interface RecencyWindow {
   readonly backfillDays: number;
 }
 
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * Gap-aware recency window (ADR-019, "the honest fix," deliberately
+ * deferred there until a real outage existed to size it against —
+ * docs/audit AC-028). No successful `collect` on record means no earlier
+ * cycle could have caught the past week, so `backfillDays` applies, same as
+ * before. Otherwise the window is measured from the *actual* gap since the
+ * last success, not always `recencyDays` — an outage longer than
+ * `recencyDays` used to make every posting published during it permanently
+ * unreachable, because the very next successful run's window started
+ * counting from "now," not from "the last time this succeeded."
+ *
+ * Bounded both ends: never narrower than `recencyDays` (a normal cycle,
+ * gap ≈ the collection interval, still gets the deliberately generous
+ * day of overlap), never wider than `backfillDays` (an outage of months
+ * does not turn into an unbounded backfill — recovery beyond that is a
+ * deliberate manual `--since-days` call, not automatic).
+ */
+export function computeRecencyWindowDays(
+  lastSuccessfulCollectAt: Date | null,
+  now: Date,
+  recency: RecencyWindow,
+): number {
+  if (lastSuccessfulCollectAt === null) return recency.backfillDays;
+  const gapDays =
+    (now.getTime() - lastSuccessfulCollectAt.getTime()) / MS_PER_DAY;
+  return Math.min(Math.max(gapDays, recency.recencyDays), recency.backfillDays);
+}
+
 /**
  * Resolves the collector for a query's `source`. Production passes
  * `collectorFor`; tests pass a stub so no suite ever touches the network
@@ -141,15 +171,11 @@ export async function executeCollect(
   const postingsRepo = new PostingsRepository(db);
   const runsRepo = new RunsRepository(db);
 
-  // "First run" is derived, not stored: no successful collect on record means
-  // no previous cycle can have caught the last week, so the window reaches
-  // back further exactly once (ADR-019). Read BEFORE this run is started, or
-  // it would find itself.
-  const isFirstRun = runsRepo.findLatestFinished("collect", "success") === null;
+  // Read BEFORE this run is started, or it would find itself.
+  const lastSuccessfulCollectAt =
+    runsRepo.findLatestFinished("collect", "success")?.finishedAt ?? null;
   const windowDays = recency
-    ? isFirstRun
-      ? recency.backfillDays
-      : recency.recencyDays
+    ? computeRecencyWindowDays(lastSuccessfulCollectAt, now(), recency)
     : null;
   const cutoff =
     windowDays === null

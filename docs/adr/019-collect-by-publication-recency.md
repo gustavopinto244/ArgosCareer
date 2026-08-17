@@ -99,3 +99,37 @@ a real outage to size it against.
 **Reversal cost:** low. Removing `recencyDays` from `criteria.yaml` restores
 unbounded collection via the schema default path; the `publishedAt` column
 stays and is simply unread.
+
+## Amendment 1 — 2026-08-17: the gap-aware window, no longer deferred
+
+The "real risk worth naming" above predicted its own fix and deferred it
+"until there is a real outage to size it against." A repository audit
+(`docs/audit/AUDIT_REPORT.md` AC-028) found the same gap by reading the
+code rather than living through an outage, and the fix is exactly the one
+already named here.
+
+**Decision:** `computeRecencyWindowDays` (`src/cli/main.ts`) replaces the
+binary "first run vs. not" check. No successful `collect` on record still
+means `backfillDays` (unchanged — there is no earlier cycle to measure a
+gap against). Otherwise the window is
+`clamp(daysSince(lastSuccessfulCollectAt), recencyDays, backfillDays)` — at
+least `recencyDays` (a normal cycle's gap is a few hours, so this is what
+actually governs day to day), and never more than `backfillDays` (an outage
+of months does not become an unbounded backfill; recovering further than
+that is a deliberate manual `--since-days` call, not automatic).
+
+**Consequence, same shape as Amendment 4/5 of ADR-011:** this measures the
+gap since the last _cycle-wide_ success (`runs.outcome = "success"` on any
+`collect` run), not per source. A cycle where Gupy succeeds and CIEE fails
+outright still counts as one success for this purpose (`executeCollect`
+marks the whole run `"failed"` only when _every_ query fails), so a
+single source down for days while the others keep succeeding does not get
+its own extended window — it gets `recencyDays` like a normal cycle,
+and depends on `evaluateCollectionHealth`'s alerting to surface the
+per-source problem instead. Per-source recovery windows would need
+per-source success tracking, a bigger change than this finding's concrete
+scenario (the whole app down) asked for — deliberately not built here.
+
+**Reversal cost:** low. `computeRecencyWindowDays` is a pure function with
+its own unit tests, independent of the rest of `executeCollect`; reverting
+means restoring the old `isFirstRun ? backfillDays : recencyDays` branch.
