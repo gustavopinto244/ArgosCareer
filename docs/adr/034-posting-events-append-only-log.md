@@ -15,7 +15,7 @@ same missing piece seen from two angles:
 
 - **AC-019** (MEDIUM): `applyPreFilter` returns a `reason` and `tracks`, but
   `executeDeliver` only ever kept `.passed` — the reason was computed and
-  immediately thrown away. Nothing recorded *which* rule rejected a
+  immediately thrown away. Nothing recorded _which_ rule rejected a
   posting, or against which version of `criteria.yaml`. "Why isn't this
   posting in the digest" was answerable only by re-running the pure
   function by hand against today's criteria, which is not necessarily the
