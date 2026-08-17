@@ -1073,6 +1073,67 @@ describe("executeIngestExternal", () => {
 });
 
 describe("executeDeliver", () => {
+  it("catches a near-duplicate from external ingest before scoring, without a separate dedup run ever having been called (docs/audit AC-005)", async () => {
+    // The exact scenario AC-005 names: Indeed/Catho/LinkedIn ingest via
+    // executeIngestExternal, which normalizes/upserts but never runs
+    // dedupSimilarPostings itself -- only the scheduler's own collection
+    // cycle does, on its own schedule. Two near-duplicate postings land via
+    // external ingest and executeDeliver is called directly, with no
+    // executeDedup call anywhere in between.
+    const normalize = (
+      raw: { source: string; sourceId: string; payload: unknown },
+      now: Date,
+    ) => {
+      const payload = raw.payload as { title: string; company: string };
+      return createPosting({
+        source: raw.source,
+        sourceId: raw.sourceId,
+        company: payload.company,
+        title: payload.title,
+        location: { kind: "unknown" },
+        workMode: "unknown",
+        collectedAt: now,
+        firstSeenAt: now,
+        lastSeenAt: now,
+        rawPayload: payload,
+      });
+    };
+    await executeIngestExternal(db, "indeed", normalize, [
+      {
+        sourceId: "1",
+        payload: { title: "Estágio Back-End", company: "Empresa X" },
+      },
+      {
+        sourceId: "2",
+        payload: {
+          title: "Estágio Back End (Rio de Janeiro)",
+          company: "Empresa X",
+        },
+      },
+    ]);
+
+    const criteria = deliverCriteria();
+    const scorer = new StubScorer(criteria);
+    const { notifier } = recordingNotifier();
+
+    const outcome = await executeDeliver(
+      db,
+      scorer,
+      notifier,
+      criteria,
+      deliverProfile(),
+    );
+
+    // Only one of the two near-duplicates reaches scoring -- the barrier
+    // dedup executeDeliver now runs internally caught the second one before
+    // any Stage A/B spend, exactly what AC-005 requires.
+    expect(outcome.filtered).toBe(1);
+    expect(outcome.scored).toBe(1);
+
+    const postingsRepo = new PostingsRepository(db);
+    expect(postingsRepo.findActive()).toHaveLength(1);
+  });
+
   it("takes an unnotified posting end to end: pre-filter, score, digest, notify, mark notified", async () => {
     const collector = stubCollector({
       source: "gupy",
