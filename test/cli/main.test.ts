@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  computeRecencyWindowDays,
   executeCollect,
   executeDedup,
   executeDeliver,
@@ -257,6 +258,30 @@ describe("executeCollect — multi-query cycles", () => {
   });
 });
 
+describe("computeRecencyWindowDays (docs/audit AC-028 — gap-aware recovery)", () => {
+  const WINDOW = { recencyDays: 1, backfillDays: 7 };
+  const NOW = new Date("2026-08-15T12:00:00Z");
+
+  it("uses backfillDays when there is no successful collect on record", () => {
+    expect(computeRecencyWindowDays(null, NOW, WINDOW)).toBe(7);
+  });
+
+  it("uses recencyDays for a normal gap (a few hours since the last success)", () => {
+    const lastSuccess = new Date("2026-08-15T08:00:00Z"); // 4h before NOW
+    expect(computeRecencyWindowDays(lastSuccess, NOW, WINDOW)).toBe(1);
+  });
+
+  it("widens to cover the actual gap after an outage longer than recencyDays", () => {
+    const lastSuccess = new Date("2026-08-12T12:00:00Z"); // 3 days before NOW
+    expect(computeRecencyWindowDays(lastSuccess, NOW, WINDOW)).toBe(3);
+  });
+
+  it("caps the widened window at backfillDays — no unbounded recovery", () => {
+    const lastSuccess = new Date("2026-08-01T12:00:00Z"); // 14 days before NOW
+    expect(computeRecencyWindowDays(lastSuccess, NOW, WINDOW)).toBe(7);
+  });
+});
+
 describe("executeCollect — recency window (ADR-019)", () => {
   const WINDOW = { recencyDays: 1, backfillDays: 7 };
 
@@ -345,6 +370,42 @@ describe("executeCollect — recency window (ADR-019)", () => {
       () =>
         collectorWith([
           datedPayload(4, "Estágio de 4 dias", "2026-08-11T12:00:00Z"),
+        ]),
+      [{}],
+      () => now,
+      0,
+      WINDOW,
+    );
+
+    expect(outcome.normalized).toBe(1);
+    expect(outcome.tooOld).toBe(0);
+  });
+
+  it("recovers a posting published during a multi-day outage instead of losing it (docs/audit AC-028)", async () => {
+    const lastSuccessAt = new Date("2026-08-12T12:00:00Z");
+    await executeCollect(
+      db,
+      () => collectorWith([]),
+      [{}],
+      () => lastSuccessAt,
+      0,
+      WINDOW,
+    );
+
+    // The app was down for 3 days; this run is the first since the outage.
+    // A posting published 2 days ago is outside recencyDays (1) but inside
+    // the actual gap since the last success — the honest fix ADR-019 named
+    // and deferred.
+    const now = new Date("2026-08-15T12:00:00Z");
+    const outcome = await executeCollect(
+      db,
+      () =>
+        collectorWith([
+          datedPayload(
+            6,
+            "Estágio Publicado no Apagão",
+            "2026-08-13T12:00:00Z",
+          ),
         ]),
       [{}],
       () => now,
