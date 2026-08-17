@@ -170,3 +170,25 @@ system this project does not have.
   the classification and budget-splitting logic in `llm-output.ts` and
   passing plain `Error`s from `OpenRouterClient` again, without touching any
   other stage.
+
+## Amendment 1 — 2026-08-17: `operationLabel` sanitized before logging
+
+The text above is kept as originally accepted. This section records a change
+to one detail — `operationLabel` is no longer plain, unsanitized string
+interpolation — not to the core decision (separate retry budgets, backoff,
+shared breaker), which is unchanged.
+
+`POST_REMEDIATION_CHANGE_AUDIT_2026-08-17.md` (PR-010) found that
+`` `stage-b:${fingerprint}:${requirement.text}` `` put `requirement.text` —
+sourced entirely from an untrusted posting description — straight into every
+retry/failure log line this ADR's logging produces, unbounded and
+unescaped — attacker-influenced text with no bound on length or content
+reaching a log sink, and one that lets a crafted description forge
+extra log lines via an embedded newline. ADR-036 fixes this:
+`StageBMatcher` now builds the label via
+`sanitizeLogLabel(requirement.text)` (`src/scoring/domain/log-label.ts`),
+which strips control characters (including newlines) and caps the result at
+60 characters. `operationLabel` remains plain string interpolation, not a
+structured field — that part of the original decision holds — the change is
+only that the untrusted component of it is now bounded and stripped of
+control characters before it gets there.

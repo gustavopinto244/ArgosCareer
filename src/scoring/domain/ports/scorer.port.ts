@@ -5,6 +5,17 @@ import { ScoreFailureReason, ScoreOutcome } from "../types";
 export type { ScoreFailureReason };
 
 /**
+ * Whether Stage A's input had to be cut to fit its size budget (docs/audit
+ * AC-017) — kept as its own type rather than a field on `ScoreOutcome` for
+ * the same reason `Recommendation` is separate: it is a fact about
+ * *extraction*, not an output of `computeScore`'s formula, so adding it here
+ * did not require touching that pure function or its tests.
+ */
+export interface ExtractionMetadata {
+  readonly inputTruncated: boolean;
+}
+
+/**
  * Bounded retries happen inside the adapter (ADR-006); by the time this
  * resolves, the outcome is final for this posting. `ok: false` is not an
  * exception — a posting that cannot be scored is not discarded, it carries
@@ -19,7 +30,7 @@ export type { ScoreFailureReason };
  * needed to change to add this.
  */
 export type ScoreResult =
-  | ({ readonly ok: true } & ScoreOutcome & Recommendation)
+  | ({ readonly ok: true } & ScoreOutcome & Recommendation & ExtractionMetadata)
   | {
       readonly ok: false;
       readonly reason: ScoreFailureReason;

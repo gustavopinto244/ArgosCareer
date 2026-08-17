@@ -2,6 +2,7 @@ import { z } from "zod";
 import { Profile } from "../../profile/domain/profile";
 import { MatchesRepository } from "../../persistence/infrastructure/matches-repository";
 import { isKnownProfileEvidence } from "../domain/evidence-provenance";
+import { sanitizeLogLabel } from "../domain/log-label";
 import { hashRequirements } from "../domain/requirements-hash";
 import { createMatch, Match, Requirement } from "../domain/types";
 import { AskModel, parseModelOutputWithRetries } from "./llm-output";
@@ -137,7 +138,12 @@ export class StageBMatcher {
         MatchOutputSchema,
         this.ask,
         prompt,
-        { operationLabel: `stage-b:${fingerprint}:${requirement.text}` },
+        {
+          // `requirement.text` originates in an untrusted posting
+          // description (docs/audit PR-010) — sanitized before it can reach
+          // a log line, not interpolated raw.
+          operationLabel: `stage-b:${fingerprint}:${sanitizeLogLabel(requirement.text)}`,
+        },
       );
       if (!result.ok) return { ok: false, attempts: result.attempts };
 

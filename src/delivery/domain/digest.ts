@@ -16,6 +16,15 @@ import { ScoreOutcome } from "../../scoring/domain/types";
  * anything reading `entry.outcome`, even though the fields were present on
  * the actual value at runtime the whole time — `render-digest.ts` simply
  * had no type-safe way to reach them.
+ *
+ * `ScoreResult` (`scorer.port.ts`) also carries `inputTruncated`
+ * (docs/audit AC-017), deliberately NOT widened into this type: nothing
+ * downstream of `ScoredPosting` renders it yet, and every digest test in
+ * this codebase constructs `ScoreOutcome & Recommendation` fixtures
+ * directly — widening this type for a field with no reader would only be
+ * test churn. `executeDeliver` (`cli/main.ts`) still has `result` in scope
+ * when it builds a `ScoredPosting`, so `result.inputTruncated` is one field
+ * access away whenever something needs to read it.
  */
 export interface ScoredPosting {
   readonly posting: Posting;
