@@ -13,8 +13,13 @@
 FROM mcr.microsoft.com/playwright:v1.62.1-jammy
 
 WORKDIR /app
-COPY package.json .
-RUN npm install
+COPY package.json package-lock.json ./
+# npm ci, not npm install (docs/audit AC-030): ci installs exactly what
+# package-lock.json resolved and fails if it is out of sync with
+# package.json; install re-resolves caret ranges (tsx's ^4.23.12 among
+# them) against whatever is on the registry that day, so the same commit
+# could silently produce a different image on every rebuild.
+RUN npm ci
 
 COPY state.ts collect.ts ./
 

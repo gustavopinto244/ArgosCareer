@@ -8,10 +8,15 @@
 # The image persists between runs (that is what makes each run fast — no
 # repeated `pip install`); each *container* from it is `--rm`, exactly the
 # "ephemeral Python container, prints JSON and exits" CLAUDE.md §6 names.
+#
+# requirements.txt pins exact versions (docs/audit AC-030) -- an unpinned
+# `pip install python-jobspy requests` re-resolved on every rebuild, so the
+# same commit could silently pick up a different jobspy release mid-deploy.
 FROM python:3.12-slim
 
 WORKDIR /app
-RUN pip install --no-cache-dir python-jobspy requests
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY collect.py .
 
