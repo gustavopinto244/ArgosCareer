@@ -1,6 +1,7 @@
 import { CollectorPort } from "../domain/ports/collector.port";
 import { CieeCollector } from "./ciee-collector";
 import { GupyCollector } from "./gupy-collector";
+import { SolidesCollector } from "./solides-collector";
 
 /**
  * Which collector answers a query, keyed by the query's `source`.
@@ -16,6 +17,7 @@ import { GupyCollector } from "./gupy-collector";
 const COLLECTORS: ReadonlyMap<string, () => CollectorPort> = new Map([
   ["gupy", () => new GupyCollector() as CollectorPort],
   ["ciee", () => new CieeCollector() as CollectorPort],
+  ["solides", () => new SolidesCollector() as CollectorPort],
 ]);
 
 /**
