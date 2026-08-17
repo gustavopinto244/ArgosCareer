@@ -134,11 +134,13 @@ export class SolidesCollector implements CollectorPort {
 
     try {
       // Bounds the number of raw items scanned, not the number of valid
-      // postings collected — same reasoning as GupyCollector.
-      while (
-        postings.length < maxResults &&
-        (page - 1) * PAGE_SIZE < maxResults
-      ) {
+      // postings collected — same reasoning as GupyCollector. The old
+      // `postings.length < maxResults` condition bounded kept postings
+      // instead, contradicting this comment (docs/audit PR-015): with
+      // `take` fixed at 10, `maxResults: 15` fetched two full pages
+      // because the second page's own pre-check compared page count against
+      // `maxResults`, not the running scanned total, and returned 20.
+      while (receivedCount < maxResults) {
         if (page > 1) await sleep(this.requestIntervalMs);
 
         const url = buildUrl(criteria, page);
@@ -188,9 +190,18 @@ export class SolidesCollector implements CollectorPort {
 
         const items = envelope.data.data.data;
         if (items.length === 0) break;
-        receivedCount += items.length;
 
-        for (const item of items) {
+        // `take` is fixed at 10 (verified live — see the constant's own
+        // comment) and cannot be requested smaller for a partial final
+        // page, so the exact bound (docs/audit PR-015) is enforced
+        // client-side instead: only the items still needed to reach
+        // `maxResults` are scanned/kept from this page, even though the
+        // full page was already downloaded.
+        const remaining = maxResults - receivedCount;
+        const itemsToProcess =
+          items.length > remaining ? items.slice(0, remaining) : items;
+
+        for (const item of itemsToProcess) {
           const parsed = SolidesJobSchema.safeParse(item);
           if (parsed.success) {
             postings.push({
@@ -202,15 +213,13 @@ export class SolidesCollector implements CollectorPort {
             schemaRejectedCount += 1;
           }
         }
+        receivedCount += itemsToProcess.length;
 
         if (items.length < PAGE_SIZE) break;
-        // A full page, but the loop's own bounds (kept count or page count)
-        // will stop the next iteration — the source's page was not short,
-        // so more results were plausibly there and never asked for
-        // (docs/audit AC-013).
-        if (postings.length >= maxResults || page * PAGE_SIZE >= maxResults) {
-          truncated = true;
-        }
+        // A full page, but the loop's own bound will stop the next
+        // iteration — the source's page was not short, so more results were
+        // plausibly there and never asked for (docs/audit AC-013).
+        if (receivedCount >= maxResults) truncated = true;
         page += 1;
       }
     } catch (cause) {

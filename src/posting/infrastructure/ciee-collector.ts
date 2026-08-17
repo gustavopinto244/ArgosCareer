@@ -223,7 +223,18 @@ export class CieeCollector implements CollectorPort {
         const items = envelope.data.content;
         if (items.length === 0) break;
 
-        for (const item of items) {
+        // CIEE paginates by page number, not offset, so the request itself
+        // cannot ask for fewer than a full `pageSize` on the final page
+        // without risking a different `page * size` cursor than every
+        // earlier request used. Bounding `maxResults` exactly (docs/audit
+        // PR-015) instead happens here, client-side: only the items still
+        // needed to reach the cap are scanned/kept from this page, even
+        // though the full page was already downloaded.
+        const remaining = maxResults - scanned;
+        const itemsToProcess =
+          items.length > remaining ? items.slice(0, remaining) : items;
+
+        for (const item of itemsToProcess) {
           const vaga = CieeVagaSchema.safeParse(item);
           // A single malformed posting is skipped, never fatal — the schema
           // is deliberately tolerant, so only a pathological item fails it.
@@ -242,7 +253,7 @@ export class CieeCollector implements CollectorPort {
           });
         }
 
-        scanned += items.length;
+        scanned += itemsToProcess.length;
         if (envelope.data.last === true || items.length < pageSize) break;
         // A full page and the source's own `last` flag says there is more —
         // if the cap stops the next iteration, that is a real truncation,

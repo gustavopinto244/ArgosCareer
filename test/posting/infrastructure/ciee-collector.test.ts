@@ -256,6 +256,30 @@ describe("CieeCollector — successful collection", () => {
     expect(result.truncated).toBe(true);
   });
 
+  it("returns exactly maxResults items, not a whole extra page past it (docs/audit PR-015)", async () => {
+    // The real bug: maxResults: 50 with the default pageSize (100) used to
+    // scan and keep an entire 100-item page, since the loop only checked
+    // the cap *before* the next page's request, never trimming what a
+    // page already in hand contributed.
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({
+        content: Array.from({ length: 100 }, (_, i) => ({
+          codigoVaga: i,
+          nivelEscolar: "SU",
+        })),
+        last: false,
+      }),
+    );
+    const collector = new CieeCollector({ fetchImpl, ...FAST_OPTIONS });
+
+    const result = await collector.collect({ maxResults: 50 });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(result.postings).toHaveLength(50);
+    expect(result.receivedCount).toBe(50);
+    expect(result.truncated).toBe(true);
+  });
+
   it("reports truncated: false when the envelope's own last flag ends it", async () => {
     const fetchImpl = vi.fn(async () =>
       jsonResponse({
