@@ -70,11 +70,19 @@ function isExpired(posting: Posting, now: Date): boolean {
  * deliberate business decision, not a measurement — see the schema comment
  * on `Criteria.undatedBacklogCutoverAt` for why `firstSeenAt` itself is never
  * rewritten to express it.
+ *
+ * A `publishedAt` more than `maxFutureSkewDays` ahead of `now` is treated the
+ * same as no `publishedAt` at all (docs/audit AC-029): a source-reported date
+ * that far in the future is not evidence of a fresh posting, it is evidence
+ * of a bad date — a misparsed format, clock skew, or an outright wrong value
+ * — and trusting it would let `ageMs` go negative and pass the recency check
+ * unconditionally, regardless of how old the posting actually is.
  */
 function isTooOld(
   posting: Posting,
   maxAgeDays: number | null,
   undatedBacklogCutoverAt: Date | null,
+  maxFutureSkewDays: number,
   now: Date,
 ): boolean {
   if (maxAgeDays === null) return false;
@@ -85,7 +93,13 @@ function isTooOld(
   ) {
     return true;
   }
-  const reference = posting.publishedAt ?? posting.firstSeenAt;
+  const futureSkewMs = maxFutureSkewDays * 24 * 60 * 60 * 1000;
+  const isImplausiblyFuture =
+    posting.publishedAt !== null &&
+    posting.publishedAt.getTime() - now.getTime() > futureSkewMs;
+  const reference = isImplausiblyFuture
+    ? posting.firstSeenAt
+    : (posting.publishedAt ?? posting.firstSeenAt);
   const ageMs = now.getTime() - reference.getTime();
   return ageMs > maxAgeDays * 24 * 60 * 60 * 1000;
 }
@@ -181,6 +195,7 @@ export function applyPreFilter(
       posting,
       criteria.maxAgeDays,
       criteria.undatedBacklogCutoverAt,
+      criteria.maxFutureSkewDays,
       now,
     )
   ) {

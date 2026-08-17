@@ -45,6 +45,7 @@ function criteria(): Criteria {
     minKeywordAdherence: 0,
     maxAgeDays: null,
     undatedBacklogCutoverAt: null,
+    maxFutureSkewDays: 1,
     tracks: { dev: ["backend"], security: [], automation: [] },
     trackExclusions: { dev: [], security: [], automation: [] },
     schedule: {

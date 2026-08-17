@@ -248,6 +248,13 @@ maxAgeDays: 7
 # that dividing line does not move.
 undatedBacklogCutoverAt: "2026-08-16T12:15:00Z"
 
+# How far into the future a source's publishedAt is still trusted
+# (docs/audit AC-029). Beyond this, it is treated as an unreliable date --
+# clock skew, a misparsed format, a bad value like the year 2099 -- not
+# evidence of freshness, and isTooOld falls back to firstSeenAt instead.
+# 1 day is generous enough to absorb ordinary timezone differences.
+maxFutureSkewDays: 1
+
 # Keyword classification per track, feeding trackAlignment (docs/04). A
 # posting matching a track's list is classified into it; matching none
 # leaves it unknown (trackWeights.unknown), not rejected.

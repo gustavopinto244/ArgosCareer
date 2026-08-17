@@ -20,6 +20,7 @@ function baseCriteria(overrides: Partial<Criteria> = {}): Criteria {
     minKeywordAdherence: 0,
     maxAgeDays: null,
     undatedBacklogCutoverAt: null,
+    maxFutureSkewDays: 1,
     tracks: {
       dev: ["backend", "node"],
       security: ["segurança"],
@@ -235,6 +236,47 @@ describe("applyPreFilter — maxAgeDays (age limit)", () => {
       NOW,
     );
     expect(outcome.reason).toBe("expired");
+  });
+});
+
+describe("applyPreFilter — maxFutureSkewDays (docs/audit AC-029)", () => {
+  it("passes a publishedAt within the future-skew tolerance", () => {
+    const outcome = applyPreFilter(
+      posting({ publishedAt: new Date("2026-08-14T12:00:00Z") }), // 9h after NOW
+      baseCriteria({ maxAgeDays: 7, maxFutureSkewDays: 1 }),
+      [],
+      NOW,
+    );
+    expect(outcome.passed).toBe(true);
+  });
+
+  it("does not let an implausibly future publishedAt grant indefinite freshness", () => {
+    // Without the AC-029 fix, a publishedAt this far in the future makes
+    // ageMs negative, which always passes maxAgeDays regardless of how old
+    // the posting actually is (e.g. a stale firstSeenAt).
+    const outcome = applyPreFilter(
+      posting({
+        publishedAt: new Date("2099-01-01T00:00:00Z"),
+        firstSeenAt: new Date("2026-08-01T00:00:00Z"), // 13 days before NOW
+      }),
+      baseCriteria({ maxAgeDays: 7, maxFutureSkewDays: 1 }),
+      [],
+      NOW,
+    );
+    expect(outcome.reason).toBe("too_old");
+  });
+
+  it("falls back to a fresh firstSeenAt when publishedAt is implausibly future, so it still passes", () => {
+    const outcome = applyPreFilter(
+      posting({
+        publishedAt: new Date("2099-01-01T00:00:00Z"),
+        firstSeenAt: NOW,
+      }),
+      baseCriteria({ maxAgeDays: 7, maxFutureSkewDays: 1 }),
+      [],
+      NOW,
+    );
+    expect(outcome.passed).toBe(true);
   });
 });
 

@@ -172,6 +172,22 @@ export const CriteriaSchema = z.object({
    * a value that needs updating over time.
    */
   undatedBacklogCutoverAt: z.coerce.date().nullable().default(null),
+  /**
+   * How far into the future a source's `publishedAt` is still trusted
+   * (docs/audit AC-029). A source reporting `publishedAt` beyond this
+   * window — clock skew, a `date_posted` format a normalizer misparses, or
+   * an outright bad value like the year 2099 — is not evidence the posting
+   * is fresh; it is evidence the date is wrong. `isTooOld` falls back to
+   * `firstSeenAt` in that case, the same conservative fallback already used
+   * for a missing `publishedAt` (see `isTooOld`'s own comment), rather than
+   * letting an implausible future date produce a negative age that always
+   * passes the recency check regardless of how old the posting actually is.
+   *
+   * Generous by default: 1 day covers ordinary timezone differences between
+   * a source's server and this system without flagging normal same-day
+   * postings as suspicious.
+   */
+  maxFutureSkewDays: z.number().nonnegative().default(1),
   tracks: z.record(ProfileTrackSchema, z.array(z.string().min(1))),
   /**
    * Phrases that veto a track even when one of its keywords matched
