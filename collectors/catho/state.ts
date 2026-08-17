@@ -31,6 +31,38 @@ import {
 } from "node:fs";
 import { dirname } from "node:path";
 
+/**
+ * The only host this collector is ever allowed to navigate a real browser
+ * to (docs/audit AC-034). `discoverCandidates` reads `<loc>` entries out of
+ * Catho's own sitemap XML — an external, unauthenticated source this
+ * project does not control — and nothing before this point verified they
+ * actually pointed at Catho. A compromised or malformed sitemap entry like
+ * `http://127.0.0.1/vagas/estagio/123` matched the path-only regex
+ * `toCandidate` used to apply and would have been handed straight to
+ * `page.goto`, an SSRF-shaped risk from the browser's network position
+ * (inside the container/host running this collector).
+ */
+const ALLOWED_CATHO_HOST = "www.catho.com.br";
+
+/**
+ * Strict allowlist: exactly `https://www.catho.com.br`, nothing else — not
+ * a subdomain, not `http:`, not a different TLD. Used twice: on every
+ * sitemap-derived candidate before it is ever navigated to, and again on
+ * the final URL after navigation, since a same-domain page could still
+ * carry an external redirect the sitemap URL alone would not reveal.
+ */
+export function isAllowedCathoUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return (
+      parsed.protocol === "https:" &&
+      parsed.hostname.toLowerCase() === ALLOWED_CATHO_HOST
+    );
+  } catch {
+    return false;
+  }
+}
+
 export type CathoEntryState =
   "collected" | "ingested" | "expired" | "retryable" | "quarantined";
 
@@ -156,6 +188,14 @@ export function classifyPageResult(input: {
   }
   if (httpStatus < 200 || httpStatus >= 300) {
     return { kind: "retryable", reason: `HTTP ${httpStatus}` };
+  }
+  // Revalidated here, not only on the sitemap-derived candidate URL
+  // (docs/audit AC-034): the candidate could be a legitimate catho.com.br
+  // URL and still redirect somewhere else entirely by the time the browser
+  // settles. `retryable`, not a new terminal state — a same-run anomaly
+  // like this deserves another look next cycle, not a permanent verdict.
+  if (!isAllowedCathoUrl(finalUrl)) {
+    return { kind: "retryable", reason: "final URL host not allowed" };
   }
   if (isGenericListingRedirect(finalUrl)) {
     return { kind: "expired" };
