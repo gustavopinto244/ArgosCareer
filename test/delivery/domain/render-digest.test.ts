@@ -98,6 +98,20 @@ describe("renderPostingEntry", () => {
     );
     expect(text).toContain("Local: Remoto");
   });
+
+  it("warns when the outcome is lowConfidence — a high score there reflects empty-category coverage, not a verified match", () => {
+    const text = renderPostingEntry(
+      scored({ outcome: outcome({ lowConfidence: true, score: 100 }) }),
+    );
+    expect(text).toContain("Confiança baixa");
+  });
+
+  it("does not warn when the outcome is not lowConfidence", () => {
+    const text = renderPostingEntry(
+      scored({ outcome: outcome({ lowConfidence: false }) }),
+    );
+    expect(text).not.toContain("Confiança baixa");
+  });
 });
 
 describe("renderDigestText", () => {

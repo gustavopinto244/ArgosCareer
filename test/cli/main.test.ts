@@ -518,10 +518,10 @@ describe("executeCollect — multi-source dispatch", () => {
   it("reports an unregistered source as a wiring bug, not an empty source", async () => {
     const collector: CollectorPort = {
       collect: async () => ({
-        source: "linkedin",
+        source: "jooble",
         collectedAt: new Date(),
         postings: [
-          { source: "linkedin", sourceId: "1", payload: { anything: true } },
+          { source: "jooble", sourceId: "1", payload: { anything: true } },
         ],
       }),
     };

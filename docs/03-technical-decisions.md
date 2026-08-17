@@ -40,6 +40,7 @@ revisited on its merits instead of re-argued from memory.
 | [026](adr/026-recalibrate-toward-track-fit.md)                        | Recalibrate the score weights toward track fit                             | Accepted | 2026-08-16 |
 | [027](adr/027-indeed-via-external-jobspy-and-authenticated-ingest.md) | Indeed via an external `jobspy` process, ingested through the API boundary | Accepted | 2026-08-16 |
 | [028](adr/028-indeed-exception-to-the-polite-collector-rule.md)       | Accept, deliberately, that Indeed via jobspy breaks two collector rules    | Accepted | 2026-08-16 |
+| [029](adr/029-linkedin-alert-emails-via-n8n.md)                       | LinkedIn via the user's own job-alert emails, extracted by n8n             | Accepted | 2026-08-16 |
 
 ## When an ADR is required
 

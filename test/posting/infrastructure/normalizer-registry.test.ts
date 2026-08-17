@@ -17,7 +17,7 @@ describe("normalizerFor", () => {
     // The distinction this encodes: an unregistered source is a wiring bug,
     // not a degraded source. A no-op normalizer would drop every posting and
     // look exactly like a source that returned nothing.
-    expect(normalizerFor("linkedin")).toBeNull();
+    expect(normalizerFor("jooble")).toBeNull();
     expect(normalizerFor("")).toBeNull();
   });
 
@@ -40,6 +40,6 @@ describe("normalizerFor", () => {
   });
 
   it("lists what this build can normalize", () => {
-    expect(registeredSources()).toEqual(["ciee", "gupy", "indeed"]);
+    expect(registeredSources()).toEqual(["ciee", "gupy", "indeed", "linkedin"]);
   });
 });
