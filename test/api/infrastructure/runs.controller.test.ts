@@ -23,7 +23,10 @@ import {
   Db,
   runMigrations,
 } from "../../../src/persistence/infrastructure/db";
-import { RunsRepository } from "../../../src/persistence/infrastructure/runs-repository";
+import {
+  RunsRepository,
+  parseTruncatedSources,
+} from "../../../src/persistence/infrastructure/runs-repository";
 import {
   CollectionResult,
   CollectorPort,
@@ -460,6 +463,24 @@ describe("POST /runs/collect/external (ADR-027)", () => {
     const run = new RunsRepository(db).findById(res.body.runId);
     expect(run?.kind).toBe("collect");
     expect(run?.outcome).toBe("success");
+  });
+
+  it("records a caller-supplied truncated flag on the run (docs/audit PR-015)", async () => {
+    const res = await auth(
+      request(app.getHttpServer())
+        .post("/runs/collect/external")
+        .send({
+          source: "gupy",
+          postings: [
+            { sourceId: "1", payload: gupyPayload(1, "Estágio Externo") },
+          ],
+          truncated: true,
+        }),
+    );
+
+    expect(res.status).toBe(201);
+    const run = new RunsRepository(db).findById(res.body.runId);
+    expect(parseTruncatedSources(run!)).toEqual(["gupy"]);
   });
 
   it("shares the 'collect' RunLock with POST /runs/collect (ADR-024) — rejected while one is in flight", async () => {

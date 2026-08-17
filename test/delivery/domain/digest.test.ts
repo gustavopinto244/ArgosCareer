@@ -65,6 +65,7 @@ describe("composeDigest", () => {
         filtered: 1,
         scored: 1,
         failedSources: [],
+        truncatedSources: [],
       },
     });
 
@@ -84,6 +85,7 @@ describe("composeDigest", () => {
         filtered: 1,
         scored: 1,
         failedSources: [],
+        truncatedSources: [],
       },
     });
 
@@ -103,6 +105,7 @@ describe("composeDigest", () => {
         filtered: 1,
         scored: 1,
         failedSources: [],
+        truncatedSources: [],
       },
     });
 
@@ -120,6 +123,7 @@ describe("composeDigest", () => {
       filtered: 3,
       scored: 3,
       failedSources: ["gupy"],
+      truncatedSources: [],
     };
 
     const digest = composeDigest({

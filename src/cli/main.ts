@@ -37,6 +37,7 @@ import {
   RunCounts,
   RunsRepository,
   parseFailedSources,
+  parseTruncatedSources,
 } from "../persistence/infrastructure/runs-repository";
 import { PostingEventsRepository } from "../persistence/infrastructure/posting-events-repository";
 import { applyPreFilter } from "../prefilter/domain/pre-filter";
@@ -404,6 +405,16 @@ export interface IngestExternalOutcome {
  *
  * Bookkeeping matches `executeCollect`/`executeDedup`: the run row closes
  * as `failed` before a throw is re-raised, never left open (#49).
+ *
+ * `truncated` (docs/audit PR-015, ADR-027 Amendment 1) carries forward
+ * whether the *caller* — the host-side process that actually talked to the
+ * source — hit its own configured cap this run: jobspy's `results_wanted`,
+ * or Catho's `MAX_PAGES_PER_RUN` leaving title-matched candidates
+ * unfetched. This process never sees the source's raw response, so unlike
+ * `GupyCollector`/`CieeCollector`/`SolidesCollector` it cannot detect
+ * truncation itself — it can only record what the caller already knows,
+ * the same way `attemptedSources`/`failedSources` are supplied rather than
+ * derived for every other run kind.
  */
 export async function executeIngestExternal(
   db: Db,
@@ -411,6 +422,7 @@ export async function executeIngestExternal(
   normalize: Normalizer,
   postings: readonly ExternalRawPosting[],
   now: () => Date = () => new Date(),
+  truncated: boolean = false,
 ): Promise<IngestExternalOutcome> {
   const postingsRepo = new PostingsRepository(db);
   const runsRepo = new RunsRepository(db);
@@ -420,6 +432,7 @@ export async function executeIngestExternal(
   let unnormalizable = 0;
   let isNew = 0;
   let alreadySeen = 0;
+  const truncatedSources = truncated ? [source] : [];
 
   try {
     const collectedAt = now();
@@ -443,6 +456,7 @@ export async function executeIngestExternal(
       normalizedCount: normalized,
       newCount: isNew,
       alreadySeenCount: alreadySeen,
+      truncatedSources,
     });
     throw cause;
   }
@@ -452,6 +466,7 @@ export async function executeIngestExternal(
     normalizedCount: normalized,
     newCount: isNew,
     alreadySeenCount: alreadySeen,
+    truncatedSources,
   });
 
   return {
@@ -769,6 +784,13 @@ export async function executeDeliver(
     const failedSources = [
       ...new Set(collectRuns.flatMap((r) => parseFailedSources(r))),
     ];
+    // Was already persisted per collect run (internal collector caps via
+    // `CollectionResult.truncated`, external caps via the `truncated` flag
+    // `executeIngestExternal` now accepts) but never read back into
+    // anything an operator actually sees before this (docs/audit PR-015).
+    const truncatedSources = [
+      ...new Set(collectRuns.flatMap((r) => parseTruncatedSources(r))),
+    ];
 
     const profileKeywords = deriveProfileKeywords(profile);
     const profileHash = hashProfile(profile, startedAt);
@@ -887,6 +909,7 @@ export async function executeDeliver(
         filtered: filteredCount,
         scored: scoredCount,
         failedSources,
+        truncatedSources,
       },
     });
 

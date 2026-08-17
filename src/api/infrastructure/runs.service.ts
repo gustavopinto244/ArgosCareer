@@ -203,6 +203,7 @@ export class RunsService {
   async ingestExternal(
     source: string,
     postings: readonly ExternalRawPosting[],
+    truncated: boolean = false,
   ) {
     const normalize = normalizerFor(source);
     if (!normalize) {
@@ -215,7 +216,14 @@ export class RunsService {
     }
 
     const outcome = await runExclusive(this.runLock, "collect", () =>
-      executeIngestExternal(this.db, source, normalize, postings),
+      executeIngestExternal(
+        this.db,
+        source,
+        normalize,
+        postings,
+        undefined,
+        truncated,
+      ),
     );
     if (!outcome.ok) {
       throw new ConflictException("collect is already running");

@@ -1168,6 +1168,35 @@ describe("executeIngestExternal", () => {
     expect(stored.map((p) => p.source)).toEqual(["indeed", "indeed"]);
   });
 
+  it("records the caller-supplied truncated flag on the run row (docs/audit PR-015)", async () => {
+    const { normalize } = fakeNormalizer();
+    const outcome = await executeIngestExternal(
+      db,
+      "indeed",
+      normalize,
+      [{ sourceId: "in-1", payload: { title: "Estágio A", company: "X" } }],
+      () => NOW,
+      true,
+    );
+
+    const run = new RunsRepository(db).findById(outcome.runId);
+    expect(parseTruncatedSources(run!)).toEqual(["indeed"]);
+  });
+
+  it("defaults truncated to false when the caller omits it", async () => {
+    const { normalize } = fakeNormalizer();
+    const outcome = await executeIngestExternal(
+      db,
+      "indeed",
+      normalize,
+      [{ sourceId: "in-1", payload: { title: "Estágio A", company: "X" } }],
+      () => NOW,
+    );
+
+    const run = new RunsRepository(db).findById(outcome.runId);
+    expect(parseTruncatedSources(run!)).toEqual([]);
+  });
+
   it("counts an item the normalizer rejects as unnormalizable, not a thrown error", async () => {
     const { normalize } = fakeNormalizer();
     const outcome = await executeIngestExternal(
@@ -2138,6 +2167,43 @@ describe("executeDeliver", () => {
     await executeDeliver(db, scorer, notifier, criteria, deliverProfile());
 
     expect(digests[0]?.summary.failedSources).toEqual(["indeed"]);
+  });
+
+  it("surfaces a source truncated via external ingest in the digest summary (docs/audit PR-015)", async () => {
+    const normalize = (
+      raw: { source: string; sourceId: string; payload: unknown },
+      now: Date,
+    ) => {
+      const payload = raw.payload as { title: string; company: string };
+      return createPosting({
+        source: raw.source,
+        sourceId: raw.sourceId,
+        company: payload.company,
+        title: payload.title,
+        location: { kind: "unknown" },
+        workMode: "unknown",
+        collectedAt: now,
+        firstSeenAt: now,
+        lastSeenAt: now,
+        rawPayload: payload,
+      });
+    };
+    await executeIngestExternal(
+      db,
+      "indeed",
+      normalize,
+      [{ sourceId: "in-1", payload: { title: "Estágio A", company: "X" } }],
+      undefined,
+      true,
+    );
+
+    const criteria = deliverCriteria();
+    const scorer = new StubScorer(criteria);
+    const { notifier, digests } = recordingNotifier();
+
+    await executeDeliver(db, scorer, notifier, criteria, deliverProfile());
+
+    expect(digests[0]?.summary.truncatedSources).toEqual(["indeed"]);
   });
 });
 

@@ -9,6 +9,9 @@ and scheduled on Atlas — first real run 2026-08-16: 50 postings scraped,
 47 normalized, 44 new, landed in the corpus indistinguishable from a
 Gupy/CIEE `collect` run in `GET /runs`. Twice-daily timer active.
 
+Amended 2026-08-17, see
+[Amendment 1](#amendment-1--2026-08-17-carry-the-callers-own-truncation-signal-through-the-boundary).
+
 ## Date
 
 2026-08-16
@@ -164,3 +167,51 @@ operation happens.
 **Reversal cost:** low on the receiving side (delete the route, the service
 method, the normalizer, the schema — nothing else depends on any of them);
 whatever cost exists is in the not-yet-written host script, not in this ADR.
+
+## Amendment 1 — 2026-08-17: carry the caller's own truncation signal through the boundary
+
+`GupyCollector`/`CieeCollector`/`SolidesCollector` each detect their own
+truncation and report it on `CollectionResult`, which `executeCollect`
+already turns into `runs.truncatedSources` (docs/audit AC-013). A
+post-remediation audit (`docs/audit`, PR-015) named the gap this ADR's
+own boundary left: `executeIngestExternal` — the shared landing point for
+both Indeed (this ADR) and Catho (ADR-032/033) — had no equivalent, so a
+source whose _host-side_ process hit its own cap (jobspy's
+`results_wanted`, Catho's `MAX_PAGES_PER_RUN` cutting real candidates)
+left no trace anywhere a "success" run could be told apart from one that
+quietly left postings uncollected.
+
+This process genuinely cannot detect it the way the internal collectors
+do — it never sees Indeed's raw response or Catho's sitemap; the fact
+only exists on the caller's side of the HTTP boundary. So `truncated` is
+now an optional field on `IngestExternalBody`, defaulting to `false`,
+carried through `executeIngestExternal` into the same
+`runs.truncatedSources` column the internal path already writes — one
+run-accounting mechanism, not a second one bolted on beside it.
+
+Both host scripts now compute it honestly rather than leaving it `false`
+by omission:
+
+- **`collectors/indeed/collect.py`:** `len(jobs) >= results_wanted` — the
+  same "a full result plus a cap" heuristic the internal collectors use,
+  since jobspy has no "there were more" signal of its own.
+- **`collectors/catho/collect.ts`:** `eligible.length > maxPagesPerRun`,
+  computed right where `toFetch` is already sliced to the same budget —
+  real, title-matched candidates left for a later run, not the sitemap
+  running dry.
+
+**Consequence for the digest.** `runs.truncatedSources` existed since
+AC-013 but was written and never read back anywhere an operator could see
+it — `parseTruncatedSources` had no caller at all before this change.
+`RunSummary` (`digest.ts`) now carries `truncatedSources`, computed the
+same way `failedSources` already is (a union over every `collect` run
+since the last delivery, internal and external sources alike), and
+`render-digest.ts` prints it as its own line. This closes a second,
+narrower gap PR-015 named alongside the caller-supplied signal itself.
+
+**Reversal cost:** trivial on the receiving side — `truncated` is
+optional and defaults to `false`, so an older host script that never
+sends it behaves exactly as before. Removing the digest line is one line
+in `render-digest.ts`; removing the field from `RunSummary` would need
+updating every fixture that constructs one, the same cost `failedSources`
+would have.
