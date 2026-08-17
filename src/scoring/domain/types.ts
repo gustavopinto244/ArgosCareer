@@ -94,12 +94,25 @@ export interface ScoreBreakdown {
   readonly trackAlignment: number;
 }
 
-/** Why `ScorerPort.score` returned `ok: false` — bounded retries already
+/**
+ * Why a posting has no real `ScoreOutcome`. The first three are why
+ * `ScorerPort.score` returned `ok: false` — bounded retries already
  * exhausted by the time this is set (ADR-006). Lives here, not on
  * `ScorerPort` itself, so `ScoreOutcome` can reference it without a
- * circular import (`scorer.port.ts` already imports from this module). */
+ * circular import (`scorer.port.ts` already imports from this module).
+ *
+ * `max_retries_exceeded` (docs/audit PR-002) is different in kind: it is set
+ * by `executeDeliver` *before* calling `scorer.score` at all, once
+ * `PostingsRepository.getScoreFailureCount` shows this posting has already
+ * failed on `maxScoreFailures` consecutive runs — the bounded stop that
+ * keeps a permanently-broken posting (as opposed to a transient provider
+ * outage) from spending a model call every single night forever.
+ */
 export type ScoreFailureReason =
-  "invalid_output" | "extraction_failed" | "matching_failed";
+  | "invalid_output"
+  | "extraction_failed"
+  | "matching_failed"
+  | "max_retries_exceeded";
 
 export interface ScoreOutcome {
   readonly score: number;

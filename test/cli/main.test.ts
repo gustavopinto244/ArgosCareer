@@ -1425,6 +1425,153 @@ describe("executeDeliver", () => {
     expect(run?.filteredCount).toBe(1);
   });
 
+  describe("docs/audit PR-002 — recoverable scoring failures", () => {
+    async function collectOnePosting(): Promise<void> {
+      const collector = stubCollector({
+        source: "gupy",
+        collectedAt: new Date(),
+        postings: [
+          {
+            source: "gupy",
+            sourceId: "1",
+            payload: gupyPayload(1, "Estágio em Backend"),
+          },
+        ],
+      });
+      await executeCollect(db, () => collector, [{}], undefined, 0);
+    }
+
+    function failingScorer(): ScorerPort {
+      return {
+        score: async () => ({
+          ok: false,
+          reason: "extraction_failed",
+          attempts: 3,
+        }),
+      };
+    }
+
+    it("does not mark a failed posting notified, so it stays a candidate for the next run", async () => {
+      await collectOnePosting();
+      const criteria = deliverCriteria();
+      const { notifier } = recordingNotifier();
+
+      await executeDeliver(
+        db,
+        failingScorer(),
+        notifier,
+        criteria,
+        deliverProfile(),
+      );
+
+      // Before this fix, every entry in the digest -- failures included --
+      // was marked notified unconditionally, permanently removing a
+      // transiently-failed posting from all future scoring the moment its
+      // one failure message was delivered.
+      const postingsRepo = new PostingsRepository(db);
+      expect(postingsRepo.findUnnotified()).toHaveLength(1);
+    });
+
+    it("retries a failed posting on the next run and reports it again", async () => {
+      await collectOnePosting();
+      const criteria = deliverCriteria();
+
+      const first = await executeDeliver(
+        db,
+        failingScorer(),
+        recordingNotifier().notifier,
+        criteria,
+        deliverProfile(),
+      );
+      const { notifier, digests } = recordingNotifier();
+      const second = await executeDeliver(
+        db,
+        failingScorer(),
+        notifier,
+        criteria,
+        deliverProfile(),
+      );
+
+      expect(first.filtered).toBe(1);
+      expect(second.filtered).toBe(1);
+      expect(digests[0]?.review[0]?.outcome.scoreFailureReason).toBe(
+        "extraction_failed",
+      );
+    });
+
+    it("clears the failure count once a posting scores successfully again", async () => {
+      await collectOnePosting();
+      const criteria = deliverCriteria();
+
+      await executeDeliver(
+        db,
+        failingScorer(),
+        recordingNotifier().notifier,
+        criteria,
+        deliverProfile(),
+      );
+      const postingsRepo = new PostingsRepository(db);
+      const [posting] = postingsRepo.findUnnotified();
+      expect(postingsRepo.getScoreFailureCount(posting!.fingerprint)).toBe(1);
+
+      await executeDeliver(
+        db,
+        new StubScorer(criteria),
+        recordingNotifier().notifier,
+        criteria,
+        deliverProfile(),
+      );
+
+      expect(postingsRepo.getScoreFailureCount(posting!.fingerprint)).toBe(0);
+    });
+
+    it("stops retrying and marks the posting notified once maxScoreFailures is reached", async () => {
+      await collectOnePosting();
+      const criteria = deliverCriteria();
+      const maxScoreFailures = 2;
+
+      // First two runs each fail and consume one attempt of the budget.
+      for (let i = 0; i < maxScoreFailures; i++) {
+        await executeDeliver(
+          db,
+          failingScorer(),
+          recordingNotifier().notifier,
+          criteria,
+          deliverProfile(),
+          undefined,
+          undefined,
+          undefined,
+          maxScoreFailures,
+        );
+      }
+
+      const postingsRepo = new PostingsRepository(db);
+      expect(postingsRepo.findUnnotified()).toHaveLength(1);
+
+      // The third run hits the ceiling: no model call, marked notified with
+      // a distinct reason, and gone from the unnotified pool for good.
+      const ask = failingScorer();
+      const { notifier, digests } = recordingNotifier();
+      const outcome = await executeDeliver(
+        db,
+        ask,
+        notifier,
+        criteria,
+        deliverProfile(),
+        undefined,
+        undefined,
+        undefined,
+        maxScoreFailures,
+      );
+
+      expect(outcome.delivered).toBe(1);
+      expect(digests[0]?.review[0]?.outcome.scoreFailureReason).toBe(
+        "max_retries_exceeded",
+      );
+      expect(postingsRepo.findUnnotified()).toHaveLength(0);
+    });
+  });
+
   it("excludes a posting that fails the pre-filter from scoring and the digest", async () => {
     const collector = stubCollector({
       source: "gupy",

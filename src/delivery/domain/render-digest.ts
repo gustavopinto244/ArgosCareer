@@ -26,6 +26,8 @@ const SCORE_FAILURE_LABEL: Record<ScoreFailureReason, string> = {
   invalid_output: "o modelo não retornou uma resposta válida",
   extraction_failed: "falha ao extrair requisitos da vaga",
   matching_failed: "falha ao avaliar os requisitos contra o perfil",
+  max_retries_exceeded:
+    "falhou repetidamente e não será mais tentada automaticamente — descarte manual ou correção do problema necessários",
 };
 
 function renderLocation(posting: ScoredPosting["posting"]): string {
