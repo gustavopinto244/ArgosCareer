@@ -24,6 +24,8 @@ import {
   DEFAULT_DEDUP_CONFIG,
   DedupConfig,
   dedupSimilarPostings,
+  DedupOutcome as DedupSimilarPostingsOutcome,
+  ShadowDuplicateCandidate,
 } from "../persistence/application/dedup-similar-postings";
 import {
   createDatabase,
@@ -466,6 +468,37 @@ export interface DedupOutcome {
   readonly runId: string;
   readonly scanned: number;
   readonly markedDuplicate: number;
+  /** How many shadow candidates layer 2 logged this pass (docs/audit
+   * PR-006) — none of them excluded, all of them recorded as
+   * `posting_events` for review. */
+  readonly shadowCandidateCount: number;
+}
+
+/**
+ * Records one `posting_events` row per shadow candidate `dedupSimilarPostings`
+ * found (docs/audit PR-006, ADR-010 Amendment 3) — the auditability half of
+ * shadow mode. `reason` carries everything a human needs to judge the call
+ * without re-running anything: the canonical it would have merged into, the
+ * two titles compared, and the computed similarity score.
+ */
+function recordShadowDuplicateEvents(
+  postingEventsRepo: PostingEventsRepository,
+  runId: string,
+  candidates: readonly ShadowDuplicateCandidate[],
+  occurredAt: Date,
+): void {
+  for (const candidate of candidates) {
+    postingEventsRepo.record({
+      runId,
+      fingerprint: candidate.candidateFingerprint,
+      stage: "dedup-similarity",
+      outcome: "shadow_candidate",
+      reason:
+        `similarity ${candidate.similarity.toFixed(2)} to ${candidate.canonicalFingerprint} ` +
+        `("${candidate.candidateTitle}" vs "${candidate.canonicalTitle}")`,
+      occurredAt,
+    });
+  }
 }
 
 /** The testable core of `dedup`. Touches only PostingsRepository — no
@@ -477,6 +510,7 @@ export function executeDedup(
 ): DedupOutcome {
   const postingsRepo = new PostingsRepository(db);
   const runsRepo = new RunsRepository(db);
+  const postingEventsRepo = new PostingEventsRepository(db);
   const runId = runsRepo.start("dedup", now());
 
   let outcome;
@@ -489,6 +523,13 @@ export function executeDedup(
     throw cause;
   }
 
+  recordShadowDuplicateEvents(
+    postingEventsRepo,
+    runId,
+    outcome.shadowCandidates,
+    now(),
+  );
+
   runsRepo.finish(runId, now(), "success", {
     duplicateCount: outcome.markedDuplicate,
   });
@@ -497,6 +538,7 @@ export function executeDedup(
     runId,
     scanned: outcome.scanned,
     markedDuplicate: outcome.markedDuplicate,
+    shadowCandidateCount: outcome.shadowCandidates.length,
   };
 }
 
@@ -530,12 +572,19 @@ function executeDedupAndClaim(
   const runsRepo = new RunsRepository(db);
   const dedupRunId = runsRepo.start("dedup", now());
 
-  let outcome: { readonly scanned: number; readonly markedDuplicate: number };
+  let outcome: DedupSimilarPostingsOutcome;
   let claimed: readonly Posting[];
   try {
     const result = db.transaction((tx) => {
       const txRepo = new PostingsRepository(tx);
+      const txPostingEventsRepo = new PostingEventsRepository(tx);
       const dedupOutcome = dedupSimilarPostings(txRepo, dedupConfig);
+      recordShadowDuplicateEvents(
+        txPostingEventsRepo,
+        dedupRunId,
+        dedupOutcome.shadowCandidates,
+        now(),
+      );
       const claimedPostings = txRepo.claimForScoring(scoringRunId, now());
       return { dedupOutcome, claimedPostings };
     });
@@ -554,6 +603,7 @@ function executeDedupAndClaim(
     runId: dedupRunId,
     scanned: outcome.scanned,
     markedDuplicate: outcome.markedDuplicate,
+    shadowCandidateCount: outcome.shadowCandidates.length,
     claimed,
   };
 }
@@ -1079,7 +1129,10 @@ function dedupCommand(args: string[]): void {
   });
 
   console.log(
-    `dedup (run ${outcome.runId}): scanned ${outcome.scanned}, marked ${outcome.markedDuplicate} as duplicates`,
+    `dedup (run ${outcome.runId}): scanned ${outcome.scanned}, ` +
+      `${outcome.shadowCandidateCount} shadow candidate(s) logged (docs/audit PR-006 — ` +
+      `none merged automatically; inspect posting_events or use "restore-duplicate" ` +
+      `to reverse a legacy flag)`,
   );
 }
 
@@ -1193,6 +1246,39 @@ function discardCommand(args: string[]): void {
   console.log(`discard: ${fingerprint} will never be surfaced again`);
 }
 
+/**
+ * Reverses a duplicate flag on one specific posting (docs/audit PR-006) —
+ * the scoped counterpart `restoreDuplicate` gives shadow mode, next to
+ * `dedup --reset`'s blunt "clear everything." Exists mainly for flags a
+ * pre-shadow-mode `dedup` run already set: shadow mode itself never calls
+ * `markDuplicate`, so nothing new needs this going forward, but a legacy
+ * flag is still a real posting silently withheld from every later stage
+ * until it is undone.
+ */
+function restoreDuplicateCommand(args: string[]): void {
+  const { positionals } = parseArgs({ args, allowPositionals: true });
+
+  const fingerprint = positionals[0];
+  if (!fingerprint) {
+    console.error("Usage: argos restore-duplicate <fingerprint>");
+    process.exitCode = 1;
+    return;
+  }
+
+  const db = openDatabase();
+  const restored = new PostingsRepository(db).restoreDuplicate(fingerprint);
+
+  if (!restored) {
+    console.error(
+      `restore-duplicate: ${fingerprint} was not flagged as a duplicate`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  console.log(`restore-duplicate: ${fingerprint} is active again`);
+}
+
 async function main(): Promise<void> {
   const [, , command, ...rest] = process.argv;
 
@@ -1212,9 +1298,12 @@ async function main(): Promise<void> {
     case "discard":
       discardCommand(rest);
       break;
+    case "restore-duplicate":
+      restoreDuplicateCommand(rest);
+      break;
     default:
       console.error(
-        "Usage: argos <collect|dedup|deliver|studyplan|discard> [options]",
+        "Usage: argos <collect|dedup|deliver|studyplan|discard|restore-duplicate> [options]",
       );
       process.exitCode = 1;
   }

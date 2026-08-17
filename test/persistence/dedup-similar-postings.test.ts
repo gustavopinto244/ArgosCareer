@@ -44,10 +44,14 @@ function insert(overrides: Partial<Parameters<typeof createPosting>[0]>) {
   return repository.upsert(posting).posting;
 }
 
+// Shadow mode (docs/audit PR-006, ADR-010 Amendment 3): layer 2 no longer
+// calls `markDuplicate`. Every match is logged as a `shadowCandidate`
+// instead, and both postings stay active — `markedDuplicate` is always 0
+// and `findActive()` never excludes anything this function touches.
 describe("dedupSimilarPostings", () => {
-  it("marks a same-company, similarly-titled, in-window posting as a duplicate", () => {
+  it("logs a same-company, similarly-titled, in-window posting as a shadow candidate, without excluding either posting", () => {
     const canonical = insert({ sourceId: "1", title: "Estágio Back-End" });
-    insert({
+    const candidate = insert({
       sourceId: "2",
       title: "Estágio Back End (Rio de Janeiro)",
       firstSeenAt: new Date("2026-08-12T00:00:00Z"),
@@ -56,20 +60,25 @@ describe("dedupSimilarPostings", () => {
     const outcome = dedupSimilarPostings(repository);
 
     expect(outcome.scanned).toBe(2);
-    expect(outcome.markedDuplicate).toBe(1);
+    expect(outcome.markedDuplicate).toBe(0);
+    expect(outcome.shadowCandidates).toEqual([
+      expect.objectContaining({
+        candidateFingerprint: candidate.fingerprint,
+        canonicalFingerprint: canonical.fingerprint,
+      }),
+    ]);
 
     const active = repository.findActive();
-    expect(active).toHaveLength(1);
-    expect(active[0]?.fingerprint).toBe(canonical.fingerprint);
+    expect(active).toHaveLength(2);
   });
 
-  it("does not mark postings from different companies as duplicates, regardless of title", () => {
+  it("does not log postings from different companies as shadow candidates, regardless of title", () => {
     insert({ sourceId: "1", company: "Empresa X", title: "Estágio Backend" });
     insert({ sourceId: "2", company: "Empresa Y", title: "Estágio Backend" });
 
     const outcome = dedupSimilarPostings(repository);
 
-    expect(outcome.markedDuplicate).toBe(0);
+    expect(outcome.shadowCandidates).toHaveLength(0);
     expect(repository.findActive()).toHaveLength(2);
   });
 
@@ -83,7 +92,7 @@ describe("dedupSimilarPostings", () => {
       company: "Empresa X",
       title: "Estágio Back-End",
     });
-    insert({
+    const candidate = insert({
       sourceId: "2",
       company: "Empresa X S.A.",
       title: "Estágio Back End (Rio de Janeiro)",
@@ -92,10 +101,12 @@ describe("dedupSimilarPostings", () => {
 
     const outcome = dedupSimilarPostings(repository);
 
-    expect(outcome.markedDuplicate).toBe(1);
-    const active = repository.findActive();
-    expect(active).toHaveLength(1);
-    expect(active[0]?.fingerprint).toBe(canonical.fingerprint);
+    expect(outcome.shadowCandidates).toEqual([
+      expect.objectContaining({
+        candidateFingerprint: candidate.fingerprint,
+        canonicalFingerprint: canonical.fingerprint,
+      }),
+    ]);
   });
 
   it("still keeps two genuinely different companies apart even when one carries a legal suffix", () => {
@@ -112,20 +123,20 @@ describe("dedupSimilarPostings", () => {
 
     const outcome = dedupSimilarPostings(repository);
 
-    expect(outcome.markedDuplicate).toBe(0);
+    expect(outcome.shadowCandidates).toHaveLength(0);
     expect(repository.findActive()).toHaveLength(2);
   });
 
-  it("does not mark same-company postings with dissimilar titles as duplicates", () => {
+  it("does not log same-company postings with dissimilar titles as shadow candidates", () => {
     insert({ sourceId: "1", title: "Estágio Backend" });
     insert({ sourceId: "2", title: "Vendedor de Loja" });
 
     const outcome = dedupSimilarPostings(repository);
 
-    expect(outcome.markedDuplicate).toBe(0);
+    expect(outcome.shadowCandidates).toHaveLength(0);
   });
 
-  it("does not merge two unrelated same-company postings whose titles are both pure stopwords (docs/audit AC-011)", () => {
+  it("does not match two unrelated same-company postings whose titles are both pure stopwords (docs/audit AC-011)", () => {
     // The real false-positive this guards against: "Estágio" and "Trainee"
     // both reduce to nothing once stopwords are stripped, and used to score
     // a perfect 1 (identical) -- merging a technical internship with an
@@ -139,11 +150,11 @@ describe("dedupSimilarPostings", () => {
 
     const outcome = dedupSimilarPostings(repository);
 
-    expect(outcome.markedDuplicate).toBe(0);
+    expect(outcome.shadowCandidates).toHaveLength(0);
     expect(repository.findActive()).toHaveLength(2);
   });
 
-  it("does not mark a similar posting outside the time window as a duplicate", () => {
+  it("does not log a similar posting outside the time window as a shadow candidate", () => {
     insert({
       sourceId: "1",
       title: "Estágio Back-End",
@@ -160,11 +171,11 @@ describe("dedupSimilarPostings", () => {
       windowDays: 14,
     });
 
-    expect(outcome.markedDuplicate).toBe(0);
+    expect(outcome.shadowCandidates).toHaveLength(0);
   });
 
-  it("keeps the earliest-seen posting as canonical, regardless of insertion order", () => {
-    insert({
+  it("names the earliest-seen posting as canonical in the shadow candidate, regardless of insertion order", () => {
+    const later = insert({
       sourceId: "2",
       title: "Estágio Back End",
       firstSeenAt: new Date("2026-08-12T00:00:00Z"),
@@ -175,14 +186,19 @@ describe("dedupSimilarPostings", () => {
       firstSeenAt: new Date("2026-08-10T00:00:00Z"),
     });
 
-    dedupSimilarPostings(repository);
+    const outcome = dedupSimilarPostings(repository);
 
-    const active = repository.findActive();
-    expect(active).toHaveLength(1);
-    expect(active[0]?.fingerprint).toBe(earlier.fingerprint);
+    expect(outcome.shadowCandidates).toEqual([
+      expect.objectContaining({
+        canonicalFingerprint: earlier.fingerprint,
+        candidateFingerprint: later.fingerprint,
+      }),
+    ]);
+    // Neither posting is excluded -- shadow mode never touches `findActive`.
+    expect(repository.findActive()).toHaveLength(2);
   });
 
-  it("is a no-op the second time it runs over the same corpus — independently re-runnable without re-collecting", () => {
+  it("logs the same shadow candidate every time it runs over an unchanged corpus -- re-running is safe and repeatable", () => {
     insert({ sourceId: "1", title: "Estágio Back-End" });
     insert({
       sourceId: "2",
@@ -193,14 +209,14 @@ describe("dedupSimilarPostings", () => {
     const first = dedupSimilarPostings(repository);
     const second = dedupSimilarPostings(repository);
 
-    expect(first.markedDuplicate).toBe(1);
-    expect(second.markedDuplicate).toBe(0);
-    expect(second.scanned).toBe(1);
+    expect(first.shadowCandidates).toHaveLength(1);
+    expect(second.shadowCandidates).toHaveLength(1);
+    expect(second.scanned).toBe(2);
   });
 
-  it("never deletes a row — a marked duplicate is still findable by fingerprint", () => {
+  it("never deletes or excludes a row -- both postings stay findable and active", () => {
     insert({ sourceId: "1", title: "Estágio Back-End" });
-    const duplicate = insert({
+    const other = insert({
       sourceId: "2",
       title: "Estágio Back End",
       firstSeenAt: new Date("2026-08-11T00:00:00Z"),
@@ -208,18 +224,21 @@ describe("dedupSimilarPostings", () => {
 
     dedupSimilarPostings(repository);
 
-    expect(repository.findByFingerprint(duplicate.fingerprint)).not.toBeNull();
+    expect(repository.findByFingerprint(other.fingerprint)).not.toBeNull();
     expect(repository.count()).toBe(2);
+    expect(repository.findActive()).toHaveLength(2);
   });
 });
 
 describe("dedupSimilarPostings — locations must not contradict", () => {
   // The bug this covers, measured on the real corpus 2026-08-16: 267 of 406
-  // marked duplicates were postings in DIFFERENT cities. A company hiring
-  // the same role in two cities is hiring twice, and flagging one discards a
-  // real opening — including a "Pessoa Desenvolvedora Backend Python" in Rio.
+  // marked duplicates were postings in DIFFERENT cities, back when this
+  // function still merged destructively. A company hiring the same role in
+  // two cities is hiring twice, and treating one as a shadow candidate of
+  // the other would still be a wrong signal even though nothing is excluded
+  // anymore.
 
-  it("does not merge the same role at the same company in two cities", () => {
+  it("does not log the same role at the same company in two cities as a shadow candidate", () => {
     insert({
       sourceId: "1",
       title: "Consultor de Desenvolvimento",
@@ -233,11 +252,11 @@ describe("dedupSimilarPostings — locations must not contradict", () => {
 
     const outcome = dedupSimilarPostings(repository);
 
-    expect(outcome.markedDuplicate).toBe(0);
+    expect(outcome.shadowCandidates).toHaveLength(0);
     expect(repository.findActive()).toHaveLength(2);
   });
 
-  it("still merges the same role at the same company in the same city", () => {
+  it("still logs the same role at the same company in the same city", () => {
     // Titles must differ after normalization, or layer 1 catches them on the
     // fingerprint and layer 2 never gets a look — "Backend" and "Back-end"
     // normalize identically, which is itself the point of layer 1.
@@ -249,13 +268,13 @@ describe("dedupSimilarPostings — locations must not contradict", () => {
 
     const outcome = dedupSimilarPostings(repository);
 
-    expect(outcome.markedDuplicate).toBe(1);
+    expect(outcome.shadowCandidates).toHaveLength(1);
   });
 
-  it("does not merge when only one side states a city", () => {
-    // Exactly the shape that ate the real Backend Python posting: the
-    // canonical had no city at all, so nothing contradicted and everything
-    // merged. Unknown is not agreement.
+  it("does not log a shadow candidate when only one side states a city", () => {
+    // Exactly the shape that ate the real Backend Python posting under the
+    // old destructive behavior: the canonical had no city at all, so
+    // nothing contradicted and everything merged. Unknown is not agreement.
     insert({
       sourceId: "1",
       title: "Pessoa Desenvolvedora Backend Python",
@@ -269,10 +288,10 @@ describe("dedupSimilarPostings — locations must not contradict", () => {
 
     const outcome = dedupSimilarPostings(repository);
 
-    expect(outcome.markedDuplicate).toBe(0);
+    expect(outcome.shadowCandidates).toHaveLength(0);
   });
 
-  it("merges when both sides are equally unknown — nothing contradicts", () => {
+  it("logs a shadow candidate when both sides are equally unknown — nothing contradicts", () => {
     insert({
       sourceId: "1",
       title: "Estágio em Dados",
@@ -286,15 +305,18 @@ describe("dedupSimilarPostings — locations must not contradict", () => {
 
     const outcome = dedupSimilarPostings(repository);
 
-    expect(outcome.markedDuplicate).toBe(1);
+    expect(outcome.shadowCandidates).toHaveLength(1);
   });
 });
 
 describe("PostingsRepository.clearDuplicateFlags", () => {
   it("restores flagged postings whole, so a corrected pass can re-decide", () => {
-    insert({ sourceId: "1", title: "Estágio em Dados" });
-    insert({ sourceId: "2", title: "Estágio em Dados Analytics" });
-    dedupSimilarPostings(repository);
+    // `dedupSimilarPostings` itself never calls `markDuplicate` anymore
+    // (shadow mode) -- this simulates a flag set by a pre-shadow-mode run,
+    // which `clearDuplicateFlags` must still be able to undo.
+    const a = insert({ sourceId: "1", title: "Estágio em Dados" });
+    const b = insert({ sourceId: "2", title: "Estágio em Dados Analytics" });
+    repository.markDuplicate(b.fingerprint, a.fingerprint);
     expect(repository.findActive()).toHaveLength(1);
 
     const cleared = repository.clearDuplicateFlags();

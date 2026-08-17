@@ -1009,10 +1009,12 @@ describe("executeDedup", () => {
     const outcome = executeDedup(db);
 
     expect(outcome.scanned).toBe(2);
-    expect(outcome.markedDuplicate).toBe(1);
+    // Shadow mode (docs/audit PR-006): logged, not merged — both stay active.
+    expect(outcome.markedDuplicate).toBe(0);
+    expect(outcome.shadowCandidateCount).toBe(1);
 
     const postingsRepo = new PostingsRepository(db);
-    expect(postingsRepo.findActive()).toHaveLength(1);
+    expect(postingsRepo.findActive()).toHaveLength(2);
   });
 
   it("is independently re-runnable — a second run over an unchanged corpus marks nothing new", () => {
@@ -1233,13 +1235,22 @@ describe("executeIngestExternal", () => {
 });
 
 describe("executeDeliver", () => {
-  it("catches a near-duplicate from external ingest before scoring, without a separate dedup run ever having been called (docs/audit AC-005)", async () => {
+  it("runs its own dedup pass over a near-duplicate from external ingest before scoring, without a separate dedup run ever having been called (docs/audit AC-005, AC-010 Amendment 3)", async () => {
     // The exact scenario AC-005 names: Indeed/Catho/LinkedIn ingest via
     // executeIngestExternal, which normalizes/upserts but never runs
     // dedupSimilarPostings itself -- only the scheduler's own collection
     // cycle does, on its own schedule. Two near-duplicate postings land via
     // external ingest and executeDeliver is called directly, with no
     // executeDedup call anywhere in between.
+    //
+    // Shadow mode (docs/audit PR-006) changed what "catches" means here:
+    // layer 2 no longer excludes the near-duplicate from scoring -- both
+    // postings below get scored and delivered, same as if they were
+    // genuinely distinct openings. What AC-005's atomic wrapping still
+    // guarantees is that the scan happens at all, inside the same
+    // transaction as the scoring claim, and is recorded: a shadow-candidate
+    // `posting_events` row exists for the pair even though executeDeliver
+    // was called directly, with no separate `executeDedup` in between.
     const normalize = (
       raw: { source: string; sourceId: string; payload: unknown },
       now: Date,
@@ -1284,14 +1295,26 @@ describe("executeDeliver", () => {
       deliverProfile(),
     );
 
-    // Only one of the two near-duplicates reaches scoring -- the barrier
-    // dedup executeDeliver now runs internally caught the second one before
-    // any Stage A/B spend, exactly what AC-005 requires.
-    expect(outcome.filtered).toBe(1);
-    expect(outcome.scored).toBe(1);
+    // Both near-duplicates reach scoring -- shadow mode never excludes.
+    expect(outcome.filtered).toBe(2);
+    expect(outcome.scored).toBe(2);
 
     const postingsRepo = new PostingsRepository(db);
-    expect(postingsRepo.findActive()).toHaveLength(1);
+    const active = postingsRepo.findActive();
+    expect(active).toHaveLength(2);
+
+    // But the internal dedup pass still ran and still logged the pair --
+    // this is what AC-005's atomic wrapping actually guarantees now.
+    const laterPosting = active.find((p) => p.sourceId === "2");
+    const events = new PostingEventsRepository(db).findByFingerprint(
+      laterPosting!.fingerprint,
+    );
+    expect(
+      events.some(
+        (e) =>
+          e.stage === "dedup-similarity" && e.outcome === "shadow_candidate",
+      ),
+    ).toBe(true);
   });
 
   it("takes an unnotified posting end to end: pre-filter, score, digest, notify, mark notified", async () => {

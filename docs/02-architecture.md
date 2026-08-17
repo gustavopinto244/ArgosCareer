@@ -162,11 +162,23 @@ role in two cities had one of the two silently discarded — 267 of 406 flagged
 duplicates, measured, including a "Pessoa Desenvolvedora Backend Python" in
 Rio flagged against a canonical posting that stated no city at all.
 
+**Layer 2 runs in shadow mode (ADR-010 Amendment 3): it never excludes.**
+Two more real false positives at the same threshold, found without new data
+after Amendment 1's repair, showed the threshold has no calibration behind
+it. A match is logged — `posting_events`, `stage: "dedup-similarity"` — for
+a human to review; both postings stay active. Layer 1 (the fingerprint) is
+the only dedup mechanism that excludes anything automatically. `argos
+restore-duplicate <fingerprint>` reverses a flag a pre-shadow-mode run left
+behind; `argos dedup --reset` clears every legacy flag at once.
+
 A posting already seen is **never reprocessed and never re-notified** — this is
 both a cost control (stage A and B are the expensive stages) and a usability
-requirement (criterion 2 in `01-vision-and-scope.md`).
+requirement (criterion 2 in `01-vision-and-scope.md`). That still holds for
+layer 1 (exact fingerprint match). Layer 2 candidates are logged, not
+excluded, so a genuine repost may surface a second digest entry until the
+threshold is calibrated — an accepted, bounded cost, not a bug.
 
-Reasoning and thresholds: ADR-010 and its amendment.
+Reasoning and thresholds: ADR-010 and its amendments.
 
 ### Source topology — how much overlap to expect, and why
 
