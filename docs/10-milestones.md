@@ -334,9 +334,15 @@ deliberate deferral with a stated reason, not a gap.
       honestly rather than assumed. "The nightly digest still working while
       Hermes is stopped" is trivially true today — nothing consumes the API
       yet — and stops being a meaningful test until Hermes exists to stop.
-- [x] n8n consuming the API for side effects — **N/A.** No `N8nCollector`
-      exists in code (still unimplemented, same standing note as M8), so
-      there is nothing for it to consume yet.
+- [x] n8n consuming the API for side effects — **real as of PR #64
+      (ADR-029):** the user's n8n workflow POSTs LinkedIn alert-email
+      extractions to `POST /runs/collect/external`, the same
+      `ApiKeyGuard`-authenticated boundary ADR-027 built for Indeed. This is
+      the P2 LinkedIn source (`After M6`), not the P3 `N8nCollector` behind
+      `CollectorPort` this criterion originally meant — that one still does
+      not exist in code. Kept checked because the underlying claim ("n8n can
+      consume this API for a real side effect") is now demonstrated for
+      real, by a different source than first planned.
 - [x] ADR recording the API boundary — [ADR-017](adr/017-tailscale-and-bearer-key-for-the-api-boundary.md):
       Tailscale over the existing Cloudflare Tunnel pattern (the only
       intended caller is one already-tailnet-joined machine, not the public
@@ -415,8 +421,17 @@ One per pull request, each meeting the M3 criteria:
       `collectors/indeed/`, systemd-scheduled twice daily). Google Jobs
       itself was probed and returned zero results — not pursued, not
       implemented
-- [ ] LinkedIn, public visitor endpoints only — **never authenticated with a
-      personal session or cookies** (`CLAUDE.md` §3)
+- [x] LinkedIn, **not scraped** — the user's own opt-in job-alert emails,
+      parsed by an n8n workflow the user controls and POSTed to the same
+      `/runs/collect/external` boundary ADR-027 built for Indeed
+      (`linkedin-alert-schema.ts`, `linkedin-alert-normalizer.ts`, ADR-029,
+      PR #64). Never authenticates with a personal LinkedIn session or
+      cookies (`CLAUDE.md` §3) — no LinkedIn endpoint is queried at all. The
+      receiving side is in this repository and tested; which alert searches
+      to subscribe to and wiring the n8n workflow itself are the user's own
+      infrastructure, not tracked here. A real, permanent limit, not a gap:
+      the alert email carries no description, so a LinkedIn posting always
+      trips `lowConfidence` and caps at `review`, never `apply`
 - [ ] `N8nCollector` behind `CollectorPort`, with one long-tail source proving
       it (ADR-008). Workflow exported and committed to `n8n/`; core verified
       unaffected with n8n stopped
