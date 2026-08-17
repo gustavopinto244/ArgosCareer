@@ -46,17 +46,29 @@ const ALLOWED_CATHO_HOST = "www.catho.com.br";
 
 /**
  * Strict allowlist: exactly `https://www.catho.com.br`, nothing else — not
- * a subdomain, not `http:`, not a different TLD. Used twice: on every
- * sitemap-derived candidate before it is ever navigated to, and again on
- * the final URL after navigation, since a same-domain page could still
- * carry an external redirect the sitemap URL alone would not reveal.
+ * a subdomain, not `http:`, not a different TLD, not a nonstandard port
+ * (docs/audit PR-020: `URL.hostname` never includes the port, so checking
+ * only `hostname` silently accepted `https://www.catho.com.br:9999/...` —
+ * this docstring already promised "exactly" the origin and the code did
+ * not deliver on it). `parsed.port` is `""` for the scheme's default port
+ * (443 for `https:`), which is the only value accepted here.
+ *
+ * Used on every URL this collector's browser or `fetch` could reach before
+ * that request is made — sitemap child URLs (`docs/audit PR-020`; a
+ * compromised or malformed `<loc>` entry in the trusted sitemap index was
+ * previously filtered only by a path-suffix regex, no host check at all),
+ * every sitemap-derived candidate before it is ever navigated to, and
+ * again on the final URL after navigation, since a same-domain page could
+ * still carry an external redirect the sitemap URL alone would not
+ * reveal.
  */
 export function isAllowedCathoUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
     return (
       parsed.protocol === "https:" &&
-      parsed.hostname.toLowerCase() === ALLOWED_CATHO_HOST
+      parsed.hostname.toLowerCase() === ALLOWED_CATHO_HOST &&
+      parsed.port === ""
     );
   } catch {
     return false;
