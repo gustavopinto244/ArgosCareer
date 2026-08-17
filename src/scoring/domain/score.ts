@@ -143,6 +143,13 @@ export function computeScore(
   let score = rawScore;
   if (blockingFailure) score = Math.min(score, config.blockingCapScore);
   if (tracks.length === 0) score = Math.min(score, config.unknownTrackCapScore);
+  // A correctly-validated config (weights summing to 100, coverage/alignment
+  // terms already bounded to [0, 1] by construction) can never produce a
+  // score outside [0, 100] — this clamp is a second, independent guarantee
+  // of the same invariant CriteriaSchema enforces at load time (docs/audit
+  // AC-025), not a substitute for it: a config loaded from anywhere that
+  // skips validation must still never hand a caller an out-of-range score.
+  score = Math.min(100, Math.max(0, score));
 
   // Counts verifiable requirements, not all of them (ADR-015). Excluding
   // traits from coverage opens a hole this closes: a posting asking only for

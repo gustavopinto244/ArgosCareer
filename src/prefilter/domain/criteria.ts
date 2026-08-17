@@ -28,17 +28,52 @@ export const LocationCriteriaSchema = z.object({
  * with the pre-filter's track classification rather than duplicated here).
  */
 export const ScoringConfigSchema = z.object({
-  weights: z.object({
-    mandatory: z.number(),
-    desirable: z.number(),
-    trackAlignment: z.number(),
-  }),
-  thresholds: z.object({
-    apply: z.number(),
-    review: z.number(),
-  }),
+  /**
+   * Must sum to 100 (docs/audit AC-025) — `computeScore`'s formula
+   * (`docs/04-scoring-model.md`) is `weights.mandatory * mandatoryCoverage +
+   * weights.desirable * desirableCoverage + weights.trackAlignment *
+   * trackAlignment`, and every coverage/alignment term is itself bounded to
+   * [0, 1]. A score in the documented [0, 100] range is only guaranteed
+   * when the three weights add up to exactly 100 — a typo like
+   * `mandatory: 350` would otherwise produce a score over 100 with no
+   * startup failure to catch it.
+   */
+  weights: z
+    .object({
+      mandatory: z.number().nonnegative(),
+      desirable: z.number().nonnegative(),
+      trackAlignment: z.number().nonnegative(),
+    })
+    .refine(
+      (w) =>
+        Math.abs(w.mandatory + w.desirable + w.trackAlignment - 100) < 1e-9,
+      {
+        message:
+          "scoring.weights.mandatory + desirable + trackAlignment must sum to 100",
+      },
+    ),
+  /**
+   * `apply` must exceed `review` (docs/audit AC-025) — `computeVerdict`
+   * reads them as a descending ladder (`score >= apply` before `score >=
+   * review`); an inverted or equal pair would make the `apply` verdict
+   * unreachable, or the two verdicts silently interchangeable, with no
+   * error anywhere in the pipeline to say so.
+   */
+  thresholds: z
+    .object({
+      apply: z.number().min(0).max(100),
+      review: z.number().min(0).max(100),
+    })
+    .refine((t) => t.apply > t.review, {
+      message:
+        "scoring.thresholds.apply must be greater than thresholds.review",
+    }),
   minExtractedRequirements: z.number().int().nonnegative(),
-  blockingCapScore: z.number(),
+  /** [0, 100] (docs/audit AC-025) — a cap outside the score's own valid
+   * range cannot do its job: negative caps everything to a negative
+   * score, and anything above 100 caps nothing a valid score could ever
+   * reach anyway. */
+  blockingCapScore: z.number().min(0).max(100),
   /**
    * Score ceiling when a posting matches no configured track (ADR-025).
    * `trackAlignment` alone caps out at 15% of the formula, which is not
@@ -48,7 +83,7 @@ export const ScoringConfigSchema = z.object({
    * criteria file predating it should fail validation rather than silently
    * keep producing the inflated scores this exists to fix.
    */
-  unknownTrackCapScore: z.number(),
+  unknownTrackCapScore: z.number().min(0).max(100),
   /**
    * How many stage B requirement calls may be in flight at once (ADR-022).
    * Defaulted, not required, so a criteria file written before this existed
@@ -222,11 +257,18 @@ export const CriteriaSchema = z.object({
       automation: z.array(z.string().min(1)).default([]),
     })
     .default({ dev: [], security: [], automation: [] }),
+  /**
+   * Each in [0, 1] (docs/audit AC-025) — `computeTrackAlignment` takes the
+   * max of the matched tracks' weights and multiplies it by
+   * `scoring.weights.trackAlignment`'s share of the 100-point total, so a
+   * weight outside [0, 1] would let this one term alone push the score
+   * above 100 or below 0 regardless of every other term.
+   */
   trackWeights: z.object({
-    dev: z.number(),
-    security: z.number(),
-    automation: z.number(),
-    unknown: z.number(),
+    dev: z.number().min(0).max(1),
+    security: z.number().min(0).max(1),
+    automation: z.number().min(0).max(1),
+    unknown: z.number().min(0).max(1),
   }),
   scoring: ScoringConfigSchema,
   /**

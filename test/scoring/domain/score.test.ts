@@ -421,3 +421,35 @@ describe("computeScore — non-verifiable requirements (ADR-015)", () => {
     expect(outcome.breakdown.mandatoryCoverage).toBe(0);
   });
 });
+
+describe("computeScore — score is always clamped to [0, 100] (docs/audit AC-025)", () => {
+  // CriteriaSchema rejects this config at load time (weights must sum to
+  // 100) -- this is the defense-in-depth guarantee for a config that
+  // reaches computeScore some other way, e.g. constructed directly in a
+  // script or a future caller that skips CriteriaSchema.
+  it("clamps a score above 100 when weights sum well past 100", () => {
+    const config: ScoringConfig = {
+      ...baseConfig,
+      weights: { mandatory: 350, desirable: 0, trackAlignment: 0 },
+    };
+    const outcome = computeScore(
+      [createMatch(requirement("mandatory"), "met", "e")],
+      ["dev"],
+      config,
+    );
+    expect(outcome.score).toBe(100);
+  });
+
+  it("clamps a score below 0 when a weight is negative", () => {
+    const config: ScoringConfig = {
+      ...baseConfig,
+      weights: { mandatory: -50, desirable: 0, trackAlignment: 0 },
+    };
+    const outcome = computeScore(
+      [createMatch(requirement("mandatory"), "met", "e")],
+      ["dev"],
+      config,
+    );
+    expect(outcome.score).toBe(0);
+  });
+});
