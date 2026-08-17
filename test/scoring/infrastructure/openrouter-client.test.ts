@@ -1,5 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
-import { OpenRouterClient } from "../../../src/scoring/infrastructure/openrouter-client";
+import { CircuitBreaker } from "../../../src/scoring/infrastructure/circuit-breaker";
+import {
+  LlmTransportError,
+  OpenRouterClient,
+} from "../../../src/scoring/infrastructure/openrouter-client";
+
+const ZERO_OUTCOMES = {
+  success: 0,
+  timeout: 0,
+  networkError: 0,
+  rateLimited: 0,
+  serverError: 0,
+  providerError: 0,
+  authError: 0,
+  configError: 0,
+  invalidEnvelope: 0,
+  invalidOutput: 0,
+  httpError: 0,
+};
 
 // No test makes a real network call (docs/07-testing-strategy.md) — fetch is
 // injected and faked for every scenario below.
@@ -78,6 +96,17 @@ describe("OpenRouterClient.complete — failure, throws with a clear message", (
     );
   });
 
+  it("throws an LlmTransportError carrying the failure category, not just a message (docs/audit AC-016)", async () => {
+    const fetchImpl = vi.fn(async () => new Response("boom", { status: 500 }));
+    const error = await client(fetchImpl)
+      .complete("prompt")
+      .catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(LlmTransportError);
+    expect((error as LlmTransportError).category).toBe("serverError");
+    expect((error as LlmTransportError).status).toBe(500);
+  });
+
   it("throws on a malformed (non-JSON) response body", async () => {
     const fetchImpl = vi.fn(
       async () =>
@@ -148,14 +177,7 @@ describe("OpenRouterClient.getUsage — attempt accounting (docs/audit AC-015)",
     const usage = c.getUsage();
     expect(usage.calls).toBe(1);
     expect(usage.attempts).toBe(1);
-    expect(usage.attemptsByOutcome).toEqual({
-      success: 1,
-      httpError: 0,
-      timeout: 0,
-      networkError: 0,
-      invalidEnvelope: 0,
-      invalidOutput: 0,
-    });
+    expect(usage.attemptsByOutcome).toEqual({ ...ZERO_OUTCOMES, success: 1 });
     expect(usage.attemptsWithoutUsage).toBe(0);
     expect(usage.costUsd).toBeCloseTo(0.001);
   });
@@ -170,7 +192,9 @@ describe("OpenRouterClient.getUsage — attempt accounting (docs/audit AC-015)",
     const usage = c.getUsage();
     expect(usage.calls).toBe(0);
     expect(usage.attempts).toBe(1);
-    expect(usage.attemptsByOutcome.httpError).toBe(1);
+    // 402 is not auth (401/403) or rate-limiting (429) -- it falls to the
+    // permanent "malformed/unsupported request" bucket (docs/audit AC-016).
+    expect(usage.attemptsByOutcome.configError).toBe(1);
     expect(usage.attemptsWithoutUsage).toBe(1);
   });
 
@@ -291,13 +315,188 @@ describe("OpenRouterClient.getUsage — attempt accounting (docs/audit AC-015)",
     expect(usage.attempts).toBe(2);
     expect(usage.calls).toBe(1);
     expect(usage.attemptsByOutcome).toEqual({
+      ...ZERO_OUTCOMES,
       success: 1,
-      httpError: 1,
-      timeout: 0,
-      networkError: 0,
-      invalidEnvelope: 0,
-      invalidOutput: 0,
+      serverError: 1,
     });
     expect(usage.attemptsWithoutUsage).toBe(1);
+  });
+});
+
+describe("OpenRouterClient.complete — HTTP status taxonomy (docs/audit AC-016)", () => {
+  it.each([
+    [401, "authError"],
+    [403, "authError"],
+    [429, "rateLimited"],
+    [400, "configError"],
+    [404, "configError"],
+    [422, "configError"],
+    [500, "serverError"],
+    [507, "serverError"],
+    [502, "providerError"],
+    [503, "providerError"],
+    [504, "providerError"],
+  ] as const)("classifies status %i as %s", async (status, category) => {
+    const fetchImpl = vi.fn(async () => new Response("x", { status }));
+    const c = client(fetchImpl);
+    const error = await c.complete("prompt").catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(LlmTransportError);
+    expect((error as LlmTransportError).category).toBe(category);
+    expect(c.getUsage().attemptsByOutcome[category]).toBe(1);
+  });
+
+  it("parses a numeric Retry-After header into milliseconds, clamped to a sane ceiling", async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response("slow down", {
+          status: 429,
+          headers: { "retry-after": "2" },
+        }),
+    );
+    const error = await client(fetchImpl)
+      .complete("prompt")
+      .catch((e: unknown) => e);
+
+    expect((error as LlmTransportError).retryAfterMs).toBe(2000);
+  });
+
+  it("clamps an unreasonably large Retry-After rather than obeying it verbatim", async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response("slow down", {
+          status: 429,
+          headers: { "retry-after": "3600" },
+        }),
+    );
+    const error = await client(fetchImpl)
+      .complete("prompt")
+      .catch((e: unknown) => e);
+
+    expect((error as LlmTransportError).retryAfterMs).toBe(30_000);
+  });
+
+  it("parses an HTTP-date Retry-After header relative to now", async () => {
+    const future = new Date(Date.now() + 5_000).toUTCString();
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response("slow down", {
+          status: 429,
+          headers: { "retry-after": future },
+        }),
+    );
+    const error = await client(fetchImpl)
+      .complete("prompt")
+      .catch((e: unknown) => e);
+
+    const retryAfterMs = (error as LlmTransportError).retryAfterMs;
+    expect(retryAfterMs).toBeGreaterThan(3_000);
+    expect(retryAfterMs).toBeLessThanOrEqual(5_000);
+  });
+
+  it("leaves retryAfterMs undefined when the header is absent or unparseable", async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response("slow down", {
+          status: 429,
+          headers: { "retry-after": "not a date or a number" },
+        }),
+    );
+    const error = await client(fetchImpl)
+      .complete("prompt")
+      .catch((e: unknown) => e);
+
+    expect((error as LlmTransportError).retryAfterMs).toBeUndefined();
+  });
+});
+
+describe("OpenRouterClient.complete — circuit breaker (docs/audit AC-016)", () => {
+  it("blocks calls without reaching fetch once the breaker is open", async () => {
+    const fetchImpl = vi.fn(async () => new Response("boom", { status: 500 }));
+    const clock = 0;
+    const breaker = new CircuitBreaker({
+      failureThreshold: 3,
+      cooldownMs: 30_000,
+      now: () => clock,
+    });
+    const c = new OpenRouterClient({
+      apiKey: "k",
+      model: "m",
+      fetchImpl,
+      circuitBreaker: breaker,
+    });
+
+    await expect(c.complete("p1")).rejects.toThrow();
+    await expect(c.complete("p2")).rejects.toThrow();
+    await expect(c.complete("p3")).rejects.toThrow();
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+
+    const error = await c.complete("p4").catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(LlmTransportError);
+    expect((error as LlmTransportError).category).toBe("circuitOpen");
+    expect(fetchImpl).toHaveBeenCalledTimes(3); // blocked, not a 4th network call
+
+    const usage = c.getUsage();
+    expect(usage.attempts).toBe(3);
+    expect(usage.blockedByCircuit).toBe(1);
+  });
+
+  it("allows one trial call through after the cooldown, and closes again on success", async () => {
+    let call = 0;
+    const fetchImpl = vi.fn(async () => {
+      call += 1;
+      return call <= 2
+        ? new Response("boom", { status: 500 })
+        : jsonResponse({ choices: [{ message: { content: "recovered" } }] });
+    });
+    let clock = 0;
+    const breaker = new CircuitBreaker({
+      failureThreshold: 2,
+      cooldownMs: 10_000,
+      now: () => clock,
+    });
+    const c = new OpenRouterClient({
+      apiKey: "k",
+      model: "m",
+      fetchImpl,
+      circuitBreaker: breaker,
+    });
+
+    await expect(c.complete("p1")).rejects.toThrow();
+    await expect(c.complete("p2")).rejects.toThrow();
+    // Breaker is open now -- blocked without reaching fetch.
+    await expect(c.complete("p3")).rejects.toThrow();
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+
+    clock += 10_000; // cooldown elapsed
+    await expect(c.complete("p4")).resolves.toBe("recovered");
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+
+    // Closed again -- a subsequent failure needs the full threshold once more.
+    await expect(c.complete("p5")).resolves.toBe("recovered");
+  });
+
+  it("does not count a permanent failure (auth/config) toward opening the breaker", async () => {
+    const fetchImpl = vi.fn(async () => new Response("nope", { status: 401 }));
+    const clock = 0;
+    const breaker = new CircuitBreaker({
+      failureThreshold: 2,
+      cooldownMs: 10_000,
+      now: () => clock,
+    });
+    const c = new OpenRouterClient({
+      apiKey: "k",
+      model: "m",
+      fetchImpl,
+      circuitBreaker: breaker,
+    });
+
+    await expect(c.complete("p1")).rejects.toThrow();
+    await expect(c.complete("p2")).rejects.toThrow();
+    await expect(c.complete("p3")).rejects.toThrow();
+
+    // Still closed -- every failure reached fetch, none were blocked.
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(c.getUsage().blockedByCircuit).toBe(0);
   });
 });

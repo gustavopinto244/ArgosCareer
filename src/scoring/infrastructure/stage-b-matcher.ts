@@ -137,6 +137,7 @@ export class StageBMatcher {
         MatchOutputSchema,
         this.ask,
         prompt,
+        { operationLabel: `stage-b:${fingerprint}:${requirement.text}` },
       );
       if (!result.ok) return { ok: false, attempts: result.attempts };
 
