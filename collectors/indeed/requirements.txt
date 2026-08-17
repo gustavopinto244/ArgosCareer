@@ -1,0 +1,10 @@
+# Pinned exactly, not a range (docs/audit AC-030): an unpinned `pip install
+# python-jobspy requests` re-resolved on every image rebuild, so the same
+# commit could silently pick up a different jobspy release with a different
+# Indeed scraper -- including the hardcoded mobile User-Agent ADR-028's
+# exception is scoped to specifically. Bumping either version here is a
+# deliberate, reviewable change, not a rebuild side effect -- and ADR-028's
+# "verified in its source" UA claim should be re-checked against the new
+# version before bumping python-jobspy.
+python-jobspy==1.1.82
+requests==2.34.2
