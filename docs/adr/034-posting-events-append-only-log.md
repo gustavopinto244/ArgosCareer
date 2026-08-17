@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted
+Accepted — amended 2026-08-17, see
+[Amendment 1](#amendment-1--2026-08-17-collection-joins-the-covered-stages)
 
 ## Date
 
@@ -119,3 +120,44 @@ this table.
 `executeDeliver`; reverting means dropping the three `record()` calls and
 leaving the table unused (SQLite has no cheap `DROP TABLE` migration story
 here, but an unused additive table costs nothing at rest).
+
+## Amendment 1 — 2026-08-17: collection joins the covered stages
+
+A post-remediation audit (`docs/audit`, PR-021) named collection by name
+as one of the gaps this ADR's own "deliberately not solved here" section
+had already flagged in spirit: "collection schema rejection, normalization
+rejection, too-old collection drops... are absent." Two other stages
+named in the same finding were already closed by the time PR-021 was
+read — dedup's canonical/duplicate relation got its own coverage in
+ADR-010 Amendment 3 (`stage: "dedup-similarity"`), landing the same day
+as this amendment but as a separate, independent fix. Collection had none
+at all.
+
+**Decision:** `executeCollect` now records a `posting_events` row
+(`stage: "collect"`) for every raw item that became a real `Posting` —
+`outcome: "too_old"` when the recency cutoff (ADR-019) drops it, with
+`reason` carrying the posting's own `publishedAt` and the cutoff it
+missed; `outcome: "new"` or `"already_seen"` for every successful
+`upsert`, mirroring what `wasNew` already reported at the run-count
+level.
+
+**Not covered, and not a gap in this amendment's own scope:** a raw item
+that never became a `Posting` at all — no normalizer registered for its
+source, or the normalizer's own rejection — has no fingerprint to key an
+event on, since `posting_events.fingerprint` is `NOT NULL` and a
+fingerprint is computed only once `normalize` succeeds. The run-level
+`unnormalizableCount` aggregate is what represents this case, unchanged
+from before this amendment.
+
+**Still deliberately not solved, as this ADR's own Consequences section
+already said and this amendment does not revisit:** Stage A/B cache
+hit/miss events, and profile-hash/model/prompt identity on score rows.
+PR-021 asked for both; both remain real, larger asks than one amendment
+covers in one pass, the same judgment call this project has made
+repeatedly this cycle for genuinely bigger asks bundled into one audit
+finding (ADR-010 Amendment 3 versus full threshold calibration; ADR-043
+versus full per-source/query funnel counters).
+
+**Reversal cost:** trivial — the two new `record()` calls in
+`executeCollect` are additive, same shape as the original three this ADR
+already accepted the reversal cost of.
