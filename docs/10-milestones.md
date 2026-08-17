@@ -449,6 +449,25 @@ One per pull request, each meeting the M3 criteria:
       records for Gupy before its own vertical-slice run; a real collection
       cycle, and the Gupy/Sólides overlap measurement `docs/02` flags as
       pending, are the natural next check
+- [x] Catho, via a real headless browser (ADR-032; `catho-schema.ts`,
+      `catho-normalizer.ts`, `collectors/catho/`). No public API and no
+      server-side search reaches this project (`robots.txt` disallows
+      exactly that path) — sitemap-only candidate discovery
+      (~6,800 title-matched postings nationwide, measured 2026-08-17),
+      Playwright opening each one with a genuinely honest browser
+      User-Agent, never a forged one (ADR-020). Breaks no CLAUDE.md §6
+      rule, unlike Indeed's ADR-028 exception. Registered in
+      `normalizer-registry.ts` only — ingestion is external
+      (`POST /runs/collect/external`), same shape as Indeed/LinkedIn, never
+      a `CollectorPort` entry. **Not yet run for real** — no Docker or
+      browser available in this session to exercise `collect.ts` end to
+      end; the TypeScript typechecks clean against the real `playwright`
+      package, and the extraction logic (JSON-LD shape, the
+      expired-posting redirect, the title-parsing regex for city) was each
+      confirmed against real Catho pages via manual browser inspection
+      first. A real first backlog-drain run, per
+      `collectors/catho/README.md`'s setup section, is the actual
+      validation step
 - [ ] `N8nCollector` behind `CollectorPort`, with one long-tail source proving
       it (ADR-008). Workflow exported and committed to `n8n/`; core verified
       unaffected with n8n stopped

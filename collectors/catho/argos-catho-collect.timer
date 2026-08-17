@@ -1,0 +1,16 @@
+[Unit]
+Description=Run the Catho collector every 30 minutes
+
+[Timer]
+# More frequent than Indeed's twice-daily (ADR-028's deliberately
+# conservative cadence, given that exception) because this collector
+# breaks no politeness rule and is bounded per run (MAX_PAGES_PER_RUN) --
+# frequent small runs drain the ~6,800-posting backlog over about a day
+# without ever holding one long-running process, and settle into cheap,
+# infrequent-in-effect work once the backlog is drained (a run with
+# nothing new to collect exits immediately after one sitemap fetch).
+OnCalendar=*:0/30
+Persistent=true
+
+[Install]
+WantedBy=timers.target
