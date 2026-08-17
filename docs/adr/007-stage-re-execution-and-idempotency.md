@@ -2,8 +2,9 @@
 
 ## Status
 
-Accepted — amended 2026-08-14, see [Amendment](#amendment--2026-08-14-upserts-must-preserve-first-sighting)
-and [Amendment 2](#amendment-2--2026-08-17-stage-as-key-was-missing-the-one-thing-that-actually-varies-its-answer)
+Accepted — amended 2026-08-14, see [Amendment](#amendment--2026-08-14-upserts-must-preserve-first-sighting),
+[Amendment 2](#amendment-2--2026-08-17-stage-as-key-was-missing-the-one-thing-that-actually-varies-its-answer)
+and [Amendment 3](#amendment-3--2026-08-17-neither-key-included-which-model-answered-and-stage-b-ignored-what-stage-a-actually-produced)
 
 ## Date
 
@@ -56,15 +57,15 @@ writing twice is indistinguishable from writing once.**
 
 ### Stage state keys
 
-| Stage      | Keyed by                                    | Re-running it means                                                          |
-| ---------- | ------------------------------------------- | ---------------------------------------------------------------------------- |
-| Collect    | `(source, sourceId)`                        | Re-fetch from the source                                                     |
-| Normalize  | `fingerprint`                               | Re-derive `Posting` from the retained raw payload — no network               |
-| Dedup      | `fingerprint`                               | Recompute; already-seen stays already-seen                                   |
-| Pre-filter | `(fingerprint, criteriaHash)`               | Re-apply rules; changed criteria produce a new key                           |
-| Score A    | `(fingerprint, promptVersion, contentHash)` | Re-extract if the prompt or the title/description text changed (Amendment 2) |
-| Score B    | `(fingerprint, profileHash, promptVersion)` | Re-match only if profile or prompt changed                                   |
-| Deliver    | `(runId, fingerprint)`                      | Nothing — see below                                                          |
+| Stage      | Keyed by                                                             | Re-running it means                                                                     |
+| ---------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Collect    | `(source, sourceId)`                                                 | Re-fetch from the source                                                                |
+| Normalize  | `fingerprint`                                                        | Re-derive `Posting` from the retained raw payload — no network                          |
+| Dedup      | `fingerprint`                                                        | Recompute; already-seen stays already-seen                                              |
+| Pre-filter | `(fingerprint, criteriaHash)`                                        | Re-apply rules; changed criteria produce a new key                                      |
+| Score A    | `(fingerprint, promptVersion, model, contentHash)`                   | Re-extract if the prompt, model or the title/description text changed (Amendments 2, 3) |
+| Score B    | `(fingerprint, profileHash, promptVersion, model, requirementsHash)` | Re-match if profile, prompt, model or the requirement set changed (Amendment 3)         |
+| Deliver    | `(runId, fingerprint)`                                               | Nothing — see below                                                                     |
 
 The keys are what make caching and re-execution the same mechanism. A prompt
 change during M7 invalidates stage B without touching stage A, because
@@ -203,4 +204,75 @@ not `(fingerprint, promptVersion)` — the table above understated it.
 
 **Reversal cost:** low. `hashExtractionInput` has one call site
 (`StageAExtractor`); dropping the parameter and the column restores the
+previous (incorrect) behavior.
+
+## Amendment 3 — 2026-08-17: neither key included which model answered, and Stage B ignored what Stage A actually produced
+
+Two further gaps in the same key, both from the same audit finding
+(`docs/audit/AUDIT_REPORT.md` AC-007, HIGH, CONFIRMED) that Amendment 2 left
+open.
+
+### Gap 1 — `model` was not part of either key
+
+`LLM_MODEL` is an environment variable, not a constant. Swapping it — to try
+a cheaper or newer model, or because the configured one changed upstream —
+left both `Score A` and `Score B`'s keys completely unchanged, so a switch
+silently served extractions and matches produced by the _previous_ model as
+if they belonged to the new one. This is the same shape of bug Amendment 2
+fixed for `contentHash`: something that actually varies the model's answer
+was missing from the cache key.
+
+### Gap 2 — Stage B's key did not depend on Stage A's actual output
+
+The table above always said `Score B` is `(fingerprint, profileHash,
+promptVersion)`. It never included anything derived from the requirement set
+Stage A produced. So a Stage A re-extraction — triggered by Amendment 2's own
+`contentHash` fix, or by a prompt-version bump, or by anything else — could
+change the requirements Stage B was supposed to match against, while Stage
+B's cache kept serving matches computed against the _old_ requirement set,
+because nothing in its key said otherwise.
+
+Binding Stage B's key to Stage A's `contentHash` or `promptVersion` would
+work only as long as every path that changes Stage A's output is accounted
+for. Binding it directly to the requirement set Stage B was actually called
+with removes that assumption: it does not matter _why_ the requirements
+differ, only _whether_ they do.
+
+### Decision
+
+`hashRequirements` (`src/scoring/domain/requirements-hash.ts`) hashes the
+exact `Requirement[]` passed into `StageBMatcher.match()` and joins
+`promptVersion` and `model` as part of Stage B's real key. `model` joins
+Stage A's key the same way `contentHash` did in Amendment 2.
+
+`StageAExtractor` and `StageBMatcher` both take `model` as a new trailing,
+**defaulted** (`"unknown"`) constructor parameter — the value `build-scorer.ts`
+always passes in production is `LLM_MODEL`, unchanged; the default exists
+only so the many existing test call sites that construct these classes with
+positional arguments and no opinion about model identity did not need to
+change. `ExtractionsRepository.find`/`upsert` and `MatchesRepository.find`/
+`upsert`, by contrast, take `model` (and `requirementsHash`, for matches) as
+**required** parameters — same precedent as `contentHash` in Amendment 2: the
+repository layer is where cache correctness is actually enforced, so it does
+not get a default to quietly paper over a caller that forgot.
+
+A stored row whose `model` (or, for matches, `requirementsHash`) does not
+match — including every row written before these columns existed, which
+store `null` — is a miss. The `extractions` table gained one nullable column
+(`model`); the `matches` table gained two (`requirements_hash`, `model`).
+Both additive, no backfill: a legacy row re-extracts or re-matches once, the
+same cost as any other cache miss.
+
+**Corrected keys:** `Score A` is `(fingerprint, promptVersion, model,
+contentHash)`; `Score B` is `(fingerprint, profileHash, promptVersion,
+model, requirementsHash)` — the table above understated both.
+
+`MatchesRepository.findAllForProfile` (the read-only aggregate scan M10 uses)
+was deliberately left scoped to `(profileHash, promptVersion)` only, unchanged
+— consistent with the existing precedent that aggregate scans over the corpus
+don't carry per-call cache-correctness filtering; they read whatever is there
+under that prompt version.
+
+**Reversal cost:** low. `hashRequirements` has one call site
+(`StageBMatcher`); dropping the parameters and the two columns restores the
 previous (incorrect) behavior.

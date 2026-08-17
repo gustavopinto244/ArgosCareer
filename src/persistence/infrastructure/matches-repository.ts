@@ -23,9 +23,18 @@ function parseMatches(value: string): Match[] | null {
 
 /**
  * Stage B's cache, keyed `(fingerprint, profileHash, promptVersion)`
- * (ADR-007). `profileHash` is what makes this cache correct: editing the
- * profile must produce a new key, never silently reuse a match computed
- * against the old one.
+ * (ADR-007) *and* `requirementsHash` *and* `model` (docs/audit AC-007).
+ * `profileHash` is what makes this cache correct against a profile edit:
+ * editing the profile must produce a new key, never silently reuse a match
+ * computed against the old one. `requirementsHash` does the same job
+ * against a *Stage A* change — a new `a-v` prompt version or a
+ * content-hash-triggered re-extraction (ADR-007 Amendment 2) leaves
+ * `fingerprint`/`profileHash`/`promptVersion` completely unchanged from
+ * Stage B's point of view, so without hashing the actual requirement list
+ * being matched, Stage B kept serving matches computed against a
+ * requirement set that no longer existed. `model` closes the same gap
+ * AC-006 closed for Stage A: switching `LLM_MODEL` must not silently reuse
+ * a different model's judgment as the current one's.
  */
 export class MatchesRepository {
   constructor(private readonly db: Db) {}
@@ -34,6 +43,8 @@ export class MatchesRepository {
     fingerprint: string,
     profileHash: string,
     promptVersion: string,
+    model: string,
+    requirementsHash: string,
     matchList: readonly Match[],
     matchedAt: Date,
   ): void {
@@ -54,7 +65,7 @@ export class MatchesRepository {
     if (existing) {
       this.db
         .update(matches)
-        .set({ matches: serialized, matchedAt })
+        .set({ matches: serialized, model, requirementsHash, matchedAt })
         .where(eq(matches.id, existing.id))
         .run();
     } else {
@@ -64,6 +75,8 @@ export class MatchesRepository {
           fingerprint,
           profileHash,
           promptVersion,
+          model,
+          requirementsHash,
           matches: serialized,
           matchedAt,
         })
@@ -75,6 +88,8 @@ export class MatchesRepository {
     fingerprint: string,
     profileHash: string,
     promptVersion: string,
+    model: string,
+    requirementsHash: string,
   ): Match[] | null {
     const row = this.db
       .select()
@@ -88,7 +103,14 @@ export class MatchesRepository {
       )
       .get();
 
-    return row ? parseMatches(row.matches) : null;
+    if (!row) return null;
+    // A legacy row (written before these columns existed), one computed
+    // from a different requirement set, or one produced by a different
+    // model is a miss, not a stale hit (AC-007).
+    if (row.requirementsHash !== requirementsHash) return null;
+    if (row.model !== model) return null;
+
+    return parseMatches(row.matches);
   }
 
   /**

@@ -111,6 +111,11 @@ export const extractions = sqliteTable(
     // (or mismatched) contentHash as a miss rather than trusting a legacy
     // row blindly.
     contentHash: text("content_hash"),
+    // Which model actually answered (docs/audit AC-007) — nullable for the
+    // same reason contentHash is: a legacy row predates this column and is
+    // treated as a miss, not assumed to match whatever LLM_MODEL is set to
+    // today.
+    model: text("model"),
     extractedAt: integer("extracted_at", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => [
@@ -140,6 +145,14 @@ export const matches = sqliteTable(
     profileHash: text("profile_hash").notNull(),
     promptVersion: text("prompt_version").notNull(),
     matches: text("matches").notNull(),
+    // hashRequirements(requirements) — docs/audit AC-007. Nullable for the
+    // same reason extractions.contentHash is: a row predating this column
+    // is a miss, not a trusted hit, since there is no way to know which
+    // requirement set actually produced it.
+    requirementsHash: text("requirements_hash"),
+    // Which model actually answered (docs/audit AC-007) — same nullable/
+    // miss-on-legacy-row treatment as extractions.model.
+    model: text("model"),
     matchedAt: integer("matched_at", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => [

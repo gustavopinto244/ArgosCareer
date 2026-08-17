@@ -33,16 +33,18 @@ function parseRequirements(value: string): Requirement[] | null {
 
 /**
  * Stage A's cache, keyed `(fingerprint, promptVersion)` (ADR-007) *and*
- * `contentHash` (docs/audit AC-006) — the row is stored under the first
- * pair (one current extraction per posting/prompt-version, same as
- * before), but `find` only returns it as a hit when the stored
- * `contentHash` matches the content being asked about right now. A
+ * `contentHash` (docs/audit AC-006) *and* `model` (docs/audit AC-007) — the
+ * row is stored under the first pair (one current extraction per
+ * posting/prompt-version, same as before), but `find` only returns it as a
+ * hit when the stored `contentHash`/`model` both match the current call. A
  * posting's `fingerprint` does not change when its description is edited
- * (ADR-007: company+title+city only), so without this a re-collected
- * posting with new text kept serving the extraction of the old text
- * forever. Upsert rather than insert, matching every other stage's write
- * rule: writing the same extraction twice is indistinguishable from
- * writing it once, so a re-run after a crash costs nothing extra.
+ * (ADR-007: company+title+city only), so without `contentHash` a
+ * re-collected posting with new text kept serving the extraction of the
+ * old text forever; without `model`, switching `LLM_MODEL` silently reused
+ * a different model's extraction as if it were the current one's. Upsert
+ * rather than insert, matching every other stage's write rule: writing the
+ * same extraction twice is indistinguishable from writing it once, so a
+ * re-run after a crash costs nothing extra.
  */
 export class ExtractionsRepository {
   constructor(private readonly db: Db) {}
@@ -50,6 +52,7 @@ export class ExtractionsRepository {
   upsert(
     fingerprint: string,
     promptVersion: string,
+    model: string,
     contentHash: string,
     record: ExtractionRecord,
     extractedAt: Date,
@@ -70,6 +73,7 @@ export class ExtractionsRepository {
       seniority: record.seniority,
       experienceYears: record.experienceYears,
       contentHash,
+      model,
       extractedAt,
     };
 
@@ -90,6 +94,7 @@ export class ExtractionsRepository {
   find(
     fingerprint: string,
     promptVersion: string,
+    model: string,
     contentHash: string,
   ): ExtractionRecord | null {
     const row = this.db
@@ -104,9 +109,11 @@ export class ExtractionsRepository {
       .get();
 
     if (!row) return null;
-    // A legacy row (written before this column existed) or one whose
-    // content has since changed is a miss, not a stale hit (AC-006).
+    // A legacy row (written before these columns existed), one whose
+    // content has since changed (AC-006), or one produced by a different
+    // model (AC-007) is a miss, not a stale hit.
     if (row.contentHash !== contentHash) return null;
+    if (row.model !== model) return null;
 
     const requirements = parseRequirements(row.requirements);
     if (!requirements) return null;

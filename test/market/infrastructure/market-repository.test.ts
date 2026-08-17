@@ -127,6 +127,7 @@ describe("MarketRepository.loadCorpus", () => {
     extractionsRepo.upsert(
       p.fingerprint,
       STAGE_A_PROMPT_VERSION,
+      "model",
       "content-hash",
       {
         requirements: [requirement("Node.js")],
@@ -146,6 +147,7 @@ describe("MarketRepository.loadCorpus", () => {
     extractionsRepo.upsert(
       p.fingerprint,
       "a-v0-superseded",
+      "model",
       "content-hash",
       {
         requirements: [requirement("Node.js")],
@@ -165,6 +167,7 @@ describe("MarketRepository.loadCorpus", () => {
     extractionsRepo.upsert(
       p.fingerprint,
       STAGE_A_PROMPT_VERSION,
+      "model",
       "content-hash",
       {
         requirements: [requirement("Node.js")],
@@ -177,6 +180,8 @@ describe("MarketRepository.loadCorpus", () => {
       p.fingerprint,
       PROFILE_HASH,
       STAGE_B_PROMPT_VERSION,
+      "model",
+      "requirements-hash",
       [metMatch("Node.js")],
       NOW,
     );
@@ -205,6 +210,8 @@ describe("MarketRepository.loadCorpus", () => {
       p.fingerprint,
       "a-different-hash",
       STAGE_B_PROMPT_VERSION,
+      "model",
+      "requirements-hash",
       [metMatch("Node.js")],
       NOW,
     );

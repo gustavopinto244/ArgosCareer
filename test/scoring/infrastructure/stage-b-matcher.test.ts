@@ -9,6 +9,7 @@ import {
 } from "../../../src/persistence/infrastructure/db";
 import { MatchesRepository } from "../../../src/persistence/infrastructure/matches-repository";
 import { Profile } from "../../../src/profile/domain/profile";
+import { hashRequirements } from "../../../src/scoring/domain/requirements-hash";
 import { Requirement } from "../../../src/scoring/domain/types";
 import { StageBMatcher } from "../../../src/scoring/infrastructure/stage-b-matcher";
 
@@ -88,9 +89,15 @@ describe("StageBMatcher.match — cache", () => {
       ]);
     }
     expect(ask).toHaveBeenCalledTimes(1);
-    expect(matchesRepo.find("fp1", "hash1", "b-v2")).toEqual(
-      result.ok ? result.matches : null,
-    );
+    expect(
+      matchesRepo.find(
+        "fp1",
+        "hash1",
+        "b-v2",
+        "unknown",
+        hashRequirements([requirement()]),
+      ),
+    ).toEqual(result.ok ? result.matches : null);
   });
 
   it("never calls the model on a cache hit", async () => {
@@ -98,6 +105,8 @@ describe("StageBMatcher.match — cache", () => {
       "fp1",
       "hash1",
       "b-v2",
+      "unknown",
+      hashRequirements([requirement()]),
       [{ requirement: requirement(), status: "not_met", evidence: null }],
       NOW,
     );
@@ -121,6 +130,8 @@ describe("StageBMatcher.match — cache", () => {
       "fp1",
       "hash1",
       "b-v2",
+      "unknown",
+      hashRequirements([requirement()]),
       [{ requirement: requirement(), status: "met", evidence: "old" }],
       NOW,
     );
@@ -178,6 +189,60 @@ describe("StageBMatcher.match — cache", () => {
 
     expect(ask).not.toHaveBeenCalled();
     expect(result).toEqual({ ok: true, matches: [] });
+  });
+
+  it("does not reuse a cached match produced by a different model (docs/audit AC-007)", async () => {
+    const ask = vi.fn(
+      async () =>
+        '{"status":"met","evidence":"Built atlas-manager\'s HTTP layer in Node.js."}',
+    );
+    const matcherA = new StageBMatcher(
+      ask,
+      matchesRepo,
+      "b-v2",
+      undefined,
+      "model-a",
+    );
+    const matcherB = new StageBMatcher(
+      ask,
+      matchesRepo,
+      "b-v2",
+      undefined,
+      "model-b",
+    );
+
+    await matcherA.match("fp1", [requirement()], profile(), "hash1", () => NOW);
+    expect(ask).toHaveBeenCalledTimes(1);
+
+    // Same fingerprint, profileHash, promptVersion and requirements -- only
+    // the model differs. Switching LLM_MODEL must not silently reuse the
+    // other model's match as if it were this one's.
+    await matcherB.match("fp1", [requirement()], profile(), "hash1", () => NOW);
+    expect(ask).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not reuse a cached match when the requirement set changes, even with the same fingerprint (docs/audit AC-007)", async () => {
+    const ask = vi.fn(
+      async () =>
+        '{"status":"met","evidence":"Built atlas-manager\'s HTTP layer in Node.js."}',
+    );
+    const matcher = new StageBMatcher(ask, matchesRepo);
+
+    await matcher.match("fp1", [requirement()], profile(), "hash1", () => NOW);
+    expect(ask).toHaveBeenCalledTimes(1);
+
+    // Simulates Stage A re-extracting and producing a different requirement
+    // set for the same posting (fingerprint unchanged) -- the old cached
+    // match must not be reused just because fingerprint/profileHash/
+    // promptVersion still line up.
+    await matcher.match(
+      "fp1",
+      [requirement({ text: "Docker experience" })],
+      profile(),
+      "hash1",
+      () => NOW,
+    );
+    expect(ask).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -303,7 +368,13 @@ describe("StageBMatcher.match — evidence provenance (docs/audit AC-008)", () =
 
     await matcher.match("fp1", [requirement()], profile(), "hash1", () => NOW);
 
-    const cached = matchesRepo.find("fp1", "hash1", "b-v2");
+    const cached = matchesRepo.find(
+      "fp1",
+      "hash1",
+      "b-v2",
+      "unknown",
+      hashRequirements([requirement()]),
+    );
     expect(cached?.[0]?.status).toBe("not_met");
     expect(cached?.[0]?.evidence).toBeNull();
   });
@@ -327,7 +398,9 @@ describe("StageBMatcher.match — failure, never throws", () => {
       reason: "matching_failed",
       attempts: 3,
     });
-    expect(matchesRepo.find("fp1", "hash1", "b-v2")).toBeNull();
+    expect(
+      matchesRepo.find("fp1", "hash1", "b-v2", "unknown", "any-hash"),
+    ).toBeNull();
   });
 
   it("discards results for requirements already matched when a later one fails", async () => {
@@ -346,7 +419,9 @@ describe("StageBMatcher.match — failure, never throws", () => {
     );
 
     expect(result.ok).toBe(false);
-    expect(matchesRepo.find("fp1", "hash1", "b-v2")).toBeNull();
+    expect(
+      matchesRepo.find("fp1", "hash1", "b-v2", "unknown", "any-hash"),
+    ).toBeNull();
   });
 });
 
@@ -523,6 +598,8 @@ describe("StageBMatcher.match — bounded concurrency (ADR-022)", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toBe("matching_failed");
     expect(ask.mock.calls.length).toBeLessThan(20);
-    expect(matchesRepo.find("fp1", "h", "b-v2")).toBeNull();
+    expect(
+      matchesRepo.find("fp1", "h", "b-v2", "unknown", "any-hash"),
+    ).toBeNull();
   });
 });
