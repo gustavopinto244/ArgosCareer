@@ -59,7 +59,7 @@ beforeEach(async () => {
     imports: [ApiModule],
   })
     .overrideProvider(COLLECTOR)
-    .useValue(new FakeCollector())
+    .useValue(() => new FakeCollector())
     .overrideProvider(NOTIFIER)
     .useValue(fakeNotifier)
     .compile();

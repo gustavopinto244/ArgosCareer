@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import {
+  CollectorResolver,
   executeCollect,
   executeDedup,
   executeDeliver,
@@ -20,7 +21,6 @@ import {
   RunsRepository,
 } from "../../persistence/infrastructure/runs-repository";
 import { Criteria } from "../../prefilter/domain/criteria";
-import { CollectorPort } from "../../posting/domain/ports/collector.port";
 import { Profile } from "../../profile/domain/profile";
 import { buildScorer } from "../../scoring/infrastructure/build-scorer";
 import { RunLock, runExclusive } from "../../scheduling/domain/run-lock";
@@ -66,7 +66,7 @@ export interface CollectParams {
 export class RunsService {
   constructor(
     @Inject(DATABASE) private readonly db: Db,
-    @Inject(COLLECTOR) private readonly collector: CollectorPort,
+    @Inject(COLLECTOR) private readonly resolveCollector: CollectorResolver,
     @Inject(NOTIFIER) private readonly notifier: NotifierPort,
     @Inject(CRITERIA) private readonly criteria: Criteria,
     @Inject(PROFILE) private readonly profile: Profile,
@@ -129,7 +129,7 @@ export class RunsService {
     const outcome = await runExclusive(this.runLock, "collect", () =>
       executeCollect(
         this.db,
-        () => this.collector,
+        this.resolveCollector,
         queries,
         () => new Date(),
         this.criteria.collection.queryIntervalMs,

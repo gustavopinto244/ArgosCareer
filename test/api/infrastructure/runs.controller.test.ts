@@ -93,7 +93,7 @@ beforeEach(async () => {
     imports: [ApiModule],
   })
     .overrideProvider(COLLECTOR)
-    .useValue(fakeCollector)
+    .useValue(() => fakeCollector)
     .overrideProvider(NOTIFIER)
     .useValue(fakeNotifier)
     // Real criteria, but no politeness sleep: the configured cycle issues
@@ -292,6 +292,105 @@ describe("POST /runs/collect", () => {
       city: "Rio de Janeiro",
       maxResults: 10,
     });
+  });
+
+  it("dispatches each configured query to the collector its own source names, not always Gupy (docs/audit AC-003)", async () => {
+    // Regression test for AC-003: the REST provider used to hardcode a
+    // single GupyCollector regardless of query.source, so config/criteria.yaml's
+    // real ciee/solides queries were silently sent through Gupy. Two
+    // distinguishable fakes, resolved by source exactly like
+    // `collectorFor` does in production, prove each source reaches its own
+    // adapter.
+    class TaggedFakeCollector implements CollectorPort {
+      readonly calls: unknown[] = [];
+      constructor(private readonly source: string) {}
+      async collect(criteria: unknown): Promise<CollectionResult> {
+        this.calls.push(criteria);
+        return { source: this.source, postings: [], collectedAt: new Date() };
+      }
+    }
+    const gupyFake = new TaggedFakeCollector("gupy");
+    const cieeFake = new TaggedFakeCollector("ciee");
+    const solidesFake = new TaggedFakeCollector("solides");
+    const resolver = (source: string): CollectorPort | null =>
+      ({ gupy: gupyFake, ciee: cieeFake, solides: solidesFake })[source] ??
+      null;
+
+    const moduleRef = await Test.createTestingModule({
+      imports: [ApiModule],
+    })
+      .overrideProvider(COLLECTOR)
+      .useValue(resolver)
+      .overrideProvider(NOTIFIER)
+      .useValue(fakeNotifier)
+      .overrideProvider(CRITERIA)
+      .useValue({
+        ...loadCriteria("./config/criteria.yaml"),
+        collection: {
+          queries: [
+            { source: "gupy" },
+            { source: "ciee" },
+            { source: "solides" },
+          ],
+          queryIntervalMs: 0,
+          recencyDays: 1,
+          backfillDays: 7,
+        },
+      })
+      .compile();
+    const dispatchApp =
+      moduleRef.createNestApplication<NestExpressApplication>();
+    await dispatchApp.init();
+
+    try {
+      const res = await auth(
+        request(dispatchApp.getHttpServer()).post("/runs/collect").send({}),
+      );
+      expect(res.status).toBe(201);
+      expect(gupyFake.calls).toHaveLength(1);
+      expect(cieeFake.calls).toHaveLength(1);
+      expect(solidesFake.calls).toHaveLength(1);
+    } finally {
+      await dispatchApp.close();
+    }
+  });
+
+  it("reports a configured query for an unregistered source as a wiring bug, via the real registry (docs/audit AC-003)", async () => {
+    // Uses collectorFor (the real production registry) rather than a fake,
+    // so this also proves the REST wiring resolves by source at all — the
+    // exact thing AC-003 found missing — not just that a fake responds.
+    const moduleRef = await Test.createTestingModule({
+      imports: [ApiModule],
+    })
+      .overrideProvider(NOTIFIER)
+      .useValue(fakeNotifier)
+      .overrideProvider(CRITERIA)
+      .useValue({
+        ...loadCriteria("./config/criteria.yaml"),
+        collection: {
+          queries: [{ source: "not-a-real-source" }],
+          queryIntervalMs: 0,
+          recencyDays: 1,
+          backfillDays: 7,
+        },
+      })
+      .compile();
+    const realRegistryApp =
+      moduleRef.createNestApplication<NestExpressApplication>();
+    await realRegistryApp.init();
+
+    try {
+      const res = await auth(
+        request(realRegistryApp.getHttpServer()).post("/runs/collect").send({}),
+      );
+      expect(res.status).toBe(201);
+      expect(res.body.collected).toBe(0);
+      expect(res.body.error).toContain(
+        'No collector registered for source "not-a-real-source"',
+      );
+    } finally {
+      await realRegistryApp.close();
+    }
   });
 });
 
