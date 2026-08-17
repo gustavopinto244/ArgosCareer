@@ -52,6 +52,7 @@ revisited on its merits instead of re-argued from memory.
 | [038](adr/038-recoverable-scoring-failures-bounded-retry.md)                  | A scoring failure is reported, not notified, and retries up to a bounded ceiling    | Accepted | 2026-08-17 |
 | [039](adr/039-batch-fatal-permanent-errors-and-breaker-scope.md)              | Stop the batch on a permanent transport failure, narrow the circuit breaker's scope | Accepted | 2026-08-17 |
 | [040](adr/040-persisted-claim-as-scoring-admission-barrier.md)                | A persisted, atomic claim as the scoring admission barrier                          | Accepted | 2026-08-17 |
+| [041](adr/041-per-source-recovery-recency.md)                                 | Recovery recency is tracked per source, not per collect cycle                       | Accepted | 2026-08-17 |
 
 ## When an ADR is required
 

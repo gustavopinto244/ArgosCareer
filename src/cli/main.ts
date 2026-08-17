@@ -173,16 +173,37 @@ export async function executeCollect(
   const postingsRepo = new PostingsRepository(db);
   const runsRepo = new RunsRepository(db);
 
-  // Read BEFORE this run is started, or it would find itself.
-  const lastSuccessfulCollectAt =
-    runsRepo.findLatestFinished("collect", "success")?.finishedAt ?? null;
-  const windowDays = recency
-    ? computeRecencyWindowDays(lastSuccessfulCollectAt, now(), recency)
-    : null;
-  const cutoff =
-    windowDays === null
-      ? null
-      : new Date(now().getTime() - windowDays * 24 * 60 * 60 * 1000);
+  // Per-source, not one global window (docs/audit PR-003): the previous
+  // single `lastSuccessfulCollectAt` read from `findLatestFinished("collect",
+  // "success")` let one healthy source's success mark the whole run
+  // "success" and silently advance every *other* source's recovery clock
+  // too — a real four-day Sólides outage while Gupy stayed healthy would
+  // have looked like nothing happened, and Sólides's first run back would
+  // have received only the ordinary one-day window, permanently losing
+  // three days of postings. Each source's cutoff is computed lazily, from
+  // its own history, the first time a query for it is seen this run —
+  // read BEFORE this run is started (via `findLastSuccessfulSourceCollectAt`,
+  // which only ever looks at already-finished runs), or it would find
+  // itself. Memoized per source so a source with several queries (per-city
+  // Gupy queries) computes its window once, not once per query.
+  const cutoffCache = new Map<string, Date | null>();
+  function cutoffForSource(source: string): Date | null {
+    const cached = cutoffCache.get(source);
+    if (cached !== undefined) return cached;
+    const windowDays = recency
+      ? computeRecencyWindowDays(
+          runsRepo.findLastSuccessfulSourceCollectAt(source),
+          now(),
+          recency,
+        )
+      : null;
+    const cutoff =
+      windowDays === null
+        ? null
+        : new Date(now().getTime() - windowDays * 24 * 60 * 60 * 1000);
+    cutoffCache.set(source, cutoff);
+    return cutoff;
+  }
 
   const runId = runsRepo.start("collect", now());
 
@@ -205,6 +226,10 @@ export async function executeCollect(
   // for the same reason failedSources is: the same source can appear in
   // several queries.
   const truncatedSources = new Set<string>();
+  // Every source at least one query targeted this run (docs/audit PR-003) —
+  // what makes `findLastSuccessfulSourceCollectAt` able to tell "this source
+  // was queried and failed" apart from "this source was never queried".
+  const attemptedSources = new Set<string>();
 
   // Same bookkeeping guarantee `executeDeliver` documents: a throw between
   // `start` and `finish` must not leave the row open. Collectors cannot throw
@@ -224,6 +249,7 @@ export async function executeCollect(
         typeof query === "object" && query !== null && "source" in query
           ? String((query as { source?: unknown }).source ?? "gupy")
           : "gupy";
+      attemptedSources.add(source);
       const collector = collectors(source);
       if (!collector) {
         failures += 1;
@@ -251,6 +277,7 @@ export async function executeCollect(
       }
 
       const collectedAt = now();
+      const cutoff = cutoffForSource(source);
       for (const raw of result.postings) {
         // Dispatch by the source the payload declares, not by which collector
         // was passed in — an unregistered source is a wiring bug, and saying
@@ -301,6 +328,7 @@ export async function executeCollect(
       failureReason: firstError ?? message,
       failedSources: [...failedSources],
       truncatedSources: [...truncatedSources],
+      attemptedSources: [...attemptedSources],
     });
     throw cause;
   }
@@ -318,6 +346,7 @@ export async function executeCollect(
     failureReason: firstError ?? null,
     failedSources: [...failedSources],
     truncatedSources: [...truncatedSources],
+    attemptedSources: [...attemptedSources],
   });
 
   return {
