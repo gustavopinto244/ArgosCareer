@@ -7,6 +7,53 @@ import { TelegramConfig } from "./telegram-config";
 export const TELEGRAM_MESSAGE_LIMIT = 4096;
 
 /**
+ * Telegram rate-limits a single chat to roughly one message per second
+ * (docs/11-known-issues.md B3) — this pause between consecutive chunk sends
+ * is what keeps a large digest from tripping that limit in the first place,
+ * distinct from the 429 retry below, which handles it if it happens anyway.
+ */
+const DEFAULT_PACING_MS = 1_100;
+/** Bounded — an unbounded retry loop on a persistently rate-limited chat
+ * would never finish, and ADR-007's "notified only after a successful send"
+ * rule already means an exhausted chunk just re-sends the whole digest next
+ * run rather than losing it (docs/11 B3). */
+const DEFAULT_MAX_RETRIES = 3;
+/** Defensive cap on how long a single `retry_after` wait is allowed to
+ * sleep, regardless of what Telegram states — a malformed or unexpectedly
+ * large value must not stall a run indefinitely. */
+const DEFAULT_RETRY_AFTER_CAP_MS = 30_000;
+/** Used when a 429 response carries no parseable `retry_after` at all —
+ * conservative rather than zero, since the whole point is backing off. */
+const DEFAULT_RETRY_AFTER_MS = 5_000;
+
+export interface TelegramNotifierOptions {
+  readonly pacingMs?: number;
+  readonly maxRetries?: number;
+  readonly retryAfterCapMs?: number;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Telegram's actual 429 body shape:
+ * `{"ok":false,"error_code":429,"description":"...","parameters":{"retry_after":5}}`
+ * (`retry_after` in seconds). Null on anything unparseable — the caller
+ * falls back to `DEFAULT_RETRY_AFTER_MS` rather than guessing.
+ */
+async function parseRetryAfterMs(response: Response): Promise<number | null> {
+  try {
+    const body: unknown = await response.json();
+    const seconds = (body as { parameters?: { retry_after?: unknown } } | null)
+      ?.parameters?.retry_after;
+    return typeof seconds === "number" && seconds >= 0 ? seconds * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The plain-text-send capability, factored out so a caller (M10's
  * `executeStudyPlan`) can depend on "something that can send text" and be
  * given a fake in tests, without depending on the concrete `TelegramNotifier`
@@ -76,19 +123,23 @@ export function splitForTelegram(
  * retry.
  */
 export class TelegramNotifier implements NotifierPort, TextNotifier {
+  private readonly pacingMs: number;
+  private readonly maxRetries: number;
+  private readonly retryAfterCapMs: number;
+
   constructor(
     private readonly config: TelegramConfig,
     private readonly fetchImpl: typeof fetch = fetch,
-  ) {}
+    options: TelegramNotifierOptions = {},
+  ) {
+    this.pacingMs = options.pacingMs ?? DEFAULT_PACING_MS;
+    this.maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
+    this.retryAfterCapMs =
+      options.retryAfterCapMs ?? DEFAULT_RETRY_AFTER_CAP_MS;
+  }
 
   async notify(digest: Digest): Promise<NotifyResult> {
-    const chunks = splitForTelegram(renderDigestText(digest));
-
-    for (const chunk of chunks) {
-      const result = await this.sendMessage(chunk);
-      if (!result.ok) return result;
-    }
-    return { ok: true };
+    return this.sendChunks(splitForTelegram(renderDigestText(digest)));
   }
 
   /**
@@ -100,9 +151,18 @@ export class TelegramNotifier implements NotifierPort, TextNotifier {
    * Telegram client, not a new abstraction.
    */
   async sendText(text: string): Promise<NotifyResult> {
-    const chunks = splitForTelegram(text);
-    for (const chunk of chunks) {
-      const result = await this.sendMessage(chunk);
+    return this.sendChunks(splitForTelegram(text));
+  }
+
+  /**
+   * Paced per docs/11-known-issues.md B3: a pause before every chunk after
+   * the first, not only on failure — the point is staying under Telegram's
+   * rate limit in the first place, not just recovering after tripping it.
+   */
+  private async sendChunks(chunks: readonly string[]): Promise<NotifyResult> {
+    for (let i = 0; i < chunks.length; i++) {
+      if (i > 0) await sleep(this.pacingMs);
+      const result = await this.sendMessage(chunks[i]!);
       if (!result.ok) return result;
     }
     return { ok: true };
@@ -111,30 +171,56 @@ export class TelegramNotifier implements NotifierPort, TextNotifier {
   private async sendMessage(text: string): Promise<NotifyResult> {
     const url = `https://api.telegram.org/bot${this.config.botToken}/sendMessage`;
 
-    let response: Response;
-    try {
-      response = await this.fetchImpl(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chat_id: this.config.chatId, text }),
-      });
-    } catch (cause) {
-      return {
-        ok: false,
-        error: { message: "Telegram request failed", cause },
-      };
+    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+      let response: Response;
+      try {
+        response = await this.fetchImpl(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: this.config.chatId, text }),
+        });
+      } catch (cause) {
+        return {
+          ok: false,
+          error: { message: "Telegram request failed", cause },
+        };
+      }
+
+      if (response.status === 429) {
+        const retryAfterMs =
+          (await parseRetryAfterMs(response.clone())) ?? DEFAULT_RETRY_AFTER_MS;
+        if (attempt < this.maxRetries) {
+          await sleep(Math.min(retryAfterMs, this.retryAfterCapMs));
+          continue;
+        }
+        return {
+          ok: false,
+          error: {
+            message: `Telegram request failed: 429, exhausted ${this.maxRetries} retries`,
+          },
+        };
+      }
+
+      if (!response.ok) {
+        const body = await response.text().catch(() => "");
+        return {
+          ok: false,
+          error: {
+            message:
+              `Telegram request failed: ${response.status} ${body}`.trim(),
+          },
+        };
+      }
+
+      return { ok: true };
     }
 
-    if (!response.ok) {
-      const body = await response.text().catch(() => "");
-      return {
-        ok: false,
-        error: {
-          message: `Telegram request failed: ${response.status} ${body}`.trim(),
-        },
-      };
-    }
-
-    return { ok: true };
+    // Unreachable — the loop above always returns before exhausting its
+    // bound (the 429 branch returns once attempt === maxRetries). Kept for
+    // TypeScript's control-flow analysis, not a real code path.
+    return {
+      ok: false,
+      error: { message: "Telegram request failed: exhausted retries" },
+    };
   }
 }

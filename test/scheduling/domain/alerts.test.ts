@@ -22,6 +22,10 @@ function run(overrides: Partial<RunRow> = {}): RunRow {
     filteredCount: 0,
     scoredCount: 0,
     deliveredCount: 0,
+    tooOldCount: 0,
+    unnormalizableCount: 0,
+    failureReason: null,
+    failedSources: null,
     ...overrides,
   };
 }

@@ -54,6 +54,13 @@ Opened 2026-08-16, after the incident recorded in
 > concurrency "changes scoring behaviour". It does not. Same prompt per
 > requirement, same isolation, same cache keys, same answers — only the
 > waiting overlaps. Batching is the option that changes behaviour.
+>
+> **Checked against a real run, 2026-08-17 — still not the number this
+> entry is waiting for.** The most recent real `scoreAndDeliver` run
+> scored 40 postings in 830.9 s, but 34 of those 40 read a cached Stage A
+> extraction rather than calling the model — see A3's matching note. A
+> mostly-cached run cannot stand in for "the backlog," which is by
+> definition mostly cold. Stays open.
 
 Stage B issues one sequential model call **per requirement**. One real posting
 measured end to end against `deepseek/deepseek-v4-flash-0731`:
@@ -108,6 +115,20 @@ out. The levers are different ones:
 Both are scoring-adjacent enough to want an ADR, and neither should be
 attempted while the numbers are extrapolations from a handful of postings.
 **Measure the first real backlog run first.**
+
+> **A real run measured, 2026-08-17 — still not the measurement this entry
+> needs.** Queried Atlas's production database directly: the most recent
+> real `scoreAndDeliver` run (`01M05CE3730E1V91P2APN78XG9`) scored 40
+> postings in 830.9 s (~20.8 s/posting average) — much faster than this
+> entry's 40–67 s/posting Stage A estimate. Checked why before trusting
+> it: only **6 of the 40** postings got a _new_ Stage A extraction during
+> the run's window; the other extractions it read already existed
+> (ADR-007's per-fingerprint cache), most of them from earlier work (M7
+> calibration and similar). **The average is fast because it is mostly
+> cache hits, not because cold Stage A got cheaper.** This run still does
+> not answer what this entry is actually asking — real Stage A cost at
+> backlog scale, mostly cache _misses_. That measurement has not happened
+> yet. Left open.
 
 ---
 
@@ -194,7 +215,8 @@ whole corpus on the first run that adopts it. Amends ADR-019.
 
 ## B2 — The `runs` table records no failure reason
 
-**Status:** open · **Found:** 2026-08-16, trying to explain a collect run
+**Status:** fixed, pending confirmation against a real failure · **Found:**
+2026-08-16, trying to explain a collect run
 
 `executeCollect` computes `tooOld`, `unnormalizable` and a first `error`
 string, and returns all three on its outcome. None is persisted: the `runs`
@@ -209,16 +231,35 @@ degraded not down), with nothing in the row naming which one failed.
 `docs/08` already identifies silent degradation as the failure mode this
 project most needs to catch. This is a hole in exactly that.
 
-**Resolving it** means columns for the drop reasons and the first error, plus
-a per-source breakdown — the `failedSources` list in `executeDeliver` is
-currently hardcoded to `["gupy"]` with a comment admitting it, which is a
-second symptom of the same gap.
+> **Resolution, 2026-08-17.** Four columns added to `runs`
+> (`too_old_count`, `unnormalizable_count`, `failure_reason`,
+> `failed_sources` — migration `drizzle/0010_amused_winter_soldier.sql`,
+> additive only, no backfill for existing rows). `executeCollect` now
+> writes all four on both the normal-finish and the caught-exception path;
+> `failedSources` is a `Set<string>` built from every point that already
+> knew which source it was looking at (no collector registered, a
+> collector-reported error, an unregistered normalizer), serialized to
+> JSON text (`parseFailedSources` reads it back), the same manual
+> serialize/parse precedent `requirements`/`matches` already use rather
+> than a new drizzle json-mode column.
+>
+> **The second symptom is also fixed:** `executeDeliver`'s `failedSources`
+> was hardcoded to `["gupy"]` regardless of which source actually failed.
+> It now unions `parseFailedSources` over every `collect` run in the
+> delivery window — a real per-source breakdown, not a guess.
+>
+> **Not yet observed against a real failure in production** — covered by
+> unit tests (`test/persistence/runs-repository.test.ts`,
+> `test/cli/main.test.ts`) exercising the exact `collectedCount: N,
+normalizedCount: 0` scenario this entry describes, but the real value is
+> reading an actual failed run's row on Atlas once one occurs.
 
 ---
 
 ## B3 — Telegram delivery has no pacing and no 429 handling
 
-**Status:** open · **Found:** 2026-08-16, sizing the digest A1 will produce
+**Status:** fixed, pending confirmation against a real large digest ·
+**Found:** 2026-08-16, sizing the digest A1 will produce
 
 `TelegramNotifier` splits a digest into 4096-byte chunks and sends them in a
 loop with no delay between them. `sendMessage` treats any non-2xx as a plain
@@ -228,10 +269,31 @@ Never exercised beyond a handful of messages. The first run after A1 drains
 will produce a digest large enough to matter, and Telegram rate-limits a
 single chat at roughly one message per second.
 
-**Resolving it** means pacing between chunks and honouring `retry_after`.
-Note the interaction with ADR-007: postings are marked notified only after a
-successful send, so a 429 mid-digest currently means the whole digest is
-re-sent next run, not that a chunk is lost.
+> **Resolution, 2026-08-17.** `TelegramNotifier` now paces every chunk after
+> the first by `pacingMs` (default 1,100 ms — over Telegram's stated ~1
+> msg/s/chat limit on purpose, not exactly at it) before sending, and
+> retries a `429` up to `maxRetries` (default 3) times, sleeping
+> `retry_after` (parsed from Telegram's real response shape,
+> `parameters.retry_after`, in seconds) before each retry, capped at
+> `retryAfterCapMs` (default 30 s) against a malformed or unexpectedly
+> large stated value. A `429` with no parseable `retry_after` falls back to
+> a conservative 5 s wait rather than retrying immediately. Only `429` gets
+> this treatment — a plain `5xx` still fails on the first non-2xx response,
+> unchanged, per the existing "stops sending further chunks once one chunk
+> fails" contract.
+>
+> The ADR-007 interaction this entry named is preserved exactly: retries
+> happen _within_ one `sendMessage` call, so exhausting them still means
+> the whole digest is marked undelivered and re-sent next run, not that a
+> chunk is lost silently.
+>
+> Covered by fake-timer tests (`test/delivery/infrastructure/telegram-notifier.test.ts`)
+> — pacing actually delays the next chunk, a `429` retries and succeeds
+> once `retry_after` elapses, retries are bounded, a missing `retry_after`
+> falls back to the default, and an excessive one is capped. **Not yet
+> exercised against Telegram's real API** — no test here claims to know
+> Telegram's actual rate-limit behavior beyond its documented response
+> shape.
 
 ---
 
@@ -288,7 +350,8 @@ records both probes and the correction.
 
 ## C1 — Production run rows are permanently open
 
-**Status:** open · **Found:** 2026-08-16, grown by one more the same day
+**Status:** fixed (the two known rows), the underlying gap stays open ·
+**Found:** 2026-08-16, grown by one more the same day
 
 Run `01M04JFMRPWY4660K4SBV97QBW` (`scoreAndDeliver`, started
 2026-08-16T06:00:00Z) has `finishedAt: null` and `outcome: null`, because the
@@ -315,3 +378,20 @@ different failure than a single run's process being killed mid-flight — a
 restart will orphan a row exactly like this again, any time one is used to
 cancel an in-flight run. Graceful cancellation (a way to actually stop a run
 without killing the process) would be the real fix; not attempted here.
+
+> **Resolution, verified 2026-08-17.** Queried Atlas's real production
+> database directly (`docker exec argos-career node -e '...better-sqlite3...'`,
+> read-only, not the app's own API) rather than trusting this entry's
+> age: both rows already carry `finishedAt`/`outcome: "failed"`, both with
+> the identical timestamp `2026-08-16T13:17:48Z` — the fingerprint of a
+> single bulk `UPDATE`, exactly the deliberate one-off act this entry
+> called for. It had already happened by the time this was re-checked;
+> this entry was simply never updated to say so. `SELECT ... WHERE
+finished_at IS NULL` against the live database returns zero rows as of
+> this check.
+>
+> **The underlying gap is genuinely still open, not just this entry's
+> staleness:** a hard restart mid-run still orphans a row exactly this way,
+> with no graceful cancellation to prevent it. The next occurrence needs
+> the same deliberate manual fix — this entry stays, minus the two now-closed
+> rows, as the runbook for doing it again.

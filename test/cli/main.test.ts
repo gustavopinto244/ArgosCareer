@@ -18,7 +18,10 @@ import {
   runMigrations,
 } from "../../src/persistence/infrastructure/db";
 import { PostingsRepository } from "../../src/persistence/infrastructure/postings-repository";
-import { RunsRepository } from "../../src/persistence/infrastructure/runs-repository";
+import {
+  RunsRepository,
+  parseFailedSources,
+} from "../../src/persistence/infrastructure/runs-repository";
 import {
   CollectionResult,
   CollectorPort,
@@ -450,6 +453,47 @@ describe("executeCollect — collector dispatch by source", () => {
       'No collector registered for source "gupq"',
     );
     expect(outcome.collected).toBe(0);
+  });
+
+  it("records the failed source and failure reason on the run row (docs/11 B2)", async () => {
+    const outcome = await executeCollect(
+      db,
+      () => ({
+        collect: async () => ({
+          source: "indeed",
+          collectedAt: new Date(),
+          postings: [],
+          error: { message: "Indeed responded 500" },
+        }),
+      }),
+      [{ source: "indeed" }],
+      undefined,
+      0,
+    );
+
+    const run = new RunsRepository(db).findById(outcome.runId);
+    expect(run?.failureReason).toBe("Indeed responded 500");
+    expect(parseFailedSources(run!)).toEqual(["indeed"]);
+  });
+
+  it("leaves failedSources empty on the run row when every query succeeds", async () => {
+    const outcome = await executeCollect(
+      db,
+      () => ({
+        collect: async () => ({
+          source: "gupy",
+          collectedAt: new Date(),
+          postings: [],
+        }),
+      }),
+      [{ source: "gupy" }],
+      undefined,
+      0,
+    );
+
+    const run = new RunsRepository(db).findById(outcome.runId);
+    expect(run?.failureReason).toBeNull();
+    expect(parseFailedSources(run!)).toEqual([]);
   });
 });
 
@@ -1013,6 +1057,34 @@ describe("executeDeliver", () => {
     expect(outcome.error).toBeUndefined();
     expect(digests[0]?.summary.collected).toBe(2);
     expect(digests[0]?.summary.failedSources).toEqual([]);
+  });
+
+  it("reports the real failed source, not a hardcoded guess (docs/11 B2)", async () => {
+    // Regression test: this summary used to hardcode ["gupy"] for any
+    // failed collect run in the window, regardless of which source it
+    // actually was.
+    await executeCollect(
+      db,
+      () => ({
+        collect: async () => ({
+          source: "indeed",
+          collectedAt: new Date(),
+          postings: [],
+          error: { message: "Indeed responded 500" },
+        }),
+      }),
+      [{ source: "indeed" }],
+      undefined,
+      0,
+    );
+
+    const criteria = deliverCriteria();
+    const scorer = new StubScorer(criteria);
+    const { notifier, digests } = recordingNotifier();
+
+    await executeDeliver(db, scorer, notifier, criteria, deliverProfile());
+
+    expect(digests[0]?.summary.failedSources).toEqual(["indeed"]);
   });
 });
 
