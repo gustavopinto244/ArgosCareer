@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { createPosting } from "../../../src/posting/domain/posting";
 import { ScoreOutcome } from "../../../src/scoring/domain/types";
+import {
+  EMPTY_RECOMMENDATION,
+  Recommendation,
+} from "../../../src/scoring/domain/recommendation";
 import { Digest, ScoredPosting } from "../../../src/delivery/domain/digest";
 import {
   renderDigestText,
@@ -26,7 +30,9 @@ function posting(overrides: Partial<Parameters<typeof createPosting>[0]> = {}) {
   });
 }
 
-function outcome(overrides: Partial<ScoreOutcome> = {}): ScoreOutcome {
+function outcome(
+  overrides: Partial<ScoreOutcome & Recommendation> = {},
+): ScoreOutcome & Recommendation {
   return {
     score: 62.4,
     verdict: "review",
@@ -38,6 +44,7 @@ function outcome(overrides: Partial<ScoreOutcome> = {}): ScoreOutcome {
     blockingFailure: null,
     lowConfidence: true,
     criticalGaps: [],
+    ...EMPTY_RECOMMENDATION,
     ...overrides,
   };
 }
@@ -111,6 +118,42 @@ describe("renderPostingEntry", () => {
       scored({ outcome: outcome({ lowConfidence: false }) }),
     );
     expect(text).not.toContain("Confiança baixa");
+  });
+
+  it("renders the recommended resume variant, highlights and missing terms when computed (docs/audit AC-026)", () => {
+    const text = renderPostingEntry(
+      scored({
+        outcome: outcome({
+          recommendedVariant: "backend",
+          highlights: ["Node.js em produção", "Docker"],
+          missingTerms: ["Kubernetes"],
+        }),
+      }),
+    );
+    expect(text).toContain("Currículo recomendado: backend");
+    expect(text).toContain("Pontos fortes: Node.js em produção; Docker");
+    expect(text).toContain("Termos ausentes no currículo: Kubernetes");
+  });
+
+  it("renders critical gaps when the outcome has any", () => {
+    const text = renderPostingEntry(
+      scored({
+        outcome: outcome({
+          criticalGaps: [
+            { text: "Docker", category: "tooling", weight: "mandatory" },
+          ],
+        }),
+      }),
+    );
+    expect(text).toContain("Lacunas: Docker");
+  });
+
+  it("omits the recommendation lines entirely for a stubbed run (EMPTY_RECOMMENDATION)", () => {
+    const text = renderPostingEntry(scored());
+    expect(text).not.toContain("Currículo recomendado");
+    expect(text).not.toContain("Pontos fortes");
+    expect(text).not.toContain("Termos ausentes");
+    expect(text).not.toContain("Lacunas");
   });
 });
 

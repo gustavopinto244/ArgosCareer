@@ -641,6 +641,8 @@ export async function executeDeliver(
       runId,
       generatedAt: startedAt,
       scored: scoredEntries,
+      // Always empty — no structured "opens at" computation exists yet
+      // (docs/audit AC-026, `digest.ts`'s `PeriodBlockedEntry` doc comment).
       periodBlocked: [],
       summary: {
         collected,

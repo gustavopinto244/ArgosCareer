@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import { createPosting } from "../../../src/posting/domain/posting";
 import { ScoreOutcome } from "../../../src/scoring/domain/types";
 import {
+  EMPTY_RECOMMENDATION,
+  Recommendation,
+} from "../../../src/scoring/domain/recommendation";
+import {
   composeDigest,
   ScoredPosting,
 } from "../../../src/delivery/domain/digest";
@@ -25,7 +29,9 @@ function posting(overrides: Partial<Parameters<typeof createPosting>[0]> = {}) {
   });
 }
 
-function outcome(overrides: Partial<ScoreOutcome> = {}): ScoreOutcome {
+function outcome(
+  overrides: Partial<ScoreOutcome & Recommendation> = {},
+): ScoreOutcome & Recommendation {
   return {
     score: 50,
     verdict: "review",
@@ -37,6 +43,7 @@ function outcome(overrides: Partial<ScoreOutcome> = {}): ScoreOutcome {
     blockingFailure: null,
     lowConfidence: true,
     criticalGaps: [],
+    ...EMPTY_RECOMMENDATION,
     ...overrides,
   };
 }

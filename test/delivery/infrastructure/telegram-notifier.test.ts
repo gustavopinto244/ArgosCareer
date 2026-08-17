@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { createPosting } from "../../../src/posting/domain/posting";
 import { ScoreOutcome } from "../../../src/scoring/domain/types";
+import {
+  EMPTY_RECOMMENDATION,
+  Recommendation,
+} from "../../../src/scoring/domain/recommendation";
 import { Digest, ScoredPosting } from "../../../src/delivery/domain/digest";
 import {
   TelegramNotifier,
@@ -30,7 +34,9 @@ function posting(overrides: Partial<Parameters<typeof createPosting>[0]> = {}) {
   });
 }
 
-function outcome(overrides: Partial<ScoreOutcome> = {}): ScoreOutcome {
+function outcome(
+  overrides: Partial<ScoreOutcome & Recommendation> = {},
+): ScoreOutcome & Recommendation {
   return {
     score: 62,
     verdict: "review",
@@ -42,6 +48,7 @@ function outcome(overrides: Partial<ScoreOutcome> = {}): ScoreOutcome {
     blockingFailure: null,
     lowConfidence: true,
     criticalGaps: [],
+    ...EMPTY_RECOMMENDATION,
     ...overrides,
   };
 }
