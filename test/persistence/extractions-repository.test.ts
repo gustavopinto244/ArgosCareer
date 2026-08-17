@@ -2,8 +2,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { sql } from "drizzle-orm";
 import {
   createDatabase,
+  Db,
   runMigrations,
 } from "../../src/persistence/infrastructure/db";
 import {
@@ -12,11 +14,12 @@ import {
 } from "../../src/persistence/infrastructure/extractions-repository";
 
 let dir: string;
+let db: Db;
 let repository: ExtractionsRepository;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "argos-extractions-"));
-  const db = createDatabase(join(dir, "argos.db"));
+  db = createDatabase(join(dir, "argos.db"));
   runMigrations(db);
   repository = new ExtractionsRepository(db);
 });
@@ -98,6 +101,41 @@ describe("ExtractionsRepository", () => {
 
     it("returns an empty array when nothing is cached under that prompt version", () => {
       expect(repository.findAllForPromptVersion("a-v99")).toEqual([]);
+    });
+  });
+
+  describe("corrupted cache rows (docs/audit AC-031)", () => {
+    it("find treats truncated JSON as a cache miss instead of throwing", () => {
+      repository.upsert("fp1", "a-v1", record(), new Date());
+      // A real restore/manual-edit scenario, not a mock -- write truncated
+      // JSON directly into the column, bypassing upsert's own JSON.stringify.
+      db.run(
+        sql`UPDATE extractions SET requirements = '{"text": "truncated' WHERE fingerprint = 'fp1'`,
+      );
+
+      expect(() => repository.find("fp1", "a-v1")).not.toThrow();
+      expect(repository.find("fp1", "a-v1")).toBeNull();
+    });
+
+    it("find treats valid JSON that is not an array as a cache miss", () => {
+      repository.upsert("fp1", "a-v1", record(), new Date());
+      db.run(
+        sql`UPDATE extractions SET requirements = '{"not": "an array"}' WHERE fingerprint = 'fp1'`,
+      );
+
+      expect(repository.find("fp1", "a-v1")).toBeNull();
+    });
+
+    it("findAllForPromptVersion skips a corrupted row instead of failing the whole scan", () => {
+      repository.upsert("fp1", "a-v1", record(), new Date());
+      repository.upsert("fp2", "a-v1", record(), new Date());
+      db.run(
+        sql`UPDATE extractions SET requirements = 'not json at all' WHERE fingerprint = 'fp1'`,
+      );
+
+      expect(() => repository.findAllForPromptVersion("a-v1")).not.toThrow();
+      const all = repository.findAllForPromptVersion("a-v1");
+      expect(all.map((r) => r.fingerprint)).toEqual(["fp2"]);
     });
   });
 });
