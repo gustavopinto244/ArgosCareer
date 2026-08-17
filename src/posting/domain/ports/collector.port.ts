@@ -7,8 +7,14 @@ export interface CollectionError {
 
 /**
  * A collector never throws — a broken source degrades the pipeline instead of
- * cancelling it (docs/02-architecture.md, principle 1). `error` set and
- * `postings` empty is the collector's way of reporting failure.
+ * cancelling it (docs/02-architecture.md, principle 1). `error` set is the
+ * collector's way of reporting failure; `postings` is **not** guaranteed
+ * empty when it is — a collector that pages through a source (Gupy, CIEE,
+ * Sólides) fills `postings` with every page that already succeeded before
+ * the one that failed, so a later-page failure does not erase earlier valid
+ * results (docs/audit/AUDIT_REPORT.md AC-004). Callers must persist
+ * `postings` and record the failure, not treat `error` as a signal to
+ * discard what is there.
  */
 export interface CollectionResult {
   readonly source: string;

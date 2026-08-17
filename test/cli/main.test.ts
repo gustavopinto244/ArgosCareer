@@ -478,6 +478,42 @@ describe("executeCollect — collector dispatch by source", () => {
     expect(parseFailedSources(run!)).toEqual(["indeed"]);
   });
 
+  it("still normalizes and persists postings a collector returned alongside an error (docs/audit AC-004)", async () => {
+    // A page-2+ failure must not erase page 1's valid results — the
+    // collector reports both `postings` (whatever succeeded) and `error`
+    // (what failed after) in the same CollectionResult.
+    const outcome = await executeCollect(
+      db,
+      () => ({
+        collect: async () => ({
+          source: "gupy",
+          collectedAt: new Date(),
+          postings: [
+            {
+              source: "gupy",
+              sourceId: "1",
+              payload: gupyPayload(1, "Estágio A"),
+            },
+          ],
+          error: { message: "Gupy responded 500 on page 2" },
+        }),
+      }),
+      [{ source: "gupy" }],
+      undefined,
+      0,
+    );
+
+    expect(outcome.normalized).toBe(1);
+    expect(outcome.isNew).toBe(1);
+
+    const postingsRepo = new PostingsRepository(db);
+    expect(postingsRepo.findActive()).toHaveLength(1);
+
+    const run = new RunsRepository(db).findById(outcome.runId);
+    expect(run?.failureReason).toBe("Gupy responded 500 on page 2");
+    expect(run?.normalizedCount).toBe(1);
+  });
+
   it("leaves failedSources empty on the run row when every query succeeds", async () => {
     const outcome = await executeCollect(
       db,

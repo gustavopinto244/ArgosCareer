@@ -85,10 +85,12 @@ function buildUrl(criteria: SolidesCollectorCriteria, page: number): string {
 
 /**
  * `SolidesCollector` never throws — every failure path returns a
- * `CollectionResult` with `error` set and `postings` empty, matching
- * `CollectorPort`'s contract (docs/05-domain-model.md, principle 1). A single
- * malformed item within an otherwise-successful page is the one exception: it
- * is skipped, not treated as a collection failure, same as `GupyCollector`.
+ * `CollectionResult` with `error` set, matching `CollectorPort`'s contract
+ * (docs/05-domain-model.md, principle 1). `postings` carries whatever pages
+ * already succeeded before the failing one, not `[]` unconditionally
+ * (docs/audit AC-004). A single malformed item within an otherwise-successful
+ * page is a different, milder case: it is skipped, not treated as a
+ * collection failure at all, same as `GupyCollector`.
  */
 export class SolidesCollector implements CollectorPort {
   private readonly fetchImpl: FetchLike;
@@ -145,8 +147,10 @@ export class SolidesCollector implements CollectorPort {
         if (!response.ok) {
           return {
             source: SOURCE,
-            postings: [],
+            postings,
             collectedAt,
+            receivedCount,
+            schemaRejectedCount,
             error: {
               message: `Sólides responded ${response.status} ${response.statusText}`,
             },
@@ -159,8 +163,10 @@ export class SolidesCollector implements CollectorPort {
         } catch (cause) {
           return {
             source: SOURCE,
-            postings: [],
+            postings,
             collectedAt,
+            receivedCount,
+            schemaRejectedCount,
             error: { message: "Malformed Sólides response body", cause },
           };
         }
@@ -169,8 +175,10 @@ export class SolidesCollector implements CollectorPort {
         if (!envelope.success) {
           return {
             source: SOURCE,
-            postings: [],
+            postings,
             collectedAt,
+            receivedCount,
+            schemaRejectedCount,
             error: {
               message: "Unexpected Sólides response shape",
               cause: envelope.error,
@@ -213,8 +221,10 @@ export class SolidesCollector implements CollectorPort {
       const detail = cause instanceof Error ? cause.message : String(cause);
       return {
         source: SOURCE,
-        postings: [],
+        postings,
         collectedAt,
+        receivedCount,
+        schemaRejectedCount,
         error: { message: `Sólides request failed: ${detail}`, cause },
       };
     }

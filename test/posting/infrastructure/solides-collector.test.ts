@@ -131,6 +131,36 @@ describe("SolidesCollector — never throws", () => {
     expect(result.error?.message).toContain("Invalid");
     expect(fetchImpl).not.toHaveBeenCalled();
   });
+
+  it("keeps postings from a successful first page when the second page fails (docs/audit AC-004)", async () => {
+    let call = 0;
+    const fetchImpl = vi.fn(async () => {
+      call += 1;
+      if (call === 1) {
+        return jsonResponse({
+          data: {
+            data: Array.from({ length: 10 }, (_, i) => ({
+              id: i,
+              title: "Estágio",
+            })),
+          },
+        });
+      }
+      return new Response("Server Error", { status: 500 });
+    });
+    const collector = new SolidesCollector({
+      fetchImpl,
+      timeoutMs: 50,
+      requestIntervalMs: 0,
+      backoffDelaysMs: [1, 1],
+    });
+
+    const result = await collector.collect({ maxResults: 20 });
+
+    expect(result.postings).toHaveLength(10);
+    expect(result.error).toBeDefined();
+    expect(result.error?.message).toContain("Sólides request failed");
+  });
 });
 
 describe("SolidesCollector — retry and backoff", () => {

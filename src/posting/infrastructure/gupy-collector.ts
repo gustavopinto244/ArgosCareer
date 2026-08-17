@@ -67,12 +67,14 @@ function buildUrl(
 
 /**
  * `GupyCollector` never throws — every failure path returns a
- * `CollectionResult` with `error` set and `postings` empty, matching
- * `CollectorPort`'s contract (docs/05-domain-model.md, principle 1). A
- * single malformed item within an otherwise-successful page is the one
- * exception: it is skipped, not treated as a collection failure, because
- * `GupyJobSchema` is deliberately tolerant and only a pathological item
- * would fail it.
+ * `CollectionResult` with `error` set, matching `CollectorPort`'s contract
+ * (docs/05-domain-model.md, principle 1). `postings` carries whatever pages
+ * already succeeded before the failing one, not `[]` unconditionally — a
+ * page-2 failure must not erase page 1's valid results (docs/audit AC-004).
+ * A single malformed item within an otherwise-successful page is a
+ * different, milder case: it is skipped, not treated as a collection
+ * failure at all, because `GupyJobSchema` is deliberately tolerant and only
+ * a pathological item would fail it.
  */
 export class GupyCollector implements CollectorPort {
   private readonly fetchImpl: FetchLike;
@@ -130,8 +132,10 @@ export class GupyCollector implements CollectorPort {
         if (!response.ok) {
           return {
             source: SOURCE,
-            postings: [],
+            postings,
             collectedAt,
+            receivedCount,
+            schemaRejectedCount,
             error: {
               message: `Gupy responded ${response.status} ${response.statusText}`,
             },
@@ -144,8 +148,10 @@ export class GupyCollector implements CollectorPort {
         } catch (cause) {
           return {
             source: SOURCE,
-            postings: [],
+            postings,
             collectedAt,
+            receivedCount,
+            schemaRejectedCount,
             error: { message: "Malformed Gupy response body", cause },
           };
         }
@@ -154,8 +160,10 @@ export class GupyCollector implements CollectorPort {
         if (!envelope.success) {
           return {
             source: SOURCE,
-            postings: [],
+            postings,
             collectedAt,
+            receivedCount,
+            schemaRejectedCount,
             error: {
               message: "Unexpected Gupy response shape",
               cause: envelope.error,
@@ -195,8 +203,10 @@ export class GupyCollector implements CollectorPort {
       const detail = cause instanceof Error ? cause.message : String(cause);
       return {
         source: SOURCE,
-        postings: [],
+        postings,
         collectedAt,
+        receivedCount,
+        schemaRejectedCount,
         error: { message: `Gupy request failed: ${detail}`, cause },
       };
     }
