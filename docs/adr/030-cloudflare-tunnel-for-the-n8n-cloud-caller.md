@@ -91,7 +91,7 @@ dashboard ("Networks → Tunnels → Public Hostname") had, at some earlier
 point, also registered a **dashboard-side route** for this tunnel — and that
 route wins over the local file for any hostname defined in both places.
 Confirmed from `cloudflared`'s own log line after a restart
-(`journalctl -u cloudflared`), which showed the *effective* ingress config
+(`journalctl -u cloudflared`), which showed the _effective_ ingress config
 routing `argos-api.gustavopinto.dev.br` to `http://localhost:80`, not the
 `100.112.68.45:3000` the local file said — silently wrong until diagnosed by
 comparing the log's actual applied config against the file on disk. The real
