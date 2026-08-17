@@ -1,9 +1,8 @@
 import { Posting } from "../../../posting/domain/posting";
 import { Recommendation } from "../recommendation";
-import { ScoreOutcome } from "../types";
+import { ScoreFailureReason, ScoreOutcome } from "../types";
 
-export type ScoreFailureReason =
-  "invalid_output" | "extraction_failed" | "matching_failed";
+export type { ScoreFailureReason };
 
 /**
  * Bounded retries happen inside the adapter (ADR-006); by the time this

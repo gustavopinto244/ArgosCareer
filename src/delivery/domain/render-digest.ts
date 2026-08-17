@@ -1,5 +1,5 @@
 import { WorkMode } from "../../posting/domain/posting";
-import { Verdict } from "../../scoring/domain/types";
+import { ScoreFailureReason, Verdict } from "../../scoring/domain/types";
 import { Digest, ScoredPosting } from "./digest";
 
 /**
@@ -17,6 +17,15 @@ const WORK_MODE_LABEL: Record<WorkMode, string> = {
   hybrid: "Híbrido",
   onsite: "Presencial",
   unknown: "Local não informado",
+};
+
+/** docs/audit AC-009 / ADR-006: a posting `ScorerPort.score` could not
+ * score at all still appears here, with this reason attached, instead of
+ * silently vanishing from the digest. */
+const SCORE_FAILURE_LABEL: Record<ScoreFailureReason, string> = {
+  invalid_output: "o modelo não retornou uma resposta válida",
+  extraction_failed: "falha ao extrair requisitos da vaga",
+  matching_failed: "falha ao avaliar os requisitos contra o perfil",
 };
 
 function renderLocation(posting: ScoredPosting["posting"]): string {
@@ -56,7 +65,11 @@ export function renderPostingEntry(entry: ScoredPosting): string {
   // was actually extracted and verified — lowConfidence is docs/04's own
   // signal for exactly that gap, so it must be visible here or the percentage
   // above is misleading rather than merely incomplete.
-  if (outcome.lowConfidence) {
+  if (outcome.scoreFailureReason) {
+    lines.push(
+      `⚠ Não foi possível pontuar automaticamente (${SCORE_FAILURE_LABEL[outcome.scoreFailureReason]}) — avaliação manual necessária`,
+    );
+  } else if (outcome.lowConfidence) {
     lines.push(
       "⚠ Confiança baixa — poucos requisitos verificáveis extraídos da vaga",
     );
