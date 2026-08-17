@@ -1348,6 +1348,39 @@ function restoreDuplicateCommand(args: string[]): void {
   console.log(`restore-duplicate: ${fingerprint} is active again`);
 }
 
+/**
+ * The "a human who sees the failure reason can re-run scoring manually"
+ * path ADR-006 promised but never built until now (docs/audit PR-024) —
+ * SECURITY.md-adjacent documentation drift the audit flagged: a stated
+ * guarantee with no supported operation behind it. Thin over
+ * `PostingsRepository.rescore`, same shape as `discard`/`restore-duplicate`.
+ */
+function rescoreCommand(args: string[]): void {
+  const { positionals } = parseArgs({ args, allowPositionals: true });
+
+  const fingerprint = positionals[0];
+  if (!fingerprint) {
+    console.error("Usage: argos rescore <fingerprint>");
+    process.exitCode = 1;
+    return;
+  }
+
+  const db = openDatabase();
+  const rescored = new PostingsRepository(db).rescore(fingerprint);
+
+  if (!rescored) {
+    console.error(
+      `rescore: ${fingerprint} does not exist, or its last scoring attempt did not fail`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  console.log(
+    `rescore: ${fingerprint} is eligible for the next deliver run again`,
+  );
+}
+
 async function main(): Promise<void> {
   const [, , command, ...rest] = process.argv;
 
@@ -1370,9 +1403,12 @@ async function main(): Promise<void> {
     case "restore-duplicate":
       restoreDuplicateCommand(rest);
       break;
+    case "rescore":
+      rescoreCommand(rest);
+      break;
     default:
       console.error(
-        "Usage: argos <collect|dedup|deliver|studyplan|discard|restore-duplicate> [options]",
+        "Usage: argos <collect|dedup|deliver|studyplan|discard|restore-duplicate|rescore> [options]",
       );
       process.exitCode = 1;
   }

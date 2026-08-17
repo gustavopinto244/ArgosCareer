@@ -3,8 +3,10 @@
 ## Status
 
 Accepted — amended 2026-08-17, see
-[Amendment 1](#amendment-1--2026-08-17-rule-5-actually-delivered) and
+[Amendment 1](#amendment-1--2026-08-17-rule-5-actually-delivered),
 [Amendment 2](#amendment-2--2026-08-17-a-failed-posting-is-notified-only-after-exhausting-a-bounded-retry-ceiling)
+and
+[Amendment 3](#amendment-3--2026-08-17-the-manual-rescore-path-amendment-2-left-unbuilt-now-exists)
 
 ## Date
 
@@ -197,3 +199,42 @@ permanently lost on one blip either. See ADR-038 for the full mechanism,
 its interaction with PR-007 (still open), and what remains unbuilt (an
 explicit manual rescore path for a posting that has already exhausted the
 ceiling).
+
+## Amendment 3 — 2026-08-17: the manual rescore path Amendment 2 left unbuilt now exists
+
+A post-remediation audit (`docs/audit`, PR-024) checked this ADR's own
+text — "a human who sees the failure reason can re-run scoring
+manually" — against the runtime and confirmed Amendment 2's own closing
+sentence: no such operation existed. A posting that exhausted
+`DEFAULT_MAX_SCORE_FAILURES` was marked notified with
+`max_retries_exceeded` and then permanently excluded from
+`findUnnotified`/`claimForScoring` (`notifiedAt`'s "write once, never
+cleared" discipline, ADR-007) — recoverable, in practice, only by manual
+database surgery.
+
+**Decision:** `PostingsRepository.rescore(fingerprint)` clears
+`notifiedAt`, `scoreFailureCount`, `lastScoreFailedAt`, and the scoring
+claim fields for one posting, conditioned on `scoreFailureCount > 0` — a
+posting whose most recent scoring outcome was a failure, the exact case
+this ADR's text always claimed was recoverable. A posting whose last
+attempt succeeded is never eligible, so `notifiedAt`'s write-once
+discipline stays intact for every posting a human actually saw a real
+verdict for; this is a scoped, deliberate exception for the one case that
+discipline was never meant to cover. `argos rescore <fingerprint>`
+(`src/cli/main.ts`) exposes it, the same shape `discard`/
+`restore-duplicate` already use.
+
+**Consequence:** this ADR's claim is now an executable invariant, not
+documentation ahead of the code — the audit's own recommendation
+("express guarantees as executable invariants... until their acceptance
+tests pass"). `test/persistence/postings-repository.test.ts` covers the
+eligibility boundary directly: a never-scored posting, a successfully-
+scored one, and a posting with a stale-but-not-yet-expired scoring claim
+(`DEFAULT_STALE_CLAIM_MS`, 4 hours) are all exercised, the last one
+because clearing only `notifiedAt` and leaving the old claim in place
+would have silently reintroduced a multi-hour window where the fix
+appeared to do nothing.
+
+**Reversal cost:** trivial — `rescore` has one call site (the CLI
+command); deleting both restores the documented-but-unbuilt state this
+amendment fixes.

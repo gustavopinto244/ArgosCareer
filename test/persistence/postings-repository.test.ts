@@ -552,3 +552,70 @@ describe("PostingsRepository.discard", () => {
     expect(unnotified[0]?.fingerprint).toBe(b.posting.fingerprint);
   });
 });
+
+describe("PostingsRepository.rescore (docs/audit PR-024)", () => {
+  it("reopens a posting whose last scoring attempt failed", () => {
+    const { posting: stored } = repository.upsert(posting());
+    repository.recordScoreFailure(stored.fingerprint, new Date());
+    repository.markNotified(stored.fingerprint, new Date());
+    expect(repository.findUnnotified()).toHaveLength(0);
+
+    const rescored = repository.rescore(stored.fingerprint);
+
+    expect(rescored).toBe(true);
+    expect(repository.findUnnotified()).toHaveLength(1);
+    expect(repository.getScoreFailureCount(stored.fingerprint)).toBe(0);
+  });
+
+  it("clears a stale-but-not-yet-expired scoring claim, so the next run can claim it immediately", () => {
+    const { posting: stored } = repository.upsert(posting());
+    repository.recordScoreFailure(stored.fingerprint, new Date());
+    repository.markNotified(stored.fingerprint, new Date());
+    // Simulate the run that produced the failure having claimed it —
+    // fresh, well within DEFAULT_STALE_CLAIM_MS.
+    repository.claimForScoring("run-1", new Date());
+
+    repository.rescore(stored.fingerprint);
+
+    const claimed = repository.claimForScoring("run-2", new Date());
+    expect(claimed.map((p) => p.fingerprint)).toEqual([stored.fingerprint]);
+  });
+
+  it("returns false for a fingerprint that does not exist", () => {
+    expect(repository.rescore("no-such-fingerprint")).toBe(false);
+  });
+
+  it("returns false for a posting that was never scored (no failure on record)", () => {
+    const { posting: stored } = repository.upsert(posting());
+    expect(repository.rescore(stored.fingerprint)).toBe(false);
+  });
+
+  it("returns false for a posting whose last attempt succeeded — notifiedAt's write-once discipline holds", () => {
+    const { posting: stored } = repository.upsert(posting());
+    repository.recordScoreFailure(stored.fingerprint, new Date());
+    // A later success resets the counter -- the same signal
+    // executeDeliver's own clearScoreFailures call relies on.
+    repository.clearScoreFailures(stored.fingerprint);
+    repository.markNotified(stored.fingerprint, new Date());
+
+    expect(repository.rescore(stored.fingerprint)).toBe(false);
+    expect(repository.findUnnotified()).toHaveLength(0);
+  });
+
+  it("does not affect an unrelated posting", () => {
+    const a = repository.upsert(posting({ sourceId: "1" }));
+    const b = repository.upsert(
+      posting({ sourceId: "2", title: "Estágio Frontend" }),
+    );
+    repository.recordScoreFailure(a.posting.fingerprint, new Date());
+    repository.markNotified(a.posting.fingerprint, new Date());
+    repository.recordScoreFailure(b.posting.fingerprint, new Date());
+    repository.markNotified(b.posting.fingerprint, new Date());
+
+    repository.rescore(a.posting.fingerprint);
+
+    const unnotified = repository.findUnnotified();
+    expect(unnotified).toHaveLength(1);
+    expect(unnotified[0]?.fingerprint).toBe(a.posting.fingerprint);
+  });
+});
