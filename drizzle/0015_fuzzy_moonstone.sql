@@ -1,0 +1,1 @@
+ALTER TABLE `extractions` ADD `content_hash` text;

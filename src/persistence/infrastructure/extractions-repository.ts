@@ -32,10 +32,17 @@ function parseRequirements(value: string): Requirement[] | null {
 }
 
 /**
- * Stage A's cache, keyed `(fingerprint, promptVersion)` (ADR-007). Upsert
- * rather than insert, matching every other stage's write rule: writing the
- * same extraction twice is indistinguishable from writing it once, so a
- * re-run after a crash costs nothing extra.
+ * Stage A's cache, keyed `(fingerprint, promptVersion)` (ADR-007) *and*
+ * `contentHash` (docs/audit AC-006) — the row is stored under the first
+ * pair (one current extraction per posting/prompt-version, same as
+ * before), but `find` only returns it as a hit when the stored
+ * `contentHash` matches the content being asked about right now. A
+ * posting's `fingerprint` does not change when its description is edited
+ * (ADR-007: company+title+city only), so without this a re-collected
+ * posting with new text kept serving the extraction of the old text
+ * forever. Upsert rather than insert, matching every other stage's write
+ * rule: writing the same extraction twice is indistinguishable from
+ * writing it once, so a re-run after a crash costs nothing extra.
  */
 export class ExtractionsRepository {
   constructor(private readonly db: Db) {}
@@ -43,6 +50,7 @@ export class ExtractionsRepository {
   upsert(
     fingerprint: string,
     promptVersion: string,
+    contentHash: string,
     record: ExtractionRecord,
     extractedAt: Date,
   ): void {
@@ -61,6 +69,7 @@ export class ExtractionsRepository {
       requirements: JSON.stringify(record.requirements),
       seniority: record.seniority,
       experienceYears: record.experienceYears,
+      contentHash,
       extractedAt,
     };
 
@@ -78,7 +87,11 @@ export class ExtractionsRepository {
     }
   }
 
-  find(fingerprint: string, promptVersion: string): ExtractionRecord | null {
+  find(
+    fingerprint: string,
+    promptVersion: string,
+    contentHash: string,
+  ): ExtractionRecord | null {
     const row = this.db
       .select()
       .from(extractions)
@@ -91,6 +104,9 @@ export class ExtractionsRepository {
       .get();
 
     if (!row) return null;
+    // A legacy row (written before this column existed) or one whose
+    // content has since changed is a miss, not a stale hit (AC-006).
+    if (row.contentHash !== contentHash) return null;
 
     const requirements = parseRequirements(row.requirements);
     if (!requirements) return null;

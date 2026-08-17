@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { Posting, Seniority } from "../../posting/domain/posting";
 import { ExtractionsRepository } from "../../persistence/infrastructure/extractions-repository";
+import { hashExtractionInput } from "../domain/extraction-input-hash";
 import { Requirement } from "../domain/types";
 import { AskModel, parseModelOutputWithRetries } from "./llm-output";
 import { buildStageAPrompt, STAGE_A_PROMPT_VERSION } from "./prompts";
@@ -49,9 +50,14 @@ export type ExtractionResult =
  * Stage A (docs/04-scoring-model.md, v2 prompt: `05-domain-model.md`'s
  * seniority/experienceYears fields): reads a posting's title and
  * description, returns its declared requirements plus its stated seniority
- * level. Cached whole by `(fingerprint, promptVersion)` (ADR-007) — a cache
- * hit never calls the model at all, which is what makes re-matching across
- * many M7 configurations affordable.
+ * level. Cached whole by `(fingerprint, promptVersion, contentHash)`
+ * (ADR-007, docs/audit AC-006) — a cache hit never calls the model at all,
+ * which is what makes re-matching across many M7 configurations
+ * affordable. `contentHash` (`hashExtractionInput`) is what makes the
+ * cache correct rather than merely fast: `fingerprint` alone does not
+ * change when a company edits a posting's description, so without it a
+ * re-collected posting with new requirement text kept serving the
+ * extraction of the old text.
  */
 export class StageAExtractor {
   constructor(
@@ -64,9 +70,11 @@ export class StageAExtractor {
     posting: Posting,
     now: () => Date = () => new Date(),
   ): Promise<ExtractionResult> {
+    const contentHash = hashExtractionInput(posting.title, posting.description);
     const cached = this.extractionsRepo.find(
       posting.fingerprint,
       this.promptVersion,
+      contentHash,
     );
     if (cached) {
       return {
@@ -79,12 +87,11 @@ export class StageAExtractor {
 
     // No description is not something the model can extract requirements
     // from — asking it anyway costs a call to be told what we already know.
-    // Deliberately NOT cached: the cache key is (fingerprint, promptVersion)
-    // and carries no notion of "which description this was extracted from",
-    // so persisting this empty result would keep being served after the
-    // description arrives. That is exactly the trap that produced four
-    // silently contentless postings in the first calibration run (ADR-014);
-    // the posting stays uncached and re-extracts for free once it has text.
+    // Deliberately still not cached, even though contentHash would now
+    // correctly distinguish "no description" from any later real one
+    // (AC-006 fixed the staleness case this comment used to warn about):
+    // writing a row for a result derivable from `!posting.description`
+    // alone is pure overhead, not a correctness need.
     if (!posting.description?.trim()) {
       return {
         ok: true,
@@ -122,6 +129,7 @@ export class StageAExtractor {
     this.extractionsRepo.upsert(
       posting.fingerprint,
       this.promptVersion,
+      contentHash,
       result.data,
       now(),
     );

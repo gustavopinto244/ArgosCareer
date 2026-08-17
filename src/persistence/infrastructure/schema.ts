@@ -105,6 +105,12 @@ export const extractions = sqliteTable(
     // so a cache hit still has a value to write back onto the posting row.
     seniority: text("seniority"),
     experienceYears: integer("experience_years"),
+    // hashExtractionInput(title, description) — docs/audit AC-006. Nullable
+    // because rows written before this column existed have no way to know
+    // what content produced them; ExtractionsRepository.find treats a null
+    // (or mismatched) contentHash as a miss rather than trusting a legacy
+    // row blindly.
+    contentHash: text("content_hash"),
     extractedAt: integer("extracted_at", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => [
