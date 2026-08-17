@@ -194,4 +194,9 @@ export const runs = sqliteTable("runs", {
   // serialize/parse precedent `requirements`/`matches` already use rather
   // than drizzle's json column mode. Null, not "[]", when nothing failed.
   failedSources: text("failed_sources"),
+  // Same shape as failedSources, for docs/audit AC-013: which source(s)
+  // stopped paginating this run because they hit their own cap while the
+  // upstream source's last page was still full — a "success" run that
+  // silently left more results uncollected, previously invisible.
+  truncatedSources: text("truncated_sources"),
 });

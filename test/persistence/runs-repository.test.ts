@@ -9,6 +9,7 @@ import {
 import {
   RunsRepository,
   parseFailedSources,
+  parseTruncatedSources,
 } from "../../src/persistence/infrastructure/runs-repository";
 
 let dir: string;
@@ -100,6 +101,26 @@ describe("RunsRepository", () => {
     const row = repository.findById(runId);
     expect(row?.receivedCount).toBe(50);
     expect(row?.schemaRejectedCount).toBe(3);
+  });
+
+  it("serializes truncatedSources to JSON, read back via parseTruncatedSources (docs/audit AC-013)", () => {
+    const runId = repository.start("collect", new Date());
+    repository.finish(runId, new Date(), "success", {
+      truncatedSources: ["gupy", "solides"],
+    });
+
+    const row = repository.findById(runId);
+    expect(row).not.toBeNull();
+    expect(parseTruncatedSources(row!)).toEqual(["gupy", "solides"]);
+  });
+
+  it("parseTruncatedSources returns an empty array when nothing was truncated", () => {
+    const runId = repository.start("collect", new Date());
+    repository.finish(runId, new Date(), "success", {});
+
+    const row = repository.findById(runId);
+    expect(row).not.toBeNull();
+    expect(parseTruncatedSources(row!)).toEqual([]);
   });
 
   it("records tooOldCount, unnormalizableCount and failureReason (docs/11 B2)", () => {

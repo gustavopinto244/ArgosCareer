@@ -252,6 +252,30 @@ describe("SolidesCollector — successful collection", () => {
 
     expect(result.postings).toHaveLength(1);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(result.truncated).toBe(false);
+  });
+
+  it("reports truncated: true when the cap is hit on a full page (docs/audit AC-013)", async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({
+        data: {
+          data: Array.from({ length: 10 }, (_, i) => ({ id: i, title: "x" })),
+        },
+      }),
+    );
+    const collector = new SolidesCollector({
+      fetchImpl,
+      ...FAST_OPTIONS,
+      requestIntervalMs: 0,
+    });
+
+    // take is fixed at 10 — maxResults exactly matching one full page means
+    // the cap, not the source, ends the run.
+    const result = await collector.collect({ maxResults: 10 });
+
+    expect(result.postings).toHaveLength(10);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(result.truncated).toBe(true);
   });
 
   it("skips an individual malformed item without failing the whole collection", async () => {

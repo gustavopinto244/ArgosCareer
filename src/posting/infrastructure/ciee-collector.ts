@@ -165,6 +165,7 @@ export class CieeCollector implements CollectorPort {
     const postings: RawPosting[] = [];
     let scanned = 0;
     let schemaRejectedCount = 0;
+    let truncated = false;
     let page = 0;
 
     try {
@@ -235,6 +236,10 @@ export class CieeCollector implements CollectorPort {
 
         scanned += items.length;
         if (envelope.data.last === true || items.length < pageSize) break;
+        // A full page and the source's own `last` flag says there is more —
+        // if the cap stops the next iteration, that is a real truncation,
+        // not the source running out (docs/audit AC-013).
+        if (scanned >= maxResults) truncated = true;
         page += 1;
       }
     } catch (cause) {
@@ -253,6 +258,7 @@ export class CieeCollector implements CollectorPort {
       collectedAt,
       receivedCount: scanned,
       schemaRejectedCount,
+      truncated,
     };
   }
 

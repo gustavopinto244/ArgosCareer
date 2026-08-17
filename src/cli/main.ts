@@ -79,6 +79,10 @@ export interface CollectOutcome {
   /** Of `received`, how many failed a collector's own item schema before
    * `postings` was ever built (AC-012). */
   readonly schemaRejected: number;
+  /** Source(s) that stopped paginating this run because they hit their own
+   * cap while more results were plausibly available (AC-013) — a "success"
+   * outcome that still left something uncollected. */
+  readonly truncatedSources: readonly string[];
   readonly isNew: number;
   readonly alreadySeen: number;
   readonly error?: string;
@@ -164,6 +168,10 @@ export async function executeCollect(
   // (config/criteria.yaml's per-city Gupy queries) and should only be
   // reported once.
   const failedSources = new Set<string>();
+  // Which source(s) reported truncation this run (docs/audit AC-013) — a Set
+  // for the same reason failedSources is: the same source can appear in
+  // several queries.
+  const truncatedSources = new Set<string>();
 
   // Same bookkeeping guarantee `executeDeliver` documents: a throw between
   // `start` and `finish` must not leave the row open. Collectors cannot throw
@@ -195,6 +203,7 @@ export async function executeCollect(
       collected += result.postings.length;
       received += result.receivedCount ?? 0;
       schemaRejected += result.schemaRejectedCount ?? 0;
+      if (result.truncated) truncatedSources.add(source);
 
       if (result.error) {
         failures += 1;
@@ -253,6 +262,7 @@ export async function executeCollect(
       schemaRejectedCount: schemaRejected,
       failureReason: firstError ?? message,
       failedSources: [...failedSources],
+      truncatedSources: [...truncatedSources],
     });
     throw cause;
   }
@@ -269,6 +279,7 @@ export async function executeCollect(
     schemaRejectedCount: schemaRejected,
     failureReason: firstError ?? null,
     failedSources: [...failedSources],
+    truncatedSources: [...truncatedSources],
   });
 
   return {
@@ -279,6 +290,7 @@ export async function executeCollect(
     unnormalizable,
     received,
     schemaRejected,
+    truncatedSources: [...truncatedSources],
     isNew,
     alreadySeen,
     ...(firstError === undefined ? {} : { error: firstError }),

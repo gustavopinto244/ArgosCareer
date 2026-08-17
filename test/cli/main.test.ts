@@ -21,6 +21,7 @@ import { PostingsRepository } from "../../src/persistence/infrastructure/posting
 import {
   RunsRepository,
   parseFailedSources,
+  parseTruncatedSources,
 } from "../../src/persistence/infrastructure/runs-repository";
 import {
   CollectionResult,
@@ -668,6 +669,62 @@ describe("executeCollect — multi-source dispatch", () => {
 
     expect(outcome.received).toBe(0);
     expect(outcome.schemaRejected).toBe(0);
+  });
+
+  it("records which source(s) reported truncation (docs/audit AC-013)", async () => {
+    const registry: Record<string, CollectorPort> = {
+      gupy: {
+        collect: async () => ({
+          source: "gupy",
+          collectedAt: new Date(),
+          postings: [
+            { source: "gupy", sourceId: "1", payload: gupyPayload(1, "x") },
+          ],
+          truncated: true,
+        }),
+      },
+      ciee: {
+        collect: async () => ({
+          source: "ciee",
+          collectedAt: new Date(),
+          postings: [],
+          truncated: false,
+        }),
+      },
+    };
+
+    const outcome = await executeCollect(
+      db,
+      (source) => registry[source] ?? null,
+      [{ source: "gupy" }, { source: "ciee" }],
+      undefined,
+      0,
+    );
+
+    expect(outcome.truncatedSources).toEqual(["gupy"]);
+
+    const run = new RunsRepository(db).findById(outcome.runId);
+    expect(parseTruncatedSources(run!)).toEqual(["gupy"]);
+  });
+
+  it("leaves truncatedSources empty when no collector reports it", async () => {
+    const collector = stubCollector({
+      source: "gupy",
+      collectedAt: new Date(),
+      postings: [],
+    });
+
+    const outcome = await executeCollect(
+      db,
+      () => collector,
+      [{}],
+      undefined,
+      0,
+    );
+
+    expect(outcome.truncatedSources).toEqual([]);
+    const run = new RunsRepository(db).findById(outcome.runId);
+    expect(parseTruncatedSources(run!)).toEqual([]);
   });
 });
 

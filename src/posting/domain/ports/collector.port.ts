@@ -34,6 +34,16 @@ export interface CollectionResult {
    * already-controlled kind of drop, not schema drift.
    */
   readonly schemaRejectedCount?: number;
+  /**
+   * `true` when this call stopped paginating because it hit its own cap
+   * (`maxResults`) while the source's last page was still full — meaning
+   * more results were plausibly available and never asked for. `false` or
+   * absent when the source's own pagination signaled genuine exhaustion
+   * (an empty or short final page). A collector finishing "success" with
+   * this unset or `false` previously looked identical to one that
+   * genuinely reached the end (docs/audit/AUDIT_REPORT.md AC-013).
+   */
+  readonly truncated?: boolean;
 }
 
 export interface CollectorPort {
