@@ -12,6 +12,9 @@ import { PostingsRepository } from "../../../src/persistence/infrastructure/post
 import { Criteria } from "../../../src/prefilter/domain/criteria";
 import { createPosting } from "../../../src/posting/domain/posting";
 import { MarketRepository } from "../../../src/market/infrastructure/market-repository";
+import { normalizePostingContent } from "../../../src/scoring/domain/posting-content-hash";
+import { hashRequirements } from "../../../src/scoring/domain/requirements-hash";
+import { DEFAULT_MAX_DESCRIPTION_CHARS } from "../../../src/scoring/infrastructure/stage-a-extractor";
 import {
   STAGE_A_PROMPT_VERSION,
   STAGE_B_PROMPT_VERSION,
@@ -24,6 +27,7 @@ import {
 
 const NOW = new Date("2026-08-14T03:00:00Z");
 const PROFILE_HASH = "hash1";
+const MODEL = "model";
 
 function criteria(): Criteria {
   return {
@@ -82,6 +86,16 @@ function posting(
   });
 }
 
+/** The exact contentHash `MarketRepository.loadCorpus` will compute for
+ * this posting, via the same shared helper Stage A itself uses. */
+function contentHashFor(p: ReturnType<typeof posting>): string {
+  return normalizePostingContent(
+    p.title,
+    p.description,
+    DEFAULT_MAX_DESCRIPTION_CHARS,
+  ).contentHash;
+}
+
 function requirement(text: string): Requirement {
   return { text, category: "language", weight: "mandatory" };
 }
@@ -115,20 +129,20 @@ describe("MarketRepository.loadCorpus", () => {
   it("includes a posting with no extraction, with empty requirements and a null verdict", () => {
     postingsRepo.upsert(posting("1"));
 
-    const [entry] = repository.loadCorpus(PROFILE_HASH);
+    const [entry] = repository.loadCorpus(PROFILE_HASH, MODEL);
     expect(entry?.requirements).toEqual([]);
     expect(entry?.matches).toBeNull();
     expect(entry?.verdict).toBeNull();
   });
 
-  it("attaches cached requirements from the current prompt version", () => {
+  it("attaches cached requirements from the current prompt version and model, keyed by the posting's own content hash", () => {
     const p = posting("1");
     postingsRepo.upsert(p);
     extractionsRepo.upsert(
       p.fingerprint,
       STAGE_A_PROMPT_VERSION,
-      "model",
-      "content-hash",
+      MODEL,
+      contentHashFor(p),
       {
         requirements: [requirement("Node.js")],
         seniority: null,
@@ -137,7 +151,7 @@ describe("MarketRepository.loadCorpus", () => {
       NOW,
     );
 
-    const [entry] = repository.loadCorpus(PROFILE_HASH);
+    const [entry] = repository.loadCorpus(PROFILE_HASH, MODEL);
     expect(entry?.requirements).toEqual([requirement("Node.js")]);
   });
 
@@ -147,8 +161,8 @@ describe("MarketRepository.loadCorpus", () => {
     extractionsRepo.upsert(
       p.fingerprint,
       "a-v0-superseded",
-      "model",
-      "content-hash",
+      MODEL,
+      contentHashFor(p),
       {
         requirements: [requirement("Node.js")],
         seniority: null,
@@ -157,36 +171,73 @@ describe("MarketRepository.loadCorpus", () => {
       NOW,
     );
 
-    const [entry] = repository.loadCorpus(PROFILE_HASH);
+    const [entry] = repository.loadCorpus(PROFILE_HASH, MODEL);
+    expect(entry?.requirements).toEqual([]);
+  });
+
+  it("ignores an extraction cached under a different model (docs/audit PR-017)", () => {
+    const p = posting("1");
+    postingsRepo.upsert(p);
+    extractionsRepo.upsert(
+      p.fingerprint,
+      STAGE_A_PROMPT_VERSION,
+      "a-different-model",
+      contentHashFor(p),
+      {
+        requirements: [requirement("Node.js")],
+        seniority: null,
+        experienceYears: null,
+      },
+      NOW,
+    );
+
+    const [entry] = repository.loadCorpus(PROFILE_HASH, MODEL);
+    expect(entry?.requirements).toEqual([]);
+  });
+
+  it("ignores an extraction cached against stale content (docs/audit PR-017)", () => {
+    const p = posting("1");
+    postingsRepo.upsert(p);
+    extractionsRepo.upsert(
+      p.fingerprint,
+      STAGE_A_PROMPT_VERSION,
+      MODEL,
+      "a-content-hash-that-does-not-match-this-posting",
+      {
+        requirements: [requirement("Node.js")],
+        seniority: null,
+        experienceYears: null,
+      },
+      NOW,
+    );
+
+    const [entry] = repository.loadCorpus(PROFILE_HASH, MODEL);
     expect(entry?.requirements).toEqual([]);
   });
 
   it("recomputes a real verdict from cached matches, the same as ApiScorer's Stage C", () => {
     const p = posting("1");
     postingsRepo.upsert(p);
+    const requirements = [requirement("Node.js")];
     extractionsRepo.upsert(
       p.fingerprint,
       STAGE_A_PROMPT_VERSION,
-      "model",
-      "content-hash",
-      {
-        requirements: [requirement("Node.js")],
-        seniority: null,
-        experienceYears: null,
-      },
+      MODEL,
+      contentHashFor(p),
+      { requirements, seniority: null, experienceYears: null },
       NOW,
     );
     matchesRepo.upsert(
       p.fingerprint,
       PROFILE_HASH,
       STAGE_B_PROMPT_VERSION,
-      "model",
-      "requirements-hash",
+      MODEL,
+      hashRequirements(requirements),
       [metMatch("Node.js")],
       NOW,
     );
 
-    const [entry] = repository.loadCorpus(PROFILE_HASH);
+    const [entry] = repository.loadCorpus(PROFILE_HASH, MODEL);
     expect(entry?.verdict).not.toBeNull();
     expect(["apply", "review", "discard"]).toContain(entry?.verdict);
   });
@@ -198,7 +249,7 @@ describe("MarketRepository.loadCorpus", () => {
     postingsRepo.upsert(duplicate);
     postingsRepo.markDuplicate(duplicate.fingerprint, canonical.fingerprint);
 
-    const corpus = repository.loadCorpus(PROFILE_HASH);
+    const corpus = repository.loadCorpus(PROFILE_HASH, MODEL);
     expect(corpus).toHaveLength(1);
     expect(corpus[0]?.posting.fingerprint).toBe(canonical.fingerprint);
   });
@@ -210,14 +261,31 @@ describe("MarketRepository.loadCorpus", () => {
       p.fingerprint,
       "a-different-hash",
       STAGE_B_PROMPT_VERSION,
-      "model",
-      "requirements-hash",
+      MODEL,
+      hashRequirements([]),
       [metMatch("Node.js")],
       NOW,
     );
 
-    const [entry] = repository.loadCorpus(PROFILE_HASH);
+    const [entry] = repository.loadCorpus(PROFILE_HASH, MODEL);
     expect(entry?.matches).toBeNull();
     expect(entry?.verdict).toBeNull();
+  });
+
+  it("ignores matches cached under a different model (docs/audit PR-017)", () => {
+    const p = posting("1");
+    postingsRepo.upsert(p);
+    matchesRepo.upsert(
+      p.fingerprint,
+      PROFILE_HASH,
+      STAGE_B_PROMPT_VERSION,
+      "a-different-model",
+      hashRequirements([]),
+      [metMatch("Node.js")],
+      NOW,
+    );
+
+    const [entry] = repository.loadCorpus(PROFILE_HASH, MODEL);
+    expect(entry?.matches).toBeNull();
   });
 });

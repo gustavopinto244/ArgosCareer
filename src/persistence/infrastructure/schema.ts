@@ -147,9 +147,19 @@ export const extractions = sqliteTable(
     extractedAt: integer("extracted_at", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => [
-    uniqueIndex("extractions_fingerprint_prompt_unique").on(
+    // Composite identity (docs/audit PR-017): before this, uniqueness was
+    // only (fingerprint, promptVersion), so a different model or content
+    // under that same pair didn't get its own row -- it silently
+    // overwrote whatever was there, even though `find` already treated a
+    // model/contentHash mismatch as a miss. Switching LLM_MODEL back and
+    // forth, or editing a description and reverting it, paid for the same
+    // extraction repeatedly because the previous valid answer had already
+    // been evicted by the very write that should have coexisted with it.
+    uniqueIndex("extractions_composite_identity_unique").on(
       table.fingerprint,
       table.promptVersion,
+      table.model,
+      table.contentHash,
     ),
   ],
 );
@@ -184,10 +194,17 @@ export const matches = sqliteTable(
     matchedAt: integer("matched_at", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => [
-    uniqueIndex("matches_fingerprint_profile_prompt_unique").on(
+    // Composite identity (docs/audit PR-017) — same reasoning as
+    // `extractions_composite_identity_unique`: a different model or
+    // requirement set under the same (fingerprint, profileHash,
+    // promptVersion) now gets its own row instead of overwriting a still
+    // valid one.
+    uniqueIndex("matches_composite_identity_unique").on(
       table.fingerprint,
       table.profileHash,
       table.promptVersion,
+      table.model,
+      table.requirementsHash,
     ),
   ],
 );

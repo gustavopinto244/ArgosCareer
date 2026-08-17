@@ -126,6 +126,43 @@ describe("StageBMatcher.match — cache", () => {
     expect(result.ok).toBe(true);
   });
 
+  it("does not trust a cached match list whose count no longer matches the current requirements (docs/audit PR-013)", async () => {
+    // A row whose requirementsHash key matches but whose stored `matches`
+    // array does not -- the exact "structurally valid JSON, wrong content"
+    // corruption PR-013 names (a restore/manual edit, not a mock scenario
+    // this test simulates by writing an internally-inconsistent row
+    // directly). requirementsHash alone cannot catch this: it only proves
+    // *a* set of requirements produced this hash, not that the stored
+    // matches actually correspond to it element-for-element.
+    matchesRepo.upsert(
+      "fp1",
+      "hash1",
+      "b-v3",
+      "unknown",
+      hashRequirements([requirement()]),
+      [], // zero matches for a one-requirement key -- a count mismatch.
+      NOW,
+    );
+    const ask = vi.fn(
+      async () =>
+        '{"status":"met","evidence":"Built atlas-manager\'s HTTP layer in Node.js."}',
+    );
+    const matcher = new StageBMatcher(ask, matchesRepo);
+
+    const result = await matcher.match(
+      "fp1",
+      [requirement()],
+      profile(),
+      "hash1",
+      () => NOW,
+    );
+
+    // Falls through to a real model call rather than trusting the
+    // mismatched cache row.
+    expect(ask).toHaveBeenCalledTimes(1);
+    expect(result.ok).toBe(true);
+  });
+
   it("treats a different profileHash as a cache miss (ADR-007)", async () => {
     matchesRepo.upsert(
       "fp1",
