@@ -294,6 +294,23 @@ single chat at roughly one message per second.
 > exercised against Telegram's real API** — no test here claims to know
 > Telegram's actual rate-limit behavior beyond its documented response
 > shape.
+>
+> **Follow-up, 2026-08-17 (docs/audit AC-022).** A post-remediation audit
+> found the one piece this entry's own fix left open: `fetch` had no
+> timeout at all. A hung TCP connection (not an HTTP error Telegram
+> itself returns) could hold the delivery run's `RunLock` open
+> indefinitely, blocking every later scheduled run behind it — worse than
+> the "re-sends whole digest next run" cost this entry already accepted
+> as an ADR-007 trade-off. `TelegramNotifier` now wraps every
+> `sendMessage` attempt in an `AbortController` timeout (`timeoutMs`,
+> default 20 s), the same pattern `GupyCollector`/`OpenRouterClient`
+> already use. AC-022's other ask — per-chunk resumable delivery so a
+> partial failure does not re-send already-delivered chunks — is **not**
+> addressed here: this entry's own 2026-08-17 resolution already named
+> that trade-off and kept it deliberately, since it is safe (never
+> silently drops a posting) even where it is occasionally redundant, and
+> building real per-chunk idempotency is a materially bigger change than
+> the timeout gap actually found.
 
 ---
 

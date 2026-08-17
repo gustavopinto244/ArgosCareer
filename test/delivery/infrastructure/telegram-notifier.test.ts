@@ -392,6 +392,32 @@ describe("TelegramNotifier — failure, never throws", () => {
     expect(result.ok).toBe(false);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
+
+  it("aborts a request that never resolves, rather than hanging forever (docs/audit AC-022)", async () => {
+    const fetchImpl = vi.fn(
+      (_url: string, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(
+              new DOMException("The operation was aborted.", "AbortError"),
+            );
+          });
+        }),
+    );
+    const notifier = new TelegramNotifier(
+      CONFIG,
+      fetchImpl as unknown as typeof fetch,
+      { ...NO_PACING, timeoutMs: 50 },
+    );
+
+    const result = await notifier.notify(emptyDigest());
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toBe("Telegram request failed");
+      expect(result.error.cause).toBeInstanceOf(DOMException);
+    }
+  });
 });
 
 describe("TelegramNotifier.sendText — M8 alerts", () => {

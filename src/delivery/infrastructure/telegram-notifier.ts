@@ -25,11 +25,18 @@ const DEFAULT_RETRY_AFTER_CAP_MS = 30_000;
 /** Used when a 429 response carries no parseable `retry_after` at all —
  * conservative rather than zero, since the whole point is backing off. */
 const DEFAULT_RETRY_AFTER_MS = 5_000;
+/** Explicit per-request timeout (docs/audit AC-022) — without one, a
+ * request that never resolves (a hung TCP connection, not an HTTP error
+ * Telegram itself returns) could hold the delivery run's `RunLock` open
+ * indefinitely, blocking every later scheduled run behind it. Same
+ * AbortController pattern `GupyCollector`/`OpenRouterClient` already use. */
+const DEFAULT_TIMEOUT_MS = 20_000;
 
 export interface TelegramNotifierOptions {
   readonly pacingMs?: number;
   readonly maxRetries?: number;
   readonly retryAfterCapMs?: number;
+  readonly timeoutMs?: number;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -126,6 +133,7 @@ export class TelegramNotifier implements NotifierPort, TextNotifier {
   private readonly pacingMs: number;
   private readonly maxRetries: number;
   private readonly retryAfterCapMs: number;
+  private readonly timeoutMs: number;
 
   constructor(
     private readonly config: TelegramConfig,
@@ -136,6 +144,7 @@ export class TelegramNotifier implements NotifierPort, TextNotifier {
     this.maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
     this.retryAfterCapMs =
       options.retryAfterCapMs ?? DEFAULT_RETRY_AFTER_CAP_MS;
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   }
 
   async notify(digest: Digest): Promise<NotifyResult> {
@@ -173,17 +182,22 @@ export class TelegramNotifier implements NotifierPort, TextNotifier {
 
     for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
       let response: Response;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), this.timeoutMs);
       try {
         response = await this.fetchImpl(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ chat_id: this.config.chatId, text }),
+          signal: controller.signal,
         });
       } catch (cause) {
         return {
           ok: false,
           error: { message: "Telegram request failed", cause },
         };
+      } finally {
+        clearTimeout(timer);
       }
 
       if (response.status === 429) {
