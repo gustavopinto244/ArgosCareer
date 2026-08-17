@@ -49,6 +49,16 @@ export function renderPostingEntry(entry: ScoredPosting): string {
     `Fonte: ${posting.source}`,
     `→ ${posting.sourceUrl ?? "(link não informado pela fonte)"}`,
   ];
+  // outcome.score reflects empty-category coverage (docs/04: "empty category
+  // → coverage 1"), which reads as a strong match even when almost nothing
+  // was actually extracted and verified — lowConfidence is docs/04's own
+  // signal for exactly that gap, so it must be visible here or the percentage
+  // above is misleading rather than merely incomplete.
+  if (outcome.lowConfidence) {
+    lines.push(
+      "⚠ Confiança baixa — poucos requisitos verificáveis extraídos da vaga",
+    );
+  }
   return lines.join("\n");
 }
 

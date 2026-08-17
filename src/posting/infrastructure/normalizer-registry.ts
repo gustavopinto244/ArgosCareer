@@ -3,6 +3,7 @@ import { RawPosting } from "../domain/raw-posting";
 import { normalizeCieeVaga } from "./ciee-normalizer";
 import { normalizeGupyJob } from "./gupy-normalizer";
 import { normalizeIndeedJob } from "./indeed-normalizer";
+import { normalizeLinkedinAlertJob } from "./linkedin-alert-normalizer";
 
 /**
  * `RawPosting` → `Posting` for one source. Every normalizer returns `null`
@@ -35,6 +36,7 @@ const NORMALIZERS: ReadonlyMap<string, Normalizer> = new Map([
   ["gupy", normalizeGupyJob],
   ["ciee", normalizeCieeVaga],
   ["indeed", normalizeIndeedJob],
+  ["linkedin", normalizeLinkedinAlertJob],
 ]);
 
 /**

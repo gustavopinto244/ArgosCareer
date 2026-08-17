@@ -1,0 +1,47 @@
+# Provenance — `linkedin-jobs.json`
+
+Per `docs/07-testing-strategy.md`: curated fixtures are derived by hand from a
+real observation, never invented from imagination, and every one records
+where it came from.
+
+- **Source of the real shape:** a screenshot the user shared of an n8n
+  workflow's extraction table, built to parse LinkedIn's own job-alert
+  emails (an opt-in feature of the user's own LinkedIn account — not
+  scraped, not authenticated against LinkedIn in any way; CLAUDE.md §3).
+- **Captured:** 2026-08-16, from the user's real inbox via their own n8n
+  instance, not through this repository's code — there is no
+  `fixture:linkedin` npm script, since extraction for this source happens
+  entirely outside this process (ADR-029, mirroring ADR-027's Indeed
+  precedent).
+- **Derived from:** the real table shown in the screenshot, not committed
+  anywhere in this repository. The real rows named real companies (kept out
+  of this file, see below).
+
+## What this fixture preserves from the real observation
+
+The one structural fact the whole normalizer exists to handle:
+
+| Fact | Preserved as |
+| --- | --- |
+| `location` bundles place and work mode into one string — `"Cidade, UF (Modo)"` or `"Brasil (Modo)"` — unlike every other source's separate fields | Every item's `location` |
+| A fully-remote posting states the country, not a city, before the parenthetical | Item 2, `"Brasil (Remoto)"` |
+| A hybrid posting outside the target metro area still reaches this fixture — filtering that out is the pre-filter's job (`isLocationAllowed`, ADR-011 Amendment 3), not this normalizer's | Item 3, São Paulo |
+| Portuguese work-mode labels appear exactly as LinkedIn renders them: `Híbrido`, `Remoto`, `Presencial` | Items 1, 2, 4 respectively |
+
+`link` follows LinkedIn's real `/jobs/view/<id>/` URL shape; the numeric ids
+here are fictional placeholders in the same digit range LinkedIn actually
+uses, not real posting ids.
+
+**Not represented, because the real n8n table did not read job description
+text at all** (the reason this source exists as an email-alert extraction
+rather than a scrape in the first place — see ADR-029): there is no
+`description` field on this schema, and the normalizer always sets
+`description: null`.
+
+## What is fictional
+
+Every company name, title and link here is fictional. The real screenshot
+named real companies (Bemobi Wave, SulAmérica, Núclea, BuscarVagas among
+them) — none of those appear anywhere in this repository's history, matching
+the same discipline `indeed-jobs.md` and `gupy-jobs.md` already follow
+(ADR-004).

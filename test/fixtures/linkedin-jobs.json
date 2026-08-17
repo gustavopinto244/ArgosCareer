@@ -1,0 +1,26 @@
+[
+  {
+    "title": "Estágio em Desenvolvimento Back-end",
+    "company": "Empresa Fictícia Alfa",
+    "location": "Rio de Janeiro, RJ (Híbrido)",
+    "link": "https://www.linkedin.com/jobs/view/4100000001/"
+  },
+  {
+    "title": "Estágio em Segurança da Informação",
+    "company": "Empresa Fictícia Beta",
+    "location": "Brasil (Remoto)",
+    "link": "https://www.linkedin.com/jobs/view/4100000002/"
+  },
+  {
+    "title": "Estágio em Infraestrutura e Automação",
+    "company": "Empresa Fictícia Gama",
+    "location": "São Paulo, SP (Híbrido)",
+    "link": "https://www.linkedin.com/jobs/view/4100000003/"
+  },
+  {
+    "title": "Estágio em Desenvolvimento de Sistemas",
+    "company": "Empresa Fictícia Delta",
+    "location": "Niterói, RJ (Presencial)",
+    "link": "https://www.linkedin.com/jobs/view/4100000004/"
+  }
+]
