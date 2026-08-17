@@ -89,6 +89,16 @@ export type ExtractionResult =
       readonly ok: false;
       readonly reason: "extraction_failed";
       readonly attempts: number;
+      /** True when the underlying cause was `parseModelOutputWithRetries`'s
+       * `permanent_error` (docs/audit PR-007) — a transport failure ADR-035
+       * already knows no retry can ever fix (auth/config), as opposed to a
+       * content-specific repair-budget exhaustion. `false` for the
+       * `buildStageAPrompt` template-read failure above, which is a local
+       * deployment problem, not evidence the whole run's model access is
+       * broken. `ApiScorer` threads this through so `executeDeliver` can
+       * stop the batch instead of spending one doomed call per remaining
+       * posting. */
+      readonly permanent: boolean;
     };
 
 /**
@@ -190,7 +200,12 @@ export class StageAExtractor {
     try {
       prompt = buildStageAPrompt(normalizedTitle, normalizedDescription);
     } catch {
-      return { ok: false, reason: "extraction_failed", attempts: 0 };
+      return {
+        ok: false,
+        reason: "extraction_failed",
+        attempts: 0,
+        permanent: false,
+      };
     }
 
     const result = await parseModelOutputWithRetries(
@@ -205,6 +220,7 @@ export class StageAExtractor {
         ok: false,
         reason: "extraction_failed",
         attempts: result.attempts,
+        permanent: result.reason === "permanent_error",
       };
     }
 

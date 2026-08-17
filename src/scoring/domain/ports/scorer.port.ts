@@ -35,6 +35,17 @@ export type ScoreResult =
       readonly ok: false;
       readonly reason: ScoreFailureReason;
       readonly attempts: number;
+      /**
+       * True when the underlying cause was a permanent OpenRouter transport
+       * failure — a revoked/invalid API key or an unsupported model
+       * (docs/audit PR-007) — as opposed to a content-specific extraction
+       * or matching failure local to this one posting. `executeDeliver`
+       * reads this to stop scoring the rest of the batch immediately
+       * rather than spending one doomed call per remaining posting on a
+       * config problem no amount of per-posting retrying can fix.
+       * `StubScorer` never sets it (it never calls a model at all).
+       */
+      readonly permanent: boolean;
     };
 
 /**

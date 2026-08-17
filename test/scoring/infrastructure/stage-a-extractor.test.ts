@@ -10,6 +10,7 @@ import {
 } from "../../../src/persistence/infrastructure/db";
 import { ExtractionsRepository } from "../../../src/persistence/infrastructure/extractions-repository";
 import { hashExtractionInput } from "../../../src/scoring/domain/extraction-input-hash";
+import { LlmTransportError } from "../../../src/scoring/infrastructure/openrouter-client";
 import {
   DEFAULT_MAX_DESCRIPTION_CHARS,
   MAX_REQUIREMENT_TEXT_CHARS,
@@ -150,6 +151,7 @@ describe("StageAExtractor.extract", () => {
       ok: false,
       reason: "extraction_failed",
       attempts: 3,
+      permanent: false,
     });
   });
 
@@ -174,6 +176,22 @@ describe("StageAExtractor.extract", () => {
     });
   });
 
+  it("marks the failure permanent when the underlying cause is a permanent transport error (docs/audit PR-007)", async () => {
+    const ask = vi.fn(async () => {
+      throw new LlmTransportError("revoked key", "authError");
+    });
+    const extractor = new StageAExtractor(ask, extractionsRepo);
+
+    const result = await extractor.extract(posting(), () => NOW);
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "extraction_failed",
+      attempts: 1,
+      permanent: true,
+    });
+  });
+
   it("rejects an invented seniority value, treating it like any other schema failure", async () => {
     const ask = vi.fn(
       async () =>
@@ -187,6 +205,7 @@ describe("StageAExtractor.extract", () => {
       ok: false,
       reason: "extraction_failed",
       attempts: 3,
+      permanent: false,
     });
   });
 
@@ -396,6 +415,7 @@ describe("StageAExtractor.extract", () => {
         ok: false,
         reason: "extraction_failed",
         attempts: 3,
+        permanent: false,
       });
     });
 
@@ -421,6 +441,7 @@ describe("StageAExtractor.extract", () => {
         ok: false,
         reason: "extraction_failed",
         attempts: 3,
+        permanent: false,
       });
     });
   });

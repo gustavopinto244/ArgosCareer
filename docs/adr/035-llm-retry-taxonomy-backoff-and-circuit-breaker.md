@@ -192,3 +192,34 @@ which strips control characters (including newlines) and caps the result at
 structured field — that part of the original decision holds — the change is
 only that the untrusted component of it is now bounded and stripped of
 control characters before it gets there.
+
+## Amendment 2 — 2026-08-17: breaker scope narrowed, 408 retryable, permanent failures now visible to `executeDeliver`
+
+The text above is kept as originally accepted. This section records three
+refinements to the taxonomy and breaker this ADR established — not a
+reversal of the two-budget/backoff/shared-breaker design, which is
+unchanged.
+
+`POST_REMEDIATION_CHANGE_AUDIT_2026-08-17.md` found three gaps in what this
+ADR shipped: (PR-008) `CircuitBreaker.beforeCall`'s half-open check
+(`state !== "open"`) let every concurrent caller through once the first one
+past cooldown flipped the state, not just one trial call; (PR-009)
+`invalidEnvelope`/`invalidOutput` — facts about one response, not the
+provider — unconditionally tripped the shared breaker, and HTTP 408 fell
+to the permanent `configError` bucket instead of the retryable `timeout`
+one; (PR-007) `parseModelOutputWithRetries`'s own `permanent_error`
+classification was computed correctly but discarded by the time it reached
+`ExtractionResult`/`MatchingResult`/`ScoreResult`, so `executeDeliver` could
+not tell a run-wide auth/config failure apart from a content-specific one
+and kept scoring the rest of the batch regardless.
+
+ADR-039 fixes all three: `beforeCall` blocks every caller while already
+`half_open`, not only while `open`; `isBreakerTrippingFailure` narrows
+breaker-tripping to genuine transport-wide evidence
+(`timeout`/`networkError`/`rateLimited`/`serverError`/`providerError`),
+excluding `invalidEnvelope`/`invalidOutput`; `classifyHttpStatus` maps 408
+to `"timeout"`; and a new `permanent` field threads `permanent_error`
+through both stages' failure results so `executeDeliver` can stop the
+batch on the first one instead of spending one doomed request per
+remaining posting. See ADR-039 for the full reasoning and its interaction
+with ADR-038's bounded per-posting retry ceiling.
