@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted
+Accepted — amended 2026-08-17, see
+[Amendment 1](#amendment-1--2026-08-17-the-twice-yearly-staleness-actually-fixed)
 
 ## Date
 
@@ -136,3 +137,42 @@ Four changes, all to the inputs and none to the scoring formula:
 - Backfilling from `raw_payload` is only possible because ADR-007 stored it.
   This is the second time that decision has paid for itself; worth remembering
   before anyone proposes dropping the column to save space.
+
+## Amendment 1 — 2026-08-17: the twice-yearly staleness, actually fixed
+
+This ADR's own Consequences named the gap and rejected the fix at hand:
+"solving it means putting a clock into the cache key, which is a worse
+trade than a twice-yearly staleness." A repository audit
+(`docs/audit/AUDIT_REPORT.md` AC-018, MEDIUM, CONFIRMED) pointed out that
+the stated mitigation does not actually hold: "twice a year... until the
+profile or prompt version changes" implies the staleness self-corrects,
+but nothing does that automatically. `hashProfile` never changed at a
+semester boundary on its own, so a cached match written the day before one
+kept answering with the old period _indefinitely_, not for a bounded
+twice-yearly window — until a human happened to edit the profile or bump
+the prompt version for an unrelated reason. The real scenario named: a
+candidate crosses into eligibility for a `blocking` requirement mid-cycle
+and stays capped at 35 for months because nothing forced a re-match.
+
+**Decision:** `hashProfile` (`src/profile/domain/profile-hash.ts`) now
+takes `today` and folds `computeAcademicPeriod`'s result into the hash —
+not the raw date this ADR's Consequences warned against. The distinction
+matters: a raw clock in the cache key invalidates continuously, which
+really would be the bad trade this ADR called out. `computeAcademicPeriod`
+is already the same discrete, twice-yearly-changing signal
+`formatAcademicEvidence` uses to decide what text to render — hashing its
+_result_ reproduces exactly the cadence this ADR wanted (one invalidation
+per real semester boundary), just triggered by the actual event instead of
+depending on an unrelated, un-guaranteed profile/prompt edit.
+
+**Consequence:** M10's `MarketRepository.loadCorpus` (read-only) degrades
+gracefully across a boundary — a posting whose cached match falls under
+the old hash simply shows as not-yet-matched under the new one, the same
+"explicit miss over silently wrong" reasoning the rest of this cache
+already follows, not a crash or a wrong verdict.
+
+**Reversal cost:** trivial — `hashProfile`'s `today` parameter is
+optional and defaults to `new Date()`; dropping the `computeAcademicPeriod`
+fold restores the exact previous behavior with no schema or migration
+involved (`profileHash` is computed at read time, never stored as its own
+column).

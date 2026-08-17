@@ -88,10 +88,11 @@ export function buildStageAPrompt(
  * the candidate is in, so stage B answered `not_met` on every one of them —
  * usually a `blocking` requirement, capping the score (ADR-014).
  *
- * Caveat worth knowing: this text changes at each semester boundary while
- * `profileHash` does not, so cached stage B matches keep the period that was
- * current when they were written. Twice a year, cached matches are stale in
- * this one field until the profile or the prompt version changes.
+ * This text changes at each semester boundary — `hashProfile` folds in
+ * `computeAcademicPeriod`'s own result specifically so a cached stage B
+ * match keyed by the old `profileHash` is never reused past a boundary
+ * (docs/audit AC-018 — previously this rendered text could drift out of
+ * sync with `profileHash`, which had no way to see it).
  */
 function formatAcademicEvidence(profile: Profile, today: Date): string[] {
   const period = computeAcademicPeriod(profile.courseStart, today);

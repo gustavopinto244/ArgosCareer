@@ -592,7 +592,7 @@ export async function executeDeliver(
     ];
 
     const profileKeywords = deriveProfileKeywords(profile);
-    const profileHash = hashProfile(profile);
+    const profileHash = hashProfile(profile, startedAt);
     const criteriaHash = hashCriteria(criteria);
 
     // Every candidate gets a recorded prefilter decision, not only the ones
@@ -723,7 +723,7 @@ export async function executeStudyPlan(
   notifier: TextNotifier,
   now: () => Date = () => new Date(),
 ): Promise<StudyPlanOutcome> {
-  const profileHash = hashProfile(profile);
+  const profileHash = hashProfile(profile, now());
   const entries = new MarketRepository(db, criteria).loadCorpus(profileHash);
   const plan = composeStudyPlan(entries, profile, taxonomy, now());
   const text = renderStudyPlanText(plan);
