@@ -273,4 +273,23 @@ describe("SolidesCollector — successful collection", () => {
     expect(result.postings).toHaveLength(1);
     expect(result.postings[0]?.sourceId).toBe("1");
   });
+
+  it("reports receivedCount and schemaRejectedCount (docs/audit AC-012)", async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({
+        data: {
+          data: [
+            { id: 1, title: "Estágio válido" },
+            { missingIdAndTitle: true },
+          ],
+        },
+      }),
+    );
+    const collector = new SolidesCollector({ fetchImpl, ...FAST_OPTIONS });
+
+    const result = await collector.collect({ maxResults: 2 });
+
+    expect(result.receivedCount).toBe(2);
+    expect(result.schemaRejectedCount).toBe(1);
+  });
 });

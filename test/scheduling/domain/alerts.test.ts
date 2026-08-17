@@ -24,6 +24,8 @@ function run(overrides: Partial<RunRow> = {}): RunRow {
     deliveredCount: 0,
     tooOldCount: 0,
     unnormalizableCount: 0,
+    receivedCount: 0,
+    schemaRejectedCount: 0,
     failureReason: null,
     failedSources: null,
     ...overrides,

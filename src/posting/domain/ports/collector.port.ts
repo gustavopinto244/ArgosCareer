@@ -15,6 +15,25 @@ export interface CollectionResult {
   readonly postings: readonly RawPosting[];
   readonly error?: CollectionError;
   readonly collectedAt: Date;
+  /**
+   * Total raw items the source returned across every page this call
+   * fetched, before this collector's own item schema validated any of
+   * them — the "received" count a reconciliation needs
+   * (docs/audit/AUDIT_REPORT.md AC-012: "collected = schemaRejected +
+   * normalized + normalizationRejected" must be checkable). Optional: not
+   * every `CollectorPort` implementation can report this cleanly, and an
+   * absent count is honestly "unknown," not zero.
+   */
+  readonly receivedCount?: number;
+  /**
+   * Of `receivedCount`, how many items failed this collector's own Zod
+   * schema and were silently skipped before this call returned — previously
+   * discarded with no trace (AC-012). Does not include items a collector
+   * rejects for a source-specific business reason after schema validation
+   * succeeds (e.g. CIEE's education-level filter) — that is a different,
+   * already-controlled kind of drop, not schema drift.
+   */
+  readonly schemaRejectedCount?: number;
 }
 
 export interface CollectorPort {

@@ -230,6 +230,21 @@ describe("CieeCollector — successful collection", () => {
     expect(result.error).toBeUndefined();
   });
 
+  it("reports receivedCount and schemaRejectedCount (docs/audit AC-012)", async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({
+        content: [{ codigoVaga: 1, nivelEscolar: "SU" }, { nothing: true }],
+        last: true,
+      }),
+    );
+    const collector = new CieeCollector({ fetchImpl, ...FAST_OPTIONS });
+
+    const result = await collector.collect({});
+
+    expect(result.receivedCount).toBe(2);
+    expect(result.schemaRejectedCount).toBe(1);
+  });
+
   it("retries a 5xx and succeeds once the server recovers", async () => {
     let call = 0;
     const fetchImpl = vi.fn(async () => {

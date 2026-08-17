@@ -164,6 +164,7 @@ export class CieeCollector implements CollectorPort {
 
     const postings: RawPosting[] = [];
     let scanned = 0;
+    let schemaRejectedCount = 0;
     let page = 0;
 
     try {
@@ -217,7 +218,13 @@ export class CieeCollector implements CollectorPort {
           const vaga = CieeVagaSchema.safeParse(item);
           // A single malformed posting is skipped, never fatal — the schema
           // is deliberately tolerant, so only a pathological item fails it.
-          if (!vaga.success) continue;
+          if (!vaga.success) {
+            schemaRejectedCount += 1;
+            continue;
+          }
+          // Not a schema rejection — CIEE's own education-level/area filter,
+          // an intentional, already-controlled drop, counted separately from
+          // AC-012's "silent schema drift" concern.
           if (!keep(vaga.data, criteria)) continue;
           postings.push({
             source: SOURCE,
@@ -240,7 +247,13 @@ export class CieeCollector implements CollectorPort {
       };
     }
 
-    return { source: SOURCE, postings, collectedAt };
+    return {
+      source: SOURCE,
+      postings,
+      collectedAt,
+      receivedCount: scanned,
+      schemaRejectedCount,
+    };
   }
 
   /** Timeout per request, exponential backoff across attempts, and only

@@ -64,9 +64,21 @@ export interface CollectOutcome {
    * quietly discarding everything shows up instead of looking like a dead
    * source. */
   readonly tooOld: number;
-  /** Postings from a source with no registered normalizer — a wiring bug,
-   * not a degraded source, and it must not look like one. */
+  /** A raw item that never became a valid `Posting` — either no normalizer
+   * is registered for its source (a wiring bug) or the registered
+   * normalizer ran and rejected it (docs/audit/AUDIT_REPORT.md AC-012:
+   * previously silently dropped, uncounted, in this internal path only —
+   * `executeIngestExternal` already counted it). Both cases mean the same
+   * thing downstream (no `Posting` to score), so they share one counter. */
   readonly unnormalizable: number;
+  /** Total raw items every collector reported receiving this run, summed
+   * across queries — `undefined` contributes 0, so a collector that
+   * cannot report it does not make the total look smaller than the truth,
+   * only less complete (AC-012). */
+  readonly received: number;
+  /** Of `received`, how many failed a collector's own item schema before
+   * `postings` was ever built (AC-012). */
+  readonly schemaRejected: number;
   readonly isNew: number;
   readonly alreadySeen: number;
   readonly error?: string;
@@ -144,6 +156,8 @@ export async function executeCollect(
   let failures = 0;
   let tooOld = 0;
   let unnormalizable = 0;
+  let received = 0;
+  let schemaRejected = 0;
   let firstError: string | undefined;
   // Which source(s) actually failed this run (docs/11-known-issues.md B2) —
   // a Set because the same source can appear in several queries
@@ -179,6 +193,8 @@ export async function executeCollect(
 
       const result = await collector.collect(query);
       collected += result.postings.length;
+      received += result.receivedCount ?? 0;
+      schemaRejected += result.schemaRejectedCount ?? 0;
 
       if (result.error) {
         failures += 1;
@@ -200,7 +216,13 @@ export async function executeCollect(
           continue;
         }
         const posting = normalize(raw, collectedAt);
-        if (!posting) continue;
+        if (!posting) {
+          // The normalizer ran and rejected this item — same downstream
+          // consequence as "no normalizer registered" above (no `Posting`
+          // to score), previously uncounted here (AC-012).
+          unnormalizable += 1;
+          continue;
+        }
         // A posting the source never dated passes: absence of a date is not
         // evidence of an old posting, the same leniency ADR-011 applies to an
         // unknown location/workMode.
@@ -227,6 +249,8 @@ export async function executeCollect(
       alreadySeenCount: alreadySeen,
       tooOldCount: tooOld,
       unnormalizableCount: unnormalizable,
+      receivedCount: received,
+      schemaRejectedCount: schemaRejected,
       failureReason: firstError ?? message,
       failedSources: [...failedSources],
     });
@@ -241,6 +265,8 @@ export async function executeCollect(
     alreadySeenCount: alreadySeen,
     tooOldCount: tooOld,
     unnormalizableCount: unnormalizable,
+    receivedCount: received,
+    schemaRejectedCount: schemaRejected,
     failureReason: firstError ?? null,
     failedSources: [...failedSources],
   });
@@ -251,6 +277,8 @@ export async function executeCollect(
     normalized,
     tooOld,
     unnormalizable,
+    received,
+    schemaRejected,
     isNew,
     alreadySeen,
     ...(firstError === undefined ? {} : { error: firstError }),
