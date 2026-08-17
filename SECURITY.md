@@ -62,7 +62,11 @@ then into a Telegram message. Two consequences the implementation must respect:
   model never emits the score, and every `met` requires a verbatim quote from
   the profile, which posting text cannot supply. A prompt-injection attempt can
   corrupt one extraction; it cannot manufacture evidence that is not in the
-  profile.
+  profile — enforced by `isKnownProfileEvidence`
+  (`src/scoring/domain/evidence-provenance.ts`), which `StageBMatcher` checks
+  every `met`/`partial` evidence quote against before it ever reaches
+  `createMatch`. A repository audit (docs/audit AC-008) found this claim
+  stated here but not actually checked in code until it was added.
 - **Posting text is escaped before delivery.** It reaches Telegram as data, not
   as markup.
 
