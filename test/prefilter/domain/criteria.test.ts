@@ -178,4 +178,84 @@ describe("CriteriaSchema", () => {
       expect(CriteriaSchema.safeParse(criteria).success).toBe(false);
     });
   });
+
+  describe("scoring invariants (docs/audit AC-025)", () => {
+    it("accepts weights that sum to exactly 100", () => {
+      const criteria = validCriteria();
+      expect(CriteriaSchema.safeParse(criteria).success).toBe(true);
+    });
+
+    it("rejects weights that do not sum to 100 (a config typo like mandatory: 350)", () => {
+      const criteria = {
+        ...validCriteria(),
+        scoring: {
+          ...validCriteria().scoring,
+          weights: { mandatory: 350, desirable: 20, trackAlignment: 15 },
+        },
+      };
+      expect(CriteriaSchema.safeParse(criteria).success).toBe(false);
+    });
+
+    it("rejects weights that sum to less than 100", () => {
+      const criteria = {
+        ...validCriteria(),
+        scoring: {
+          ...validCriteria().scoring,
+          weights: { mandatory: 10, desirable: 10, trackAlignment: 10 },
+        },
+      };
+      expect(CriteriaSchema.safeParse(criteria).success).toBe(false);
+    });
+
+    it("rejects an apply threshold not greater than the review threshold", () => {
+      const criteria = {
+        ...validCriteria(),
+        scoring: {
+          ...validCriteria().scoring,
+          thresholds: { apply: 45, review: 45 },
+        },
+      };
+      expect(CriteriaSchema.safeParse(criteria).success).toBe(false);
+    });
+
+    it("rejects an inverted apply/review threshold pair", () => {
+      const criteria = {
+        ...validCriteria(),
+        scoring: {
+          ...validCriteria().scoring,
+          thresholds: { apply: 40, review: 70 },
+        },
+      };
+      expect(CriteriaSchema.safeParse(criteria).success).toBe(false);
+    });
+
+    it("rejects a blockingCapScore outside [0, 100]", () => {
+      const criteria = {
+        ...validCriteria(),
+        scoring: { ...validCriteria().scoring, blockingCapScore: 150 },
+      };
+      expect(CriteriaSchema.safeParse(criteria).success).toBe(false);
+    });
+
+    it("rejects an unknownTrackCapScore outside [0, 100]", () => {
+      const criteria = {
+        ...validCriteria(),
+        scoring: { ...validCriteria().scoring, unknownTrackCapScore: -5 },
+      };
+      expect(CriteriaSchema.safeParse(criteria).success).toBe(false);
+    });
+
+    it("rejects a trackWeights entry outside [0, 1]", () => {
+      const criteria = {
+        ...validCriteria(),
+        trackWeights: {
+          dev: 1.5,
+          security: 1.0,
+          automation: 0.7,
+          unknown: 0.4,
+        },
+      };
+      expect(CriteriaSchema.safeParse(criteria).success).toBe(false);
+    });
+  });
 });
