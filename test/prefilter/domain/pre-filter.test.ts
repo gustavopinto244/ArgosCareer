@@ -15,7 +15,11 @@ function baseCriteria(overrides: Partial<Criteria> = {}): Criteria {
     },
     titleBlocklist: ["sênior", "pleno", "especialista"],
     titleRequired: ["estágio", "estagiário", "intern", "trainee"],
-    location: { cities: ["Rio de Janeiro", "Niterói"], allowRemote: true },
+    location: {
+      cities: ["Rio de Janeiro", "Niterói"],
+      allowRemote: true,
+      nationwideSources: [],
+    },
     blockedCompanies: ["Empresa Bloqueada"],
     minKeywordAdherence: 0,
     maxAgeDays: null,
@@ -388,11 +392,65 @@ describe("applyPreFilter — location and workMode", () => {
     expect(outcome.passed).toBe(true);
   });
 
+  it("passes an unknown location from an ordinary source — cannot be ruled out", () => {
+    const outcome = applyPreFilter(
+      posting({ location: { kind: "unknown" }, workMode: "onsite" }),
+      baseCriteria(),
+      [],
+      NOW,
+    );
+    expect(outcome.passed).toBe(true);
+  });
+
+  it("rejects an unknown location from a nationwide-crawl source (docs/audit AC-024)", () => {
+    const outcome = applyPreFilter(
+      posting({
+        source: "catho",
+        location: { kind: "unknown" },
+        workMode: "onsite",
+      }),
+      baseCriteria({
+        location: {
+          cities: ["Rio de Janeiro", "Niterói"],
+          allowRemote: true,
+          nationwideSources: ["catho"],
+        },
+      }),
+      [],
+      NOW,
+    );
+    expect(outcome.reason).toBe("location_not_allowed");
+  });
+
+  it("still passes a known, in-region city from a nationwide-crawl source", () => {
+    const outcome = applyPreFilter(
+      posting({
+        source: "catho",
+        location: { kind: "known", city: "Niterói" },
+        workMode: "onsite",
+      }),
+      baseCriteria({
+        location: {
+          cities: ["Rio de Janeiro", "Niterói"],
+          allowRemote: true,
+          nationwideSources: ["catho"],
+        },
+      }),
+      [],
+      NOW,
+    );
+    expect(outcome.passed).toBe(true);
+  });
+
   it("rejects a remote posting when remote is not allowed by criteria", () => {
     const outcome = applyPreFilter(
       posting({ workMode: "remote" }),
       baseCriteria({
-        location: { cities: ["Rio de Janeiro"], allowRemote: false },
+        location: {
+          cities: ["Rio de Janeiro"],
+          allowRemote: false,
+          nationwideSources: [],
+        },
       }),
       [],
       NOW,

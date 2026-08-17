@@ -5,6 +5,21 @@ export const LocationCriteriaSchema = z.object({
   /** Case-insensitive city names the location rule accepts. */
   cities: z.array(z.string().min(1)).default([]),
   allowRemote: z.boolean().default(true),
+  /**
+   * Source names whose collector applies no server-side location filter at
+   * all — it crawls nationwide and this system learns the city only if its
+   * own client-side parsing succeeds (docs/audit AC-024). ADR-011's
+   * leniency rule ("an unknown location cannot be ruled out, so it passes")
+   * assumes the opposite: that the source already narrowed results to the
+   * search profile's region (Gupy's server-side `city` param) or serves a
+   * small enough pool that an unparsed city is unlikely to be wrong
+   * (CIEE/Sólides). Neither holds for a source listed here — an unknown
+   * city from it is exactly as likely to be Manaus as Rio de Janeiro, so
+   * `isLocationAllowed` rejects rather than passes it. Defaults to
+   * `["catho"]`, the one source this project collects via an unfiltered
+   * nationwide crawl (ADR-032) — empty for every other configured source.
+   */
+  nationwideSources: z.array(z.string().min(1)).default(["catho"]),
 });
 
 /**

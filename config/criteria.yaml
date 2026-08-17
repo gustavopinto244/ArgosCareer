@@ -199,6 +199,13 @@ location:
     - Maricá
     - Mesquita
   allowRemote: true
+  # Sources with no server-side location filter -- an unknown-city posting
+  # from one of these is not "cannot be ruled out," it is "the city-parsing
+  # regex failed on a nationwide crawl" (docs/audit AC-024). Catho has no
+  # per-city search and no traffic today (403-blocked, ADR-033) -- this is
+  # a deliberate default in place before it is ever deployed.
+  nationwideSources:
+    - catho
 
 blockedCompanies: []
 
