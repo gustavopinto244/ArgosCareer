@@ -3,8 +3,9 @@
 ## Status
 
 Accepted — amended 2026-08-14, see [Amendment](#amendment--2026-08-14-upserts-must-preserve-first-sighting),
-[Amendment 2](#amendment-2--2026-08-17-stage-as-key-was-missing-the-one-thing-that-actually-varies-its-answer)
-and [Amendment 3](#amendment-3--2026-08-17-neither-key-included-which-model-answered-and-stage-b-ignored-what-stage-a-actually-produced)
+[Amendment 2](#amendment-2--2026-08-17-stage-as-key-was-missing-the-one-thing-that-actually-varies-its-answer),
+[Amendment 3](#amendment-3--2026-08-17-neither-key-included-which-model-answered-and-stage-b-ignored-what-stage-a-actually-produced)
+and [Amendment 4](#amendment-4--2026-08-17-the-corrected-keys-were-documented-but-not-actually-enforced)
 
 ## Date
 
@@ -276,3 +277,49 @@ under that prompt version.
 **Reversal cost:** low. `hashRequirements` has one call site
 (`StageBMatcher`); dropping the parameters and the two columns restores the
 previous (incorrect) behavior.
+
+## Amendment 4 — 2026-08-17: the corrected keys were documented but not actually enforced
+
+Amendments 2 and 3 corrected what this ADR _says_ the key is. They did not
+correct what the database actually enforced: `extractions`' and `matches`'
+only unique index remained `(fingerprint, promptVersion)` and
+`(fingerprint, profileHash, promptVersion)` respectively —
+`model`/`contentHash`/`requirementsHash` were real columns, checked by
+`find()` after a row was already located, but never part of the row's
+actual identity. `upsert`'s existing-row lookup used that same narrower
+key, so a different model or content under the same narrower key did not
+get its own row — it overwrote whatever was there. `docs/audit/
+POST_REMEDIATION_CHANGE_AUDIT_2026-08-17.md` (PR-017) found this precisely:
+"the persisted model does not match its documented key semantics."
+Alternating `LLM_MODEL` between two calibration runs, or editing a
+description and reverting it, evicted a still-valid cached answer and paid
+for it again — the cost hazard this ADR's own `hashRequirements`/
+`contentHash` amendments were supposed to prevent, reopened one layer down
+from where they closed it.
+
+The `findAllForProfile`/`findAllForPromptVersion` decision above — aggregate
+scans "don't carry per-call cache-correctness filtering" — is also revised,
+not merely re-affirmed: ADR-042 (docs/audit PR-017) removes both methods
+outright rather than adding the filtering as a second, parallel
+implementation of `find()`'s own compatibility check. `MarketRepository`
+now reads the cache one posting at a time, through `find()` itself, so the
+aggregate path is exactly as strict as the live scoring path by
+construction — not a decision to leave the aggregate path weaker, but a
+decision that a second, weaker path scoped to the same cache should not
+exist at all.
+
+**Decision:** `extractions_composite_identity_unique` covers
+`(fingerprint, promptVersion, model, contentHash)`;
+`matches_composite_identity_unique` covers `(fingerprint, profileHash,
+promptVersion, model, requirementsHash)` — migration `drizzle/0020`.
+`upsert`'s existing-row lookup in both repositories now matches its own
+unique index exactly, so a write under a new composite key is a genuine
+insert, never an overwrite of a semantically different, still-valid row.
+See ADR-042 for the full reasoning, the aggregate-reader redesign, and
+docs/audit PR-013's companion fix (cache rows are now validated with real
+domain schemas, not `Array.isArray` alone).
+
+**Reversal cost:** low. Reverting means restoring the narrower unique
+indexes and the narrower `upsert`/`find` WHERE clauses; no data migration,
+since the additive columns already exist and would simply go back to being
+checked after the read rather than as part of it.

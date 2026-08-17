@@ -29,13 +29,16 @@ import { classifyTrack } from "../src/prefilter/domain/classify-track";
 import { loadCriteria } from "../src/prefilter/infrastructure/criteria-loader";
 import { hashProfile } from "../src/profile/domain/profile-hash";
 import { loadProfile } from "../src/profile/infrastructure/profile-loader";
+import { normalizePostingContent } from "../src/scoring/domain/posting-content-hash";
+import { hashRequirements } from "../src/scoring/domain/requirements-hash";
 import { computeScore } from "../src/scoring/domain/score";
-import { Match, Verdict } from "../src/scoring/domain/types";
+import { Match, Requirement, Verdict } from "../src/scoring/domain/types";
 import { buildScoringConfig } from "../src/scoring/infrastructure/scoring-config";
 import {
   STAGE_A_PROMPT_VERSION,
   STAGE_B_PROMPT_VERSION,
 } from "../src/scoring/infrastructure/prompts";
+import { DEFAULT_MAX_DESCRIPTION_CHARS } from "../src/scoring/infrastructure/stage-a-extractor";
 
 const STATUS_MARK: Record<Match["status"], string> = {
   met: "atende",
@@ -64,30 +67,59 @@ function main(): void {
   );
   const profileHash = hashProfile(profile);
   const scoringConfig = buildScoringConfig(criteria);
+  // Same env var build-scorer.ts reads for the real scorer (docs/audit
+  // PR-017) -- this report reads exactly what the run under that model
+  // actually cached, not a bulk scan that can't tell one model's answers
+  // from another's.
+  const model = process.env.LLM_MODEL ?? "unknown";
 
   const postings = new PostingsRepository(db).findActive();
-  const byFingerprint = new Map(postings.map((p) => [p.fingerprint, p]));
+  const extractionsRepo = new ExtractionsRepository(db);
+  const matchesRepo = new MatchesRepository(db);
 
-  const extractions = new Map(
-    new ExtractionsRepository(db)
-      .findAllForPromptVersion(STAGE_A_PROMPT_VERSION)
-      .map((e) => [e.fingerprint, e]),
-  );
+  const extractions = new Map<
+    string,
+    { seniority: string | null; experienceYears: number | null }
+  >();
 
-  const scored = new MatchesRepository(db)
-    .findAllForProfile(profileHash, STAGE_B_PROMPT_VERSION)
-    .flatMap((record) => {
-      const posting = byFingerprint.get(record.fingerprint);
-      if (!posting) return [];
-      const tracks = classifyTrack(
-        posting.title,
-        criteria.tracks,
-        criteria.trackExclusions,
-      );
-      const outcome = computeScore(record.matches, tracks, scoringConfig);
-      return [{ posting, matches: record.matches, tracks, outcome }];
-    })
-    .sort((a, b) => b.outcome.score - a.outcome.score);
+  const scored = postings.flatMap((posting) => {
+    const { contentHash } = normalizePostingContent(
+      posting.title,
+      posting.description,
+      DEFAULT_MAX_DESCRIPTION_CHARS,
+    );
+    const extraction = extractionsRepo.find(
+      posting.fingerprint,
+      STAGE_A_PROMPT_VERSION,
+      model,
+      contentHash,
+    );
+    if (extraction) {
+      extractions.set(posting.fingerprint, {
+        seniority: extraction.seniority,
+        experienceYears: extraction.experienceYears,
+      });
+    }
+    const requirements: readonly Requirement[] = extraction?.requirements ?? [];
+
+    const matches = matchesRepo.find(
+      posting.fingerprint,
+      profileHash,
+      STAGE_B_PROMPT_VERSION,
+      model,
+      hashRequirements(requirements),
+    );
+    if (!matches) return [];
+
+    const tracks = classifyTrack(
+      posting.title,
+      criteria.tracks,
+      criteria.trackExclusions,
+    );
+    const outcome = computeScore(matches, tracks, scoringConfig);
+    return [{ posting, matches, tracks, outcome }];
+  });
+  scored.sort((a, b) => b.outcome.score - a.outcome.score);
 
   const wanted = values.verdict as Verdict | undefined;
   const filtered = wanted

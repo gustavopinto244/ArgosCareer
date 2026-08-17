@@ -936,9 +936,19 @@ export async function executeStudyPlan(
   taxonomy: Taxonomy,
   notifier: TextNotifier,
   now: () => Date = () => new Date(),
+  /** docs/audit PR-017 — which model's cached extractions/matches to read.
+   * Defaults to the same env var `build-scorer.ts` reads for the real
+   * scorer, so a studyplan run reads exactly what last night's
+   * `scoreAndDeliver` run (under the same `LLM_MODEL`) actually wrote,
+   * without this function needing to construct a scorer itself just to
+   * learn its model string. */
+  model: string = process.env.LLM_MODEL ?? "unknown",
 ): Promise<StudyPlanOutcome> {
   const profileHash = hashProfile(profile, now());
-  const entries = new MarketRepository(db, criteria).loadCorpus(profileHash);
+  const entries = new MarketRepository(db, criteria).loadCorpus(
+    profileHash,
+    model,
+  );
   const plan = composeStudyPlan(entries, profile, taxonomy, now());
   const text = renderStudyPlanText(plan);
 

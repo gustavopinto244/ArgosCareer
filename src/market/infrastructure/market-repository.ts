@@ -4,11 +4,14 @@ import { Db } from "../../persistence/infrastructure/db";
 import { ExtractionsRepository } from "../../persistence/infrastructure/extractions-repository";
 import { MatchesRepository } from "../../persistence/infrastructure/matches-repository";
 import { PostingsRepository } from "../../persistence/infrastructure/postings-repository";
+import { normalizePostingContent } from "../../scoring/domain/posting-content-hash";
+import { hashRequirements } from "../../scoring/domain/requirements-hash";
 import {
   STAGE_A_PROMPT_VERSION,
   STAGE_B_PROMPT_VERSION,
 } from "../../scoring/infrastructure/prompts";
 import { buildScoringConfig } from "../../scoring/infrastructure/scoring-config";
+import { DEFAULT_MAX_DESCRIPTION_CHARS } from "../../scoring/infrastructure/stage-a-extractor";
 import { computeScore } from "../../scoring/domain/score";
 import { Match, Requirement } from "../../scoring/domain/types";
 import { CorpusEntry } from "../domain/types";
@@ -20,6 +23,17 @@ import { CorpusEntry } from "../domain/types";
  * for a live scoring call (`classifyTrack` -> `computeScore`), just against
  * already-cached data instead of a fresh LLM call — the same Stage C
  * function, not a second implementation of "how do I score a posting."
+ *
+ * Reads the extraction/match cache one posting at a time, through the same
+ * `find()` each stage's own live path uses (docs/audit PR-017) — not a bulk
+ * scan filtered after the fact. A bulk scan can only check dimensions that
+ * are the same for every row in the query (`promptVersion`, `model`); it
+ * cannot check `contentHash`, which is specific to each posting's own
+ * current title/description, or `requirementsHash`, which is specific to
+ * each posting's own current requirement set. Reusing `find()` per posting
+ * makes this reader automatically as strict as Stage A/B's own cache
+ * lookups, with no second, weaker compatibility check to keep in sync with
+ * theirs.
  *
  * `findActive()` (not every row): a posting flagged as a similarity
  * duplicate (ADR-010) is the same real opening as its canonical sighting,
@@ -34,33 +48,42 @@ export class MarketRepository {
     private readonly criteria: Criteria,
   ) {}
 
-  loadCorpus(profileHash: string): CorpusEntry[] {
+  /**
+   * `model` identifies which model's cached answers to read (docs/audit
+   * AC-007/PR-017) — the same value `LLM_MODEL` configured for the run that
+   * actually produced them. A corpus assembled under a different model
+   * value than the one that scored the postings simply finds nothing
+   * cached for any of them, the same honest "not scored yet" a fresh
+   * posting shows, rather than silently mixing two models' judgments.
+   */
+  loadCorpus(profileHash: string, model: string): CorpusEntry[] {
     const postings = new PostingsRepository(this.db).findActive();
-
-    const extractionsByFingerprint = new Map<string, readonly Requirement[]>();
-    for (const extraction of new ExtractionsRepository(
-      this.db,
-    ).findAllForPromptVersion(STAGE_A_PROMPT_VERSION)) {
-      extractionsByFingerprint.set(
-        extraction.fingerprint,
-        extraction.requirements,
-      );
-    }
-
-    const matchesByFingerprint = new Map<string, readonly Match[]>();
-    for (const record of new MatchesRepository(this.db).findAllForProfile(
-      profileHash,
-      STAGE_B_PROMPT_VERSION,
-    )) {
-      matchesByFingerprint.set(record.fingerprint, record.matches);
-    }
-
+    const extractionsRepo = new ExtractionsRepository(this.db);
+    const matchesRepo = new MatchesRepository(this.db);
     const scoringConfig = buildScoringConfig(this.criteria);
 
     return postings.map((posting) => {
-      const requirements =
-        extractionsByFingerprint.get(posting.fingerprint) ?? [];
-      const matches = matchesByFingerprint.get(posting.fingerprint) ?? null;
+      const { contentHash } = normalizePostingContent(
+        posting.title,
+        posting.description,
+        DEFAULT_MAX_DESCRIPTION_CHARS,
+      );
+      const extraction = extractionsRepo.find(
+        posting.fingerprint,
+        STAGE_A_PROMPT_VERSION,
+        model,
+        contentHash,
+      );
+      const requirements: readonly Requirement[] =
+        extraction?.requirements ?? [];
+
+      const matches: readonly Match[] | null = matchesRepo.find(
+        posting.fingerprint,
+        profileHash,
+        STAGE_B_PROMPT_VERSION,
+        model,
+        hashRequirements(requirements),
+      );
 
       const verdict = matches
         ? computeScore(

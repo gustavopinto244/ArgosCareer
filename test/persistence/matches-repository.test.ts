@@ -118,7 +118,7 @@ describe("MatchesRepository", () => {
     ).toEqual([]);
   });
 
-  describe("requirementsHash and model (docs/audit AC-007)", () => {
+  describe("requirementsHash and model (docs/audit AC-007, PR-017)", () => {
     it("treats a mismatched requirementsHash as a cache miss", () => {
       repository.upsert(
         "fp1",
@@ -149,6 +149,67 @@ describe("MatchesRepository", () => {
       ).toBeNull();
     });
 
+    it("keeps both requirement sets independently retrievable under the same fingerprint/profileHash/promptVersion/model (docs/audit PR-017)", () => {
+      // The exact bug PR-017 names: a Stage A prompt-version bump or a
+      // content-hash-triggered re-extraction changes the requirement set
+      // without touching fingerprint/profileHash/promptVersion from Stage
+      // B's point of view -- the old key kept getting overwritten by the
+      // new requirement set's match instead of the two coexisting.
+      repository.upsert(
+        "fp1",
+        "hash1",
+        "b-v1",
+        MODEL_A,
+        REQ_HASH_A,
+        matchList(),
+        new Date(),
+      );
+      repository.upsert(
+        "fp1",
+        "hash1",
+        "b-v1",
+        MODEL_A,
+        REQ_HASH_B,
+        [],
+        new Date(),
+      );
+
+      expect(
+        repository.find("fp1", "hash1", "b-v1", MODEL_A, REQ_HASH_A),
+      ).toEqual(matchList());
+      expect(
+        repository.find("fp1", "hash1", "b-v1", MODEL_A, REQ_HASH_B),
+      ).toEqual([]);
+    });
+
+    it("keeps both models' matches independently retrievable under the same fingerprint/profileHash/promptVersion/requirementsHash (docs/audit PR-017)", () => {
+      repository.upsert(
+        "fp1",
+        "hash1",
+        "b-v1",
+        MODEL_A,
+        REQ_HASH_A,
+        matchList(),
+        new Date(),
+      );
+      repository.upsert(
+        "fp1",
+        "hash1",
+        "b-v1",
+        MODEL_B,
+        REQ_HASH_A,
+        [],
+        new Date(),
+      );
+
+      expect(
+        repository.find("fp1", "hash1", "b-v1", MODEL_A, REQ_HASH_A),
+      ).toEqual(matchList());
+      expect(
+        repository.find("fp1", "hash1", "b-v1", MODEL_B, REQ_HASH_A),
+      ).toEqual([]);
+    });
+
     it("treats a legacy row with no stored requirementsHash/model as a miss", () => {
       db.run(
         sql`INSERT INTO matches (fingerprint, profile_hash, prompt_version, matches, matched_at) VALUES ('fp1', 'hash1', 'b-v1', '[]', ${Date.now()})`,
@@ -159,70 +220,7 @@ describe("MatchesRepository", () => {
     });
   });
 
-  describe("findAllForProfile", () => {
-    it("returns every match under the given (profileHash, promptVersion), with fingerprint", () => {
-      repository.upsert(
-        "fp1",
-        "hash1",
-        "b-v1",
-        MODEL_A,
-        REQ_HASH_A,
-        matchList(),
-        new Date(),
-      );
-      repository.upsert(
-        "fp2",
-        "hash1",
-        "b-v1",
-        MODEL_A,
-        REQ_HASH_A,
-        [],
-        new Date(),
-      );
-
-      const all = repository.findAllForProfile("hash1", "b-v1");
-      expect(all.map((r) => r.fingerprint).sort()).toEqual(["fp1", "fp2"]);
-    });
-
-    it("excludes matches under a different profile hash or prompt version", () => {
-      repository.upsert(
-        "fp1",
-        "hash1",
-        "b-v1",
-        MODEL_A,
-        REQ_HASH_A,
-        matchList(),
-        new Date(),
-      );
-      repository.upsert(
-        "fp2",
-        "hash2",
-        "b-v1",
-        MODEL_A,
-        REQ_HASH_A,
-        matchList(),
-        new Date(),
-      );
-      repository.upsert(
-        "fp3",
-        "hash1",
-        "b-v2",
-        MODEL_A,
-        REQ_HASH_A,
-        matchList(),
-        new Date(),
-      );
-
-      const all = repository.findAllForProfile("hash1", "b-v1");
-      expect(all.map((r) => r.fingerprint)).toEqual(["fp1"]);
-    });
-
-    it("returns an empty array when nothing is cached for that key", () => {
-      expect(repository.findAllForProfile("hash1", "b-v1")).toEqual([]);
-    });
-  });
-
-  describe("corrupted cache rows (docs/audit AC-031)", () => {
+  describe("corrupted cache rows (docs/audit AC-031, PR-013)", () => {
     it("find treats truncated JSON as a cache miss instead of throwing", () => {
       repository.upsert(
         "fp1",
@@ -266,7 +264,10 @@ describe("MatchesRepository", () => {
       ).toBeNull();
     });
 
-    it("findAllForProfile skips a corrupted row instead of failing the whole scan", () => {
+    it("find treats a structurally-valid-JSON array of domain-invalid elements as a cache miss", () => {
+      // The exact gap PR-013 names: [{}] and [null] are both valid JSON and
+      // both real arrays -- Array.isArray alone accepted them as if they
+      // were real Match[].
       repository.upsert(
         "fp1",
         "hash1",
@@ -276,8 +277,17 @@ describe("MatchesRepository", () => {
         matchList(),
         new Date(),
       );
+      db.run(
+        sql`UPDATE matches SET matches = '[{}]' WHERE fingerprint = 'fp1'`,
+      );
+      expect(
+        repository.find("fp1", "hash1", "b-v1", MODEL_A, REQ_HASH_A),
+      ).toBeNull();
+    });
+
+    it("find rejects an invalid status enum on an otherwise well-formed match", () => {
       repository.upsert(
-        "fp2",
+        "fp1",
         "hash1",
         "b-v1",
         MODEL_A,
@@ -286,12 +296,20 @@ describe("MatchesRepository", () => {
         new Date(),
       );
       db.run(
-        sql`UPDATE matches SET matches = 'not json at all' WHERE fingerprint = 'fp1'`,
+        sql`UPDATE matches SET matches = '[{"requirement":{"text":"Node.js","category":"language","weight":"mandatory"},"status":"maybe","evidence":"x"}]' WHERE fingerprint = 'fp1'`,
       );
+      expect(
+        repository.find("fp1", "hash1", "b-v1", MODEL_A, REQ_HASH_A),
+      ).toBeNull();
+    });
 
-      expect(() => repository.findAllForProfile("hash1", "b-v1")).not.toThrow();
-      const all = repository.findAllForProfile("hash1", "b-v1");
-      expect(all.map((r) => r.fingerprint)).toEqual(["fp2"]);
+    it("find rejects a match whose nested requirement is not a valid Requirement", () => {
+      db.run(
+        sql`INSERT INTO matches (fingerprint, profile_hash, prompt_version, matches, requirements_hash, model, matched_at) VALUES ('fp1', 'hash1', 'b-v1', '[{"requirement":{},"status":"met","evidence":"x"}]', ${REQ_HASH_A}, ${MODEL_A}, ${Date.now()})`,
+      );
+      expect(
+        repository.find("fp1", "hash1", "b-v1", MODEL_A, REQ_HASH_A),
+      ).toBeNull();
     });
   });
 });

@@ -132,7 +132,25 @@ export class StageBMatcher {
       this.model,
       requirementsHash,
     );
-    if (cached) return { ok: true, matches: cached };
+    // Reconciled against the *current* requirement list, not trusted on the
+    // strength of requirementsHash alone (docs/audit PR-013): the hash
+    // already makes a coincidental match astronomically unlikely, but it
+    // says nothing about a row whose `matches` JSON was corrupted or
+    // hand-edited independently of that column (a restore, AC-031's
+    // scenario) — a count that no longer matches, or a requirement that no
+    // longer lines up positionally, is exactly the "structurally valid
+    // JSON, wrong content" shape a bare `Array.isArray`/schema check alone
+    // cannot catch. A mismatch here is not fatal -- it degrades to a cache
+    // miss, the same cost principle 1 already assigns to any other miss.
+    if (
+      cached &&
+      cached.length === requirements.length &&
+      cached.every(
+        (match, i) => match.requirement.text === requirements[i]?.text,
+      )
+    ) {
+      return { ok: true, matches: cached };
+    }
 
     const askOne = async (requirement: Requirement): Promise<Answer> => {
       // Same disk read, same contract, as stage A — see `StageAExtractor`.

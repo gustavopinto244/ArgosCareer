@@ -1,9 +1,7 @@
 import { z } from "zod";
 import { Posting, Seniority } from "../../posting/domain/posting";
 import { ExtractionsRepository } from "../../persistence/infrastructure/extractions-repository";
-import { hashExtractionInput } from "../domain/extraction-input-hash";
-import { htmlToText } from "../domain/html-to-text";
-import { truncateDescription } from "../domain/text-truncation";
+import { normalizePostingContent } from "../domain/posting-content-hash";
 import { Requirement } from "../domain/types";
 import { AskModel, parseModelOutputWithRetries } from "./llm-output";
 import { buildStageAPrompt, STAGE_A_PROMPT_VERSION } from "./prompts";
@@ -144,20 +142,19 @@ export class StageAExtractor {
     // hash, the cache lookup, and the prompt itself all see exactly the same
     // text, which is what makes `inputTruncated` an honest fact about what
     // the model actually received rather than about the raw posting
-    // (docs/audit AC-017).
-    const normalizedTitle = htmlToText(posting.title).text;
-    let normalizedDescription: string | null = null;
-    let inputTruncated = false;
-    if (posting.description) {
-      const { text } = htmlToText(posting.description);
-      const bounded = truncateDescription(text, this.maxDescriptionChars);
-      normalizedDescription = bounded.text;
-      inputTruncated = bounded.truncated;
-    }
-
-    const contentHash = hashExtractionInput(
-      normalizedTitle,
-      normalizedDescription,
+    // (docs/audit AC-017). `normalizePostingContent` (docs/audit PR-017) is
+    // the same function `MarketRepository` calls to check a cached
+    // extraction's contentHash against a posting's current content — one
+    // place computing this, not two that could drift apart.
+    const {
+      title: normalizedTitle,
+      description: normalizedDescription,
+      contentHash,
+      inputTruncated,
+    } = normalizePostingContent(
+      posting.title,
+      posting.description,
+      this.maxDescriptionChars,
     );
     const cached = this.extractionsRepo.find(
       posting.fingerprint,

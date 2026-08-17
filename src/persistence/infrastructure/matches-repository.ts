@@ -1,40 +1,41 @@
 import { and, eq } from "drizzle-orm";
-import { Match } from "../../scoring/domain/types";
+import { z } from "zod";
+import { Match, MatchSchema } from "../../scoring/domain/types";
 import { Db } from "./db";
 import { matches } from "./schema";
 
-export interface FingerprintedMatches {
-  readonly fingerprint: string;
-  readonly matches: readonly Match[];
-}
+const CachedMatchesSchema = z.array(MatchSchema);
 
-/** `null` on anything that does not parse as an array — same reasoning as
- * `extractions-repository.ts`'s `parseRequirements` (docs/audit AC-031): a
- * corrupted cache row must read back as a miss, not throw and take down
- * whatever read it. */
+/** `null` on anything that is not a valid `Match[]` — same reasoning as
+ * `extractions-repository.ts`'s `parseRequirements` (docs/audit AC-031,
+ * PR-013): a corrupted cache row, or a structurally-valid-JSON array whose
+ * elements are not real `Match`es (an invalid `status` enum, a nested
+ * `requirement` missing a field), must read back as a miss, not throw and
+ * take down whatever read it. */
 function parseMatches(value: string): Match[] | null {
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(value);
-    return Array.isArray(parsed) ? (parsed as Match[]) : null;
+    parsed = JSON.parse(value);
   } catch {
     return null;
   }
+  const result = CachedMatchesSchema.safeParse(parsed);
+  return result.success ? (result.data as Match[]) : null;
 }
 
 /**
- * Stage B's cache, keyed `(fingerprint, profileHash, promptVersion)`
- * (ADR-007) *and* `requirementsHash` *and* `model` (docs/audit AC-007).
- * `profileHash` is what makes this cache correct against a profile edit:
- * editing the profile must produce a new key, never silently reuse a match
- * computed against the old one. `requirementsHash` does the same job
- * against a *Stage A* change — a new `a-v` prompt version or a
- * content-hash-triggered re-extraction (ADR-007 Amendment 2) leaves
- * `fingerprint`/`profileHash`/`promptVersion` completely unchanged from
- * Stage B's point of view, so without hashing the actual requirement list
- * being matched, Stage B kept serving matches computed against a
- * requirement set that no longer existed. `model` closes the same gap
- * AC-006 closed for Stage A: switching `LLM_MODEL` must not silently reuse
- * a different model's judgment as the current one's.
+ * Stage B's cache, keyed by the composite `(fingerprint, profileHash,
+ * promptVersion, model, requirementsHash)` (ADR-007, docs/audit
+ * AC-007/PR-017). `profileHash` is what makes this cache correct against a
+ * profile edit; `requirementsHash` against a Stage A change (a new prompt
+ * version, or a content-hash-triggered re-extraction) that leaves
+ * `fingerprint`/`profileHash`/`promptVersion` untouched from Stage B's own
+ * point of view; `model` against switching `LLM_MODEL`. Before PR-017, only
+ * `(fingerprint, profileHash, promptVersion)` was the row's actual database
+ * identity — `model`/`requirementsHash` were checked after a row was
+ * already found, so a different model or requirement set under that same
+ * triple silently overwrote a still-valid match instead of coexisting
+ * alongside it, enforced now by `matches_composite_identity_unique`.
  */
 export class MatchesRepository {
   constructor(private readonly db: Db) {}
@@ -56,6 +57,8 @@ export class MatchesRepository {
           eq(matches.fingerprint, fingerprint),
           eq(matches.profileHash, profileHash),
           eq(matches.promptVersion, promptVersion),
+          eq(matches.model, model),
+          eq(matches.requirementsHash, requirementsHash),
         ),
       )
       .get();
@@ -99,50 +102,13 @@ export class MatchesRepository {
           eq(matches.fingerprint, fingerprint),
           eq(matches.profileHash, profileHash),
           eq(matches.promptVersion, promptVersion),
+          eq(matches.model, model),
+          eq(matches.requirementsHash, requirementsHash),
         ),
       )
       .get();
-
     if (!row) return null;
-    // A legacy row (written before these columns existed), one computed
-    // from a different requirement set, or one produced by a different
-    // model is a miss, not a stale hit (AC-007).
-    if (row.requirementsHash !== requirementsHash) return null;
-    if (row.model !== model) return null;
 
     return parseMatches(row.matches);
-  }
-
-  /**
-   * Every cached match for the current profile and prompt version — M10's
-   * "high-compatibility postings" filter needs a verdict per posting, and a
-   * verdict needs matches. Scoped to `(profileHash, promptVersion)` for the
-   * same reason `find` is: a match computed against a superseded profile is
-   * a wrong answer that looks computed, not a data point (`05-domain-model.md`).
-   */
-  findAllForProfile(
-    profileHash: string,
-    promptVersion: string,
-  ): FingerprintedMatches[] {
-    const rows = this.db
-      .select()
-      .from(matches)
-      .where(
-        and(
-          eq(matches.profileHash, profileHash),
-          eq(matches.promptVersion, promptVersion),
-        ),
-      )
-      .all();
-
-    // A corrupted row is skipped, not fatal to the whole scan (same
-    // reasoning as `find` above).
-    const result: FingerprintedMatches[] = [];
-    for (const row of rows) {
-      const parsed = parseMatches(row.matches);
-      if (!parsed) continue;
-      result.push({ fingerprint: row.fingerprint, matches: parsed });
-    }
-    return result;
   }
 }

@@ -86,7 +86,7 @@ describe("ExtractionsRepository", () => {
     ).toEqual([]);
   });
 
-  it("upserting the same (fingerprint, promptVersion) key overwrites, not duplicates", () => {
+  it("upserting the exact same composite key overwrites, not duplicates", () => {
     repository.upsert("fp1", "a-v1", MODEL_A, HASH_A, record(), new Date());
     repository.upsert(
       "fp1",
@@ -108,24 +108,35 @@ describe("ExtractionsRepository", () => {
       expect(repository.find("fp1", "a-v1", MODEL_A, HASH_B)).toBeNull();
     });
 
-    it("re-upserting under a new contentHash replaces the old row rather than duplicating it", () => {
-      repository.upsert("fp1", "a-v1", MODEL_A, HASH_A, record(), new Date());
+    it("keeps both content hashes independently retrievable under the same fingerprint/promptVersion/model (docs/audit PR-017)", () => {
+      // The exact bug PR-017 names: a description edited and then reverted
+      // used to evict the still-valid first extraction, because the row's
+      // actual database identity was only (fingerprint, promptVersion) --
+      // contentHash was checked only after a row was already found. Both
+      // must now coexist as their own rows.
+      repository.upsert(
+        "fp1",
+        "a-v1",
+        MODEL_A,
+        HASH_A,
+        record({ requirements: [] }),
+        new Date(),
+      );
       repository.upsert(
         "fp1",
         "a-v1",
         MODEL_A,
         HASH_B,
-        record({ requirements: [] }),
+        record({ seniority: "internship" }),
         new Date(),
       );
 
-      // The old content hash no longer resolves -- the row now belongs to
-      // the new content, matching a real posting whose description changed
-      // after the first extraction (fingerprint stays identical by design).
-      expect(repository.find("fp1", "a-v1", MODEL_A, HASH_A)).toBeNull();
       expect(
-        repository.find("fp1", "a-v1", MODEL_A, HASH_B)?.requirements,
+        repository.find("fp1", "a-v1", MODEL_A, HASH_A)?.requirements,
       ).toEqual([]);
+      expect(repository.find("fp1", "a-v1", MODEL_A, HASH_B)?.seniority).toBe(
+        "internship",
+      );
     });
 
     it("treats a legacy row with no stored contentHash as a miss", () => {
@@ -138,10 +149,40 @@ describe("ExtractionsRepository", () => {
     });
   });
 
-  describe("model (docs/audit AC-007)", () => {
+  describe("model (docs/audit AC-007, PR-017)", () => {
     it("treats a mismatched model as a cache miss, even with the same fingerprint/promptVersion/contentHash", () => {
       repository.upsert("fp1", "a-v1", MODEL_A, HASH_A, record(), new Date());
       expect(repository.find("fp1", "a-v1", MODEL_B, HASH_A)).toBeNull();
+    });
+
+    it("keeps both models' extractions independently retrievable under the same fingerprint/promptVersion/contentHash (docs/audit PR-017)", () => {
+      // The exact bug PR-017 names: alternating LLM_MODEL between two
+      // calibration runs used to evict the other model's still-valid
+      // extraction on every switch, because the row's actual database
+      // identity did not include `model`.
+      repository.upsert(
+        "fp1",
+        "a-v1",
+        MODEL_A,
+        HASH_A,
+        record({ requirements: [] }),
+        new Date(),
+      );
+      repository.upsert(
+        "fp1",
+        "a-v1",
+        MODEL_B,
+        HASH_A,
+        record({ seniority: "trainee" }),
+        new Date(),
+      );
+
+      expect(
+        repository.find("fp1", "a-v1", MODEL_A, HASH_A)?.requirements,
+      ).toEqual([]);
+      expect(repository.find("fp1", "a-v1", MODEL_B, HASH_A)?.seniority).toBe(
+        "trainee",
+      );
     });
 
     it("treats a legacy row with no stored model as a miss", () => {
@@ -152,36 +193,7 @@ describe("ExtractionsRepository", () => {
     });
   });
 
-  describe("findAllForPromptVersion", () => {
-    it("returns every extraction under the given prompt version, with fingerprint", () => {
-      repository.upsert("fp1", "a-v1", MODEL_A, HASH_A, record(), new Date());
-      repository.upsert(
-        "fp2",
-        "a-v1",
-        MODEL_A,
-        HASH_A,
-        record({ requirements: [] }),
-        new Date(),
-      );
-
-      const all = repository.findAllForPromptVersion("a-v1");
-      expect(all.map((r) => r.fingerprint).sort()).toEqual(["fp1", "fp2"]);
-    });
-
-    it("excludes extractions under a different prompt version", () => {
-      repository.upsert("fp1", "a-v1", MODEL_A, HASH_A, record(), new Date());
-      repository.upsert("fp2", "a-v2", MODEL_A, HASH_A, record(), new Date());
-
-      const all = repository.findAllForPromptVersion("a-v1");
-      expect(all.map((r) => r.fingerprint)).toEqual(["fp1"]);
-    });
-
-    it("returns an empty array when nothing is cached under that prompt version", () => {
-      expect(repository.findAllForPromptVersion("a-v99")).toEqual([]);
-    });
-  });
-
-  describe("corrupted cache rows (docs/audit AC-031)", () => {
+  describe("corrupted cache rows (docs/audit AC-031, PR-013)", () => {
     it("find treats truncated JSON as a cache miss instead of throwing", () => {
       repository.upsert("fp1", "a-v1", MODEL_A, HASH_A, record(), new Date());
       // A real restore/manual-edit scenario, not a mock -- write truncated
@@ -205,16 +217,35 @@ describe("ExtractionsRepository", () => {
       expect(repository.find("fp1", "a-v1", MODEL_A, HASH_A)).toBeNull();
     });
 
-    it("findAllForPromptVersion skips a corrupted row instead of failing the whole scan", () => {
+    it("find treats a structurally-valid-JSON array of domain-invalid elements as a cache miss", () => {
+      // The exact gap PR-013 names: [{}], [null], and an invalid enum are
+      // all valid JSON and all real arrays -- Array.isArray alone accepted
+      // every one of them as if they were real Requirement[].
       repository.upsert("fp1", "a-v1", MODEL_A, HASH_A, record(), new Date());
-      repository.upsert("fp2", "a-v1", MODEL_A, HASH_A, record(), new Date());
       db.run(
-        sql`UPDATE extractions SET requirements = 'not json at all' WHERE fingerprint = 'fp1'`,
+        sql`UPDATE extractions SET requirements = '[{}]' WHERE fingerprint = 'fp1'`,
       );
+      expect(repository.find("fp1", "a-v1", MODEL_A, HASH_A)).toBeNull();
+    });
 
-      expect(() => repository.findAllForPromptVersion("a-v1")).not.toThrow();
-      const all = repository.findAllForPromptVersion("a-v1");
-      expect(all.map((r) => r.fingerprint)).toEqual(["fp2"]);
+    it("find rejects an invalid weight enum on an otherwise well-formed requirement", () => {
+      repository.upsert("fp1", "a-v1", MODEL_A, HASH_A, record(), new Date());
+      db.run(
+        sql`UPDATE extractions SET requirements = '[{"text":"Node.js","category":"language","weight":"urgent"}]' WHERE fingerprint = 'fp1'`,
+      );
+      expect(repository.find("fp1", "a-v1", MODEL_A, HASH_A)).toBeNull();
+    });
+
+    it("find accepts a requirement omitting the optional verifiable field", () => {
+      repository.upsert("fp1", "a-v1", MODEL_A, HASH_A, record(), new Date());
+      db.run(
+        sql`UPDATE extractions SET requirements = '[{"text":"Node.js","category":"language","weight":"mandatory"}]' WHERE fingerprint = 'fp1'`,
+      );
+      expect(
+        repository.find("fp1", "a-v1", MODEL_A, HASH_A)?.requirements,
+      ).toEqual([
+        { text: "Node.js", category: "language", weight: "mandatory" },
+      ]);
     });
   });
 });

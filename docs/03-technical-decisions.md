@@ -53,6 +53,7 @@ revisited on its merits instead of re-argued from memory.
 | [039](adr/039-batch-fatal-permanent-errors-and-breaker-scope.md)              | Stop the batch on a permanent transport failure, narrow the circuit breaker's scope | Accepted | 2026-08-17 |
 | [040](adr/040-persisted-claim-as-scoring-admission-barrier.md)                | A persisted, atomic claim as the scoring admission barrier                          | Accepted | 2026-08-17 |
 | [041](adr/041-per-source-recovery-recency.md)                                 | Recovery recency is tracked per source, not per collect cycle                       | Accepted | 2026-08-17 |
+| [042](adr/042-composite-cache-identity-and-domain-validated-rows.md)          | Composite cache identity and domain-validated cache rows                            | Accepted | 2026-08-17 |
 
 ## When an ADR is required
 

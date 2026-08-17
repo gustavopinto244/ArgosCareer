@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 /** weight ∈ {blocking, mandatory, desirable} (docs/04-scoring-model.md) */
 export type RequirementWeight = "blocking" | "mandatory" | "desirable";
 
@@ -20,6 +22,32 @@ export interface Requirement {
    */
   readonly verifiable?: boolean;
 }
+
+/**
+ * The domain shape `Requirement`/`Match` cache rows must satisfy to be
+ * trusted (docs/audit PR-013) — `ExtractionsRepository`/`MatchesRepository`
+ * parse every stored row through these before returning a hit, rather than
+ * the previous `Array.isArray` check alone, which accepted `[{}]`, `[null]`,
+ * an invalid `weight`/`status` enum, or any other structurally-valid-JSON,
+ * domain-invalid content as if it were a real cached answer. Deliberately
+ * loose where `Requirement`'s own field docs already are (`weight`/`status`
+ * are still real enums, but nothing here is stricter than the type itself
+ * requires) — this validates "is this a `Requirement`/`Match`", not "is
+ * this a *good* one," which is a scoring-quality question, not a cache-
+ * integrity one.
+ */
+export const RequirementSchema = z.object({
+  text: z.string().min(1),
+  category: z.string().min(1),
+  weight: z.enum(["blocking", "mandatory", "desirable"]),
+  verifiable: z.boolean().optional(),
+});
+
+export const MatchSchema = z.object({
+  requirement: RequirementSchema,
+  status: z.enum(["met", "partial", "not_met"]),
+  evidence: z.string().nullable(),
+});
 
 /** ADR-015: absent means verifiable, so legacy cached requirements keep
  * counting exactly as they did before the field existed. */
