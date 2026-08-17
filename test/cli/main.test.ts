@@ -1369,6 +1369,56 @@ describe("executeDeliver", () => {
     expect(postingsRepo.findUnnotified()).toHaveLength(1);
   });
 
+  it("surfaces a posting that fails scoring in the digest's review section, with the failure reason (docs/audit AC-009, ADR-006)", async () => {
+    const collector = stubCollector({
+      source: "gupy",
+      collectedAt: new Date(),
+      postings: [
+        {
+          source: "gupy",
+          sourceId: "1",
+          payload: gupyPayload(1, "Estágio em Backend"),
+        },
+      ],
+    });
+    await executeCollect(db, () => collector, [{}], undefined, 0);
+
+    const criteria = deliverCriteria();
+    const failingScorer: ScorerPort = {
+      score: async () => ({
+        ok: false,
+        reason: "extraction_failed",
+        attempts: 3,
+      }),
+    };
+    const { notifier, digests } = recordingNotifier();
+
+    const outcome = await executeDeliver(
+      db,
+      failingScorer,
+      notifier,
+      criteria,
+      deliverProfile(),
+    );
+
+    // Not discarded (ADR-006): filtered but not counted as successfully
+    // scored, still delivered in the digest's review section.
+    expect(outcome.filtered).toBe(1);
+    expect(outcome.scored).toBe(0);
+    expect(outcome.delivered).toBe(1);
+    expect(digests[0]?.review).toHaveLength(1);
+    expect(digests[0]?.review[0]?.outcome.scoreFailureReason).toBe(
+      "extraction_failed",
+    );
+
+    // scoredCount stays 0 -- evaluateDeliveryOutcome's failure-rate alert
+    // reads this as "successfully scored", and this posting was not.
+    const runsRepo = new RunsRepository(db);
+    const run = runsRepo.findById(outcome.runId);
+    expect(run?.scoredCount).toBe(0);
+    expect(run?.filteredCount).toBe(1);
+  });
+
   it("excludes a posting that fails the pre-filter from scoring and the digest", async () => {
     const collector = stubCollector({
       source: "gupy",

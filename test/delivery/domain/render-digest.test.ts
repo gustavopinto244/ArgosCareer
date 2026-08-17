@@ -148,6 +148,20 @@ describe("renderPostingEntry", () => {
     expect(text).toContain("Lacunas: Docker");
   });
 
+  it("renders a scoring-failure warning instead of the lowConfidence one (docs/audit AC-009)", () => {
+    const text = renderPostingEntry(
+      scored({
+        outcome: outcome({
+          lowConfidence: true,
+          scoreFailureReason: "matching_failed",
+        }),
+      }),
+    );
+    expect(text).toContain("Não foi possível pontuar automaticamente");
+    expect(text).toContain("avaliação manual necessária");
+    expect(text).not.toContain("Confiança baixa");
+  });
+
   it("omits the recommendation lines entirely for a stubbed run (EMPTY_RECOMMENDATION)", () => {
     const text = renderPostingEntry(scored());
     expect(text).not.toContain("Currículo recomendado");

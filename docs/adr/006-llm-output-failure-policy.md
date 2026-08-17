@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted
+Accepted — amended 2026-08-17, see
+[Amendment 1](#amendment-1--2026-08-17-rule-5-actually-delivered)
 
 ## Date
 
@@ -115,3 +116,55 @@ Retry counts and the failure-rate alert threshold are configuration.
   help a model that cannot represent the shape at all. M7 measures whether
   attempt 2 and 3 actually recover anything, and the ceiling drops to zero if
   they do not.
+
+## Amendment 1 — 2026-08-17: rule 5, actually delivered
+
+This ADR's own Decision section states rule 5 plainly: "A posting that
+fails scoring is not discarded. It carries `lowConfidence` into the
+digest's review section with the reason attached." `ScorerPort`'s own doc
+comment repeated the same promise. Neither was implemented —
+`executeDeliver`'s scoring loop only ever did `if (result.ok)
+scoredEntries.push(...)`; an `ok: false` result was filtered out
+silently. A repository audit (`docs/audit/AUDIT_REPORT.md` AC-009, HIGH,
+CONFIRMED) found the gap: the posting stayed `unnotified` forever (or
+until a later run's `filtered - scored` arithmetic hinted something was
+off), invisible to the actual digest a human reads.
+
+**Decision:** `scoreFailureOutcome(reason)`
+(`src/scoring/domain/types.ts`) builds a placeholder `ScoreOutcome` —
+`score: 0`, `verdict: "review"`, `lowConfidence: true`,
+`scoreFailureReason: reason` — for exactly this case.
+`executeDeliver` pushes it into the same `scoredEntries` array a real
+score would go into, so `composeDigest` buckets it into `review`
+alongside genuine low-confidence postings, and `render-digest.ts` prints
+a distinct "não foi possível pontuar automaticamente" line instead of the
+generic low-confidence warning.
+
+**A failed posting is still marked notified once shown.** This matches
+existing digest semantics exactly — a `review`-verdict posting from a
+real score is never revisited either — and it is the safer choice over
+the alternative (leaving it `unnotified` so the next run retries it):
+that would reopen exactly the "unbounded cost amplification across days"
+half of AC-009 for any _persistent_ failure (a schema mismatch, not a
+transient blip), where automatic retry can never succeed and only ever
+re-spends. A human who sees the failure reason can re-run scoring
+manually once whatever caused it is fixed.
+
+**Not solved here, and this is a real limitation AC-009 also names:**
+Stage B still has no per-requirement partial-progress caching — a
+failure on requirement 20 of 25 still discards the 19 that already
+succeeded, and a later manual re-run repeats the whole posting. Fixing
+that means changing Stage B's cache unit from "the whole match list" to
+"one requirement," a real redesign of `MatchesRepository`'s key shape
+(`(fingerprint, profileHash, promptVersion)` → something requirement-
+scoped), deliberately deferred rather than folded into this fix.
+
+**Consequence:** `evaluateDeliveryOutcome`'s `scoreFailureRateThreshold`
+alert is unaffected — `scoredCount` is only ever incremented on a real
+`ok: true` result, so a failed-but-now-visible posting still counts
+toward the failure rate exactly as it did before this fix, just no
+longer invisible to the human reading the digest.
+
+**Reversal cost:** low. `scoreFailureOutcome` has one call site
+(`executeDeliver`); removing it restores the previous (silently
+discarding) behavior, no schema or cache-key change.

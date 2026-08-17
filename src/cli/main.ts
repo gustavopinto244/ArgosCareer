@@ -46,6 +46,8 @@ import { loadProfile } from "../profile/infrastructure/profile-loader";
 import { deriveProfileKeywords } from "../profile/domain/profile-keywords";
 import { hashProfile } from "../profile/domain/profile-hash";
 import { ScorerPort } from "../scoring/domain/ports/scorer.port";
+import { EMPTY_RECOMMENDATION } from "../scoring/domain/recommendation";
+import { scoreFailureOutcome } from "../scoring/domain/types";
 import { buildScorer } from "../scoring/infrastructure/build-scorer";
 import { UsageTotals } from "../scoring/infrastructure/openrouter-client";
 import { NotifierPort } from "../delivery/domain/ports/notifier.port";
@@ -633,8 +635,24 @@ export async function executeDeliver(
         reason: result.ok ? null : result.reason,
         occurredAt: scoredAt,
       });
-      if (result.ok) scoredEntries.push({ posting, outcome: result });
-      scoredCount = scoredEntries.length;
+      if (result.ok) {
+        scoredEntries.push({ posting, outcome: result });
+        scoredCount += 1;
+      } else {
+        // ADR-006 / docs/audit AC-009: a posting that fails scoring is not
+        // discarded -- it carries the failure reason into the digest's
+        // review section instead of silently vanishing. Deliberately not
+        // counted in scoredCount, which evaluateDeliveryOutcome's
+        // scoreFailureRateThreshold alert reads as "successfully scored";
+        // this posting was not.
+        scoredEntries.push({
+          posting,
+          outcome: {
+            ...scoreFailureOutcome(result.reason),
+            ...EMPTY_RECOMMENDATION,
+          },
+        });
+      }
     }
 
     const digest = composeDigest({
