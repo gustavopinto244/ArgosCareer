@@ -113,6 +113,7 @@ export class GupyCollector implements CollectorPort {
     let offset = 0;
     let receivedCount = 0;
     let schemaRejectedCount = 0;
+    let truncated = false;
 
     try {
       // Bounds the number of raw items scanned, not the number of valid
@@ -181,6 +182,10 @@ export class GupyCollector implements CollectorPort {
 
         offset += items.length;
         if (items.length < limit) break;
+        // A full page, but the next iteration won't run (offset now at or
+        // past the cap) — the source's last observed page was not short,
+        // so more results were plausibly there and never asked for.
+        if (offset >= maxResults) truncated = true;
       }
     } catch (cause) {
       // Reached once fetchWithBackoff exhausts every attempt (a persistent
@@ -202,6 +207,7 @@ export class GupyCollector implements CollectorPort {
       collectedAt,
       receivedCount,
       schemaRejectedCount,
+      truncated,
     };
   }
 

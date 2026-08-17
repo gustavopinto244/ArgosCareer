@@ -215,6 +215,35 @@ describe("CieeCollector — successful collection", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
+  it("reports truncated: true when the cap stops a page the source says isn't last (docs/audit AC-013)", async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({
+        content: [{ codigoVaga: 1, nivelEscolar: "SU" }],
+        last: false,
+      }),
+    );
+    const collector = new CieeCollector({ fetchImpl, ...FAST_OPTIONS });
+
+    const result = await collector.collect({ pageSize: 1, maxResults: 1 });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(result.truncated).toBe(true);
+  });
+
+  it("reports truncated: false when the envelope's own last flag ends it", async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({
+        content: [{ codigoVaga: 1, nivelEscolar: "SU" }],
+        last: true,
+      }),
+    );
+    const collector = new CieeCollector({ fetchImpl, ...FAST_OPTIONS });
+
+    const result = await collector.collect({});
+
+    expect(result.truncated).toBe(false);
+  });
+
   it("skips an individual malformed item without failing the whole page", async () => {
     const fetchImpl = vi.fn(async () =>
       jsonResponse({

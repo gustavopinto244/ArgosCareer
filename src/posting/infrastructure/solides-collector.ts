@@ -128,6 +128,7 @@ export class SolidesCollector implements CollectorPort {
     let page = 1;
     let receivedCount = 0;
     let schemaRejectedCount = 0;
+    let truncated = false;
 
     try {
       // Bounds the number of raw items scanned, not the number of valid
@@ -195,6 +196,13 @@ export class SolidesCollector implements CollectorPort {
         }
 
         if (items.length < PAGE_SIZE) break;
+        // A full page, but the loop's own bounds (kept count or page count)
+        // will stop the next iteration — the source's page was not short,
+        // so more results were plausibly there and never asked for
+        // (docs/audit AC-013).
+        if (postings.length >= maxResults || page * PAGE_SIZE >= maxResults) {
+          truncated = true;
+        }
         page += 1;
       }
     } catch (cause) {
@@ -217,6 +225,7 @@ export class SolidesCollector implements CollectorPort {
       collectedAt,
       receivedCount,
       schemaRejectedCount,
+      truncated,
     };
   }
 

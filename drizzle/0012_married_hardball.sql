@@ -1,0 +1,1 @@
+ALTER TABLE `runs` ADD `truncated_sources` text;

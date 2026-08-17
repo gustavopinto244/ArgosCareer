@@ -26,23 +26,37 @@ export interface RunCounts {
   /** Serialized to JSON text by `finish` — read back with
    * `parseFailedSources`. */
   readonly failedSources?: readonly string[];
+  /** Which source(s) reported `CollectionResult.truncated: true` this run —
+   * serialized to JSON text, read back with `parseTruncatedSources`
+   * (docs/audit AC-013). */
+  readonly truncatedSources?: readonly string[];
 }
 
-/** `RunRow.failedSources` is raw JSON text (schema.ts's note on why: same
- * manual serialize/parse precedent as `requirements`/`matches`). Empty array
- * on null/unparseable rather than a throw — a run row is read far more often
- * than it is written, and a malformed value here must not break `/health` or
- * `executeDeliver`'s failed-source summary. */
-export function parseFailedSources(
-  row: Pick<RunRow, "failedSources">,
-): string[] {
-  if (!row.failedSources) return [];
+/** Both `failedSources` and `truncatedSources` are raw JSON text (schema.ts's
+ * note on why: same manual serialize/parse precedent as
+ * `requirements`/`matches`). Empty array on null/unparseable rather than a
+ * throw — a run row is read far more often than it is written, and a
+ * malformed value here must not break `/health` or a summary that reads it. */
+function parseStringArrayColumn(value: string | null): string[] {
+  if (!value) return [];
   try {
-    const parsed: unknown = JSON.parse(row.failedSources);
+    const parsed: unknown = JSON.parse(value);
     return Array.isArray(parsed) ? parsed.map(String) : [];
   } catch {
     return [];
   }
+}
+
+export function parseFailedSources(
+  row: Pick<RunRow, "failedSources">,
+): string[] {
+  return parseStringArrayColumn(row.failedSources);
+}
+
+export function parseTruncatedSources(
+  row: Pick<RunRow, "truncatedSources">,
+): string[] {
+  return parseStringArrayColumn(row.truncatedSources);
 }
 
 /**
@@ -70,7 +84,7 @@ export class RunsRepository {
     outcome: RunOutcome,
     counts: RunCounts = {},
   ): void {
-    const { failedSources, ...rest } = counts;
+    const { failedSources, truncatedSources, ...rest } = counts;
     this.db
       .update(runs)
       .set({
@@ -80,6 +94,9 @@ export class RunsRepository {
         ...(failedSources === undefined
           ? {}
           : { failedSources: JSON.stringify(failedSources) }),
+        ...(truncatedSources === undefined
+          ? {}
+          : { truncatedSources: JSON.stringify(truncatedSources) }),
       })
       .where(eq(runs.runId, runId))
       .run();

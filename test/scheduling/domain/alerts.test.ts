@@ -28,6 +28,7 @@ function run(overrides: Partial<RunRow> = {}): RunRow {
     schemaRejectedCount: 0,
     failureReason: null,
     failedSources: null,
+    truncatedSources: null,
     ...overrides,
   };
 }

@@ -219,6 +219,28 @@ describe("GupyCollector — successful collection", () => {
 
     expect(result.postings).toHaveLength(1);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(result.truncated).toBe(false);
+  });
+
+  it("reports truncated: true when the cap is hit on a full page (docs/audit AC-013)", async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({
+        data: Array.from({ length: 10 }, (_, i) => ({ id: i, name: "x" })),
+      }),
+    );
+    const collector = new GupyCollector({
+      fetchImpl,
+      ...FAST_OPTIONS,
+      requestIntervalMs: 0,
+    });
+
+    // maxResults exactly matches one full page — the source could still
+    // have more, but the collector's own cap stops it from asking.
+    const result = await collector.collect({ maxResults: 10, pageSize: 10 });
+
+    expect(result.postings).toHaveLength(10);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(result.truncated).toBe(true);
   });
 
   it("skips an individual malformed item without failing the whole collection", async () => {
