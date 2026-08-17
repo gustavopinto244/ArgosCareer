@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import {
   Location,
   Posting,
@@ -9,6 +9,17 @@ import { Db } from "./db";
 import { postings } from "./schema";
 
 type PostingRow = typeof postings.$inferSelect;
+
+/**
+ * How long a scoring claim (docs/audit PR-004) is honored before it is
+ * treated as abandoned and reclaimable. Not tuned against a measured
+ * incident — chosen as comfortably longer than a real nightly
+ * `scoreAndDeliver` run should ever take (ADR-009's single nightly window),
+ * so a hard process crash mid-run (a `kill -9`, not a caught exception —
+ * `executeDeliver`'s own try/catch already releases claims on every path it
+ * can observe) does not strand postings unclaimable forever.
+ */
+export const DEFAULT_STALE_CLAIM_MS = 4 * 60 * 60 * 1000;
 
 export interface UpsertResult {
   readonly posting: Posting;
@@ -78,14 +89,18 @@ function rowToPosting(row: PostingRow): Posting {
  * SQLite serializes write transactions at the database-file level — a
  * second connection's write transaction blocks until the first commits (up
  * to `better-sqlite3`'s 5s default `busy_timeout`), it never interleaves
- * with it. What this does **not** cover is a race spanning *multiple*
- * transactions — `executeDeliver`'s `findUnnotified` → score → notify →
+ * with it. What this does **not** cover on its own is a race spanning
+ * *multiple* transactions — `executeDeliver`'s score → notify →
  * `markNotified` sequence is not one atomic unit, so two full delivery runs
- * overlapping across processes can still both read the same unnotified
- * postings before either marks them. That is `RunLock`'s job
- * (`run-lock.ts`), not this repository's, and `RunLock`'s own known,
- * accepted limitation (in-process only, ADR-024) is what actually leaves
- * that specific race open — not anything in this method.
+ * overlapping across processes could, in principle, both act on the same
+ * posting before either marks it notified. `RunLock` (`run-lock.ts`) closes
+ * that within one process; `claimForScoring`/`releaseUnresolvedClaims`
+ * (docs/audit PR-004, ADR-040) close the specific gap `RunLock` itself
+ * documents as out of its reach — a second, separately-invoked process —
+ * by making the *selection* of which postings are even eligible for
+ * scoring one atomic transaction (alongside the dedup pass that precedes
+ * it), rather than a plain read two processes could both perform before
+ * either writes anything back.
  */
 export class PostingsRepository {
   constructor(private readonly db: Db) {}
@@ -232,10 +247,18 @@ export class PostingsRepository {
   }
 
   /**
-   * Active postings not yet notified — the candidate pool for a digest.
-   * `notifiedAt` is set once and never cleared (ADR-007's "write once"
-   * discipline, applied to delivery): a posting already notified is never
-   * notified again, so it drops out of this pool permanently once sent.
+   * Active postings not yet notified. `notifiedAt` is set once and never
+   * cleared (ADR-007's "write once" discipline, applied to delivery): a
+   * posting already notified is never notified again, so it drops out of
+   * this pool permanently once sent.
+   *
+   * No longer `executeDeliver`'s own candidate-selection query (docs/audit
+   * PR-004, ADR-040) — `claimForScoring` is, since it also needs to exclude
+   * whatever another run has already claimed and to do so atomically with
+   * the dedup pass that precedes it, neither of which this plain read does.
+   * Kept as a general-purpose "what's still outstanding" query — a superset
+   * of what is currently claimable, since it does not look at claim state
+   * at all.
    */
   findUnnotified(): Posting[] {
     const rows = this.db
@@ -261,6 +284,82 @@ export class PostingsRepository {
       .update(postings)
       .set({ notifiedAt })
       .where(eq(postings.fingerprint, fingerprint))
+      .run();
+  }
+
+  /**
+   * Atomically claims every eligible posting for `runId` — the persisted
+   * admission barrier docs/audit PR-004 asks for. Eligible means the same
+   * predicate `findUnnotified` used (active, not notified, not discarded)
+   * plus not already claimed by a still-live run (`scoringClaimedAt` null,
+   * or older than `staleClaimMs` and therefore treated as abandoned).
+   *
+   * Callers MUST invoke this from inside a single `db.transaction()` that
+   * also contains the dedup pass immediately preceding it (see
+   * `executeDedupAndClaim` in `cli/main.ts`) — that is what makes this a
+   * barrier and not just a snapshot: `better-sqlite3` serializes write
+   * transactions at the database-file level, so a second process's own
+   * `upsert`/claim transaction is fully before or fully after this one,
+   * never interleaved partway through it. Called on its own, outside a
+   * transaction with dedup, this method is still atomic (select-then-update
+   * in one call) but no longer closes the specific gap PR-004 names — a
+   * posting dedup would have flagged could still slip in as its own,
+   * separate claim between dedup's commit and this one's.
+   */
+  claimForScoring(
+    runId: string,
+    claimedAt: Date,
+    staleClaimMs: number = DEFAULT_STALE_CLAIM_MS,
+  ): Posting[] {
+    const staleBefore = new Date(claimedAt.getTime() - staleClaimMs);
+    const rows = this.db
+      .select()
+      .from(postings)
+      .where(
+        and(
+          isNull(postings.duplicateOfFingerprint),
+          isNull(postings.notifiedAt),
+          isNull(postings.discardedAt),
+          or(
+            isNull(postings.scoringClaimedAt),
+            lt(postings.scoringClaimedAt, staleBefore),
+          ),
+        ),
+      )
+      .all();
+
+    if (rows.length > 0) {
+      this.db
+        .update(postings)
+        .set({ scoringClaimedAt: claimedAt, scoringClaimRunId: runId })
+        .where(
+          inArray(
+            postings.fingerprint,
+            rows.map((row) => row.fingerprint),
+          ),
+        )
+        .run();
+    }
+    return rows.map(rowToPosting);
+  }
+
+  /**
+   * Releases every claim `runId` still holds on a posting that was not, in
+   * the end, notified (docs/audit PR-004) — a prefilter reject, a discard
+   * verdict, a recoverable scoring failure (ADR-038), or a posting never
+   * reached because a permanent transport failure stopped the batch early
+   * (ADR-039). Leaving these claimed would silently defeat ADR-038's
+   * bounded retry: `claimForScoring` would never see them as eligible again
+   * until `staleClaimMs` elapsed, regardless of how many runs passed.
+   * Idempotent and safe to call even when nothing needs releasing.
+   */
+  releaseUnresolvedClaims(runId: string): void {
+    this.db
+      .update(postings)
+      .set({ scoringClaimedAt: null, scoringClaimRunId: null })
+      .where(
+        and(eq(postings.scoringClaimRunId, runId), isNull(postings.notifiedAt)),
+      )
       .run();
   }
 

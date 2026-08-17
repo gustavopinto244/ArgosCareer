@@ -2,6 +2,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
+import { postings } from "../../src/persistence/infrastructure/schema";
 import {
   computeRecencyWindowDays,
   executeCollect,
@@ -1662,6 +1664,120 @@ describe("executeDeliver", () => {
 
       expect(scoreCalls).toHaveLength(2);
       expect(outcome.filtered).toBe(2);
+    });
+  });
+
+  describe("docs/audit PR-004 — persisted claim as the scoring admission barrier", () => {
+    function rawClaimFields(fingerprint: string) {
+      const row = db
+        .select({
+          scoringClaimedAt: postings.scoringClaimedAt,
+          scoringClaimRunId: postings.scoringClaimRunId,
+        })
+        .from(postings)
+        .where(eq(postings.fingerprint, fingerprint))
+        .get();
+      return row ?? null;
+    }
+
+    it("releases the claim (not just leaves notifiedAt null) on a recoverable scoring failure", async () => {
+      const collector = stubCollector({
+        source: "gupy",
+        collectedAt: new Date(),
+        postings: [
+          {
+            source: "gupy",
+            sourceId: "1",
+            payload: gupyPayload(1, "Estágio em Backend"),
+          },
+        ],
+      });
+      await executeCollect(db, () => collector, [{}], undefined, 0);
+
+      const criteria = deliverCriteria();
+      const failingScorer: ScorerPort = {
+        score: async () => ({
+          ok: false,
+          reason: "extraction_failed",
+          attempts: 3,
+          permanent: false,
+        }),
+      };
+      const { notifier } = recordingNotifier();
+
+      await executeDeliver(
+        db,
+        failingScorer,
+        notifier,
+        criteria,
+        deliverProfile(),
+      );
+
+      const postingsRepo = new PostingsRepository(db);
+      const [candidate] = postingsRepo.findUnnotified();
+      // The regression this guards: findUnnotified() does not look at claim
+      // state at all, so it would report this posting as a candidate even
+      // if releaseUnresolvedClaims were never called -- only reading the
+      // claim columns directly proves the barrier was actually released.
+      expect(rawClaimFields(candidate!.fingerprint)).toEqual({
+        scoringClaimedAt: null,
+        scoringClaimRunId: null,
+      });
+    });
+
+    it("marks the claim under this run's id while scoring is in progress, atomically with dedup", async () => {
+      const collector = stubCollector({
+        source: "gupy",
+        collectedAt: new Date(),
+        postings: [
+          {
+            source: "gupy",
+            sourceId: "1",
+            payload: gupyPayload(1, "Estágio em Backend"),
+          },
+        ],
+      });
+      await executeCollect(db, () => collector, [{}], undefined, 0);
+
+      const criteria = deliverCriteria();
+      const captured: { fields: ReturnType<typeof rawClaimFields> } = {
+        fields: null,
+      };
+      const observingScorer: ScorerPort = {
+        score: async (posting) => {
+          captured.fields = rawClaimFields(posting.fingerprint);
+          return {
+            ok: true,
+            score: 80,
+            verdict: "apply",
+            breakdown: {
+              mandatoryCoverage: 1,
+              desirableCoverage: 1,
+              trackAlignment: 1,
+            },
+            blockingFailure: null,
+            lowConfidence: false,
+            criticalGaps: [],
+            recommendedVariant: null,
+            highlights: [],
+            missingTerms: [],
+            inputTruncated: false,
+          };
+        },
+      };
+      const { notifier } = recordingNotifier();
+
+      const outcome = await executeDeliver(
+        db,
+        observingScorer,
+        notifier,
+        criteria,
+        deliverProfile(),
+      );
+
+      expect(captured.fields).not.toBeNull();
+      expect(captured.fields?.scoringClaimRunId).toBe(outcome.runId);
+      expect(captured.fields?.scoringClaimedAt).not.toBeNull();
     });
   });
 

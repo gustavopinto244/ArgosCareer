@@ -127,6 +127,13 @@
       "when": 1786964856534,
       "tag": "0017_pretty_cassandra_nova",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1786973349636,
+      "tag": "0018_greedy_sunspot",
+      "breakpoints": true
     }
   ]
 }

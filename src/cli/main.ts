@@ -471,6 +471,64 @@ export function executeDedup(
   };
 }
 
+/**
+ * `executeDeliver`'s own dedup pass, atomic with the scoring-candidate claim
+ * that follows it (docs/audit PR-004) — the fix for "dedup-before-delivery
+ * is not an atomic admission barrier." The plain `executeDedup(db, ...)`
+ * used before this ADR left a real gap: dedup ran, committed, and only
+ * *afterward* did `findUnnotified()` read the candidate set in a separate
+ * query — a window in which a concurrent process's insert (external ingest,
+ * or a second `deliver` invocation `RunLock` cannot see across processes)
+ * could add a near-duplicate that this run's dedup pass never evaluated, yet
+ * which was still eligible for paid Stage A/B scoring.
+ *
+ * Wrapping `dedupSimilarPostings` and `claimForScoring` in one
+ * `db.transaction()` closes that window: `better-sqlite3` serializes write
+ * transactions at the file level, so any other process's own write
+ * transaction is fully before or fully after this whole unit, never
+ * interleaved partway through it (the same guarantee
+ * `PostingsRepository.upsert`'s docstring already relies on for a different
+ * invariant). A posting inserted by another process during this transaction
+ * simply is not visible to either half of it, and is correctly left
+ * unclaimed for the next run's own atomic pass.
+ */
+function executeDedupAndClaim(
+  db: Db,
+  dedupConfig: DedupConfig,
+  scoringRunId: string,
+  now: () => Date,
+): DedupOutcome & { readonly claimed: readonly Posting[] } {
+  const runsRepo = new RunsRepository(db);
+  const dedupRunId = runsRepo.start("dedup", now());
+
+  let outcome: { readonly scanned: number; readonly markedDuplicate: number };
+  let claimed: readonly Posting[];
+  try {
+    const result = db.transaction((tx) => {
+      const txRepo = new PostingsRepository(tx);
+      const dedupOutcome = dedupSimilarPostings(txRepo, dedupConfig);
+      const claimedPostings = txRepo.claimForScoring(scoringRunId, now());
+      return { dedupOutcome, claimedPostings };
+    });
+    outcome = result.dedupOutcome;
+    claimed = result.claimedPostings;
+  } catch (cause) {
+    runsRepo.finish(dedupRunId, now(), "failed", { duplicateCount: 0 });
+    throw cause;
+  }
+
+  runsRepo.finish(dedupRunId, now(), "success", {
+    duplicateCount: outcome.markedDuplicate,
+  });
+
+  return {
+    runId: dedupRunId,
+    scanned: outcome.scanned,
+    markedDuplicate: outcome.markedDuplicate,
+    claimed,
+  };
+}
+
 export interface DeliverOutcome {
   readonly runId: string;
   readonly filtered: number;
@@ -493,23 +551,30 @@ export interface DeliverOutcome {
 export const DEFAULT_MAX_SCORE_FAILURES = 5;
 
 /**
- * The testable core of `deliver`: pre-filter → score → compose → notify,
- * over every active, not-yet-notified posting (`findUnnotified`). A posting
- * that fails the pre-filter or scores `discard` is not marked notified — it
- * stays a candidate for the next run, the same "corpus is never deleted"
- * discipline the rest of the pipeline follows (ADR-007). Only postings that
- * actually appear in a *successfully sent* digest are marked, so a failed
- * send never causes a silent skip (ADR-007's re-run test).
+ * The testable core of `deliver`: dedup+claim → pre-filter → score → compose
+ * → notify. `executeDedupAndClaim` (docs/audit PR-004, ADR-040) atomically
+ * claims every active, not-yet-notified, not-already-claimed posting as this
+ * run's own candidate set in the same transaction as the dedup pass — a
+ * persisted admission barrier a second process's own claim attempt cannot
+ * see past, unlike a plain read. A posting that fails the pre-filter or
+ * scores `discard`, or that this run claimed but a permanent transport
+ * failure (ADR-039) stopped it from ever reaching, has its claim released
+ * (`releaseUnresolvedClaims`) rather than marked notified — it stays a
+ * candidate for the next run's own claim, the same "corpus is never
+ * deleted" discipline the rest of the pipeline follows (ADR-007). Only
+ * postings that actually appear in a *successfully sent* digest are marked
+ * notified, so a failed send never causes a silent skip (ADR-007's re-run
+ * test).
  *
  * A posting whose scoring *fails* is the one deliberate exception to "in the
  * digest means notified" (docs/audit PR-002, ADR-038): failure is reported,
- * but `notifiedAt` is left null so the posting stays in `findUnnotified`'s
- * pool and gets a fresh attempt next run — up to `maxScoreFailures`, after
- * which it is marked notified with `max_retries_exceeded` so it stops being
- * retried automatically. Before this, every entry in the digest was marked
- * notified unconditionally, so a transient provider failure permanently
- * removed a posting from future scoring the moment its one failure message
- * was delivered.
+ * but `notifiedAt` is left null and its claim released, so the posting is
+ * eligible for the next run's claim and gets a fresh attempt — up to
+ * `maxScoreFailures`, after which it is marked notified with
+ * `max_retries_exceeded` so it stops being retried automatically. Before
+ * ADR-038, every entry in the digest was marked notified unconditionally,
+ * so a transient provider failure permanently removed a posting from future
+ * scoring the moment its one failure message was delivered.
  *
  * `collected`/`deduplicated` in the run summary are read from `collect` and
  * `dedup` runs since the last successful delivery, not from this run
@@ -582,6 +647,11 @@ export async function executeDeliver(
   try {
     return await deliver();
   } catch (cause) {
+    // docs/audit PR-004: whatever this run claimed but never got to notify
+    // must not stay claimed past this run's own lifetime, or it becomes
+    // unclaimable (and therefore unscoreable) until DEFAULT_STALE_CLAIM_MS
+    // elapses for no reason -- the claim's job ends when this run does.
+    postingsRepo.releaseUnresolvedClaims(runId);
     runsRepo.finish(runId, now(), "failed", {
       filteredCount,
       scoredCount,
@@ -592,11 +662,12 @@ export async function executeDeliver(
   }
 
   async function deliver(): Promise<DeliverOutcome> {
-    // The dedup barrier (AC-005, see the constructor doc comment above) —
-    // run before `findRunsSince("dedup", since)` below is computed, so this
+    // The dedup barrier (AC-005, see the constructor doc comment above),
+    // now atomic with the scoring-candidate claim (docs/audit PR-004) — run
+    // before `findRunsSince("dedup", since)` below is computed, so this
     // run's own duplicate count is folded into the summary the same way a
     // scheduled dedup's would be, not double-counted or missed.
-    executeDedup(db, dedupConfig, now);
+    const { claimed } = executeDedupAndClaim(db, dedupConfig, runId, now);
 
     const lastDelivery = runsRepo.findLatestFinished(
       "scoreAndDeliver",
@@ -630,7 +701,7 @@ export async function executeDeliver(
     // the pure function by hand, with no trace of what a past run actually
     // decided or why.
     const filtered: Posting[] = [];
-    for (const posting of postingsRepo.findUnnotified()) {
+    for (const posting of claimed) {
       const result = applyPreFilter(
         posting,
         criteria,
@@ -743,6 +814,9 @@ export async function executeDeliver(
     const notifyResult = await notifier.notify(digest);
 
     if (!notifyResult.ok) {
+      // docs/audit PR-004: nothing was notified on this path -- every
+      // claim this run holds must go back to the pool for the next run.
+      postingsRepo.releaseUnresolvedClaims(runId);
       runsRepo.finish(runId, now(), "failed", {
         filteredCount,
         scoredCount,
@@ -783,6 +857,15 @@ export async function executeDeliver(
         occurredAt: deliveredAt,
       });
     }
+
+    // docs/audit PR-004: releases the claim on every posting this run
+    // pulled in but did not end up notifying -- a prefilter reject, a
+    // discard verdict, a recoverable scoring failure (ADR-038), or a
+    // posting never reached because a permanent transport failure stopped
+    // the batch early (ADR-039). Anything actually notified above is a
+    // no-op here (the `notifiedAt IS NULL` guard in `releaseUnresolvedClaims`
+    // excludes it), so this is safe to call unconditionally.
+    postingsRepo.releaseUnresolvedClaims(runId);
 
     runsRepo.finish(runId, deliveredAt, "success", {
       filteredCount,

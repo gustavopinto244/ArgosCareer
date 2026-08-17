@@ -14,14 +14,26 @@
  * it twice, and can send the same postings to Telegram in two separate
  * digests (ADR-024's context has the full reasoning).
  *
- * In-memory is enough because collection and delivery share one process
- * (`app.module.ts`: "one process, both concerns") — `RunsService` and
- * `SchedulerService` inject the exact same instance via the `RUN_LOCK`
+ * In-memory is enough for its own job because collection and delivery share
+ * one process (`app.module.ts`: "one process, both concerns") — `RunsService`
+ * and `SchedulerService` inject the exact same instance via the `RUN_LOCK`
  * token (`run-lock.provider.ts`). It does **not** protect against a
  * separately-invoked CLI process racing the running server — a different
  * Node process gets its own empty lock — which ADR-024 states as a known,
- * accepted limitation rather than something this class silently promises
- * to cover.
+ * accepted limitation of this class specifically, not something it silently
+ * promises to cover.
+ *
+ * That specific cross-process gap, for the one place it actually mattered
+ * (two `scoreAndDeliver` runs both selecting the same postings for paid
+ * scoring), is now closed one layer down instead: `PostingsRepository`'s
+ * `claimForScoring`/`releaseUnresolvedClaims` (docs/audit PR-004, ADR-040)
+ * make the *selection* of scoring candidates a single, database-enforced
+ * transaction, so a second process's own selection genuinely cannot
+ * overlap with the first's — a guarantee this in-memory class could never
+ * offer no matter how it was built. `RunLock` still exists and still
+ * matters within one process: it avoids wasted duplicate work
+ * (re-collecting, re-scoring what's already in flight) cheaply, without
+ * a database round trip.
  */
 export class RunLock {
   private readonly active = new Set<string>();
