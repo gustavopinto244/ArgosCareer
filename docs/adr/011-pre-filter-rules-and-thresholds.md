@@ -13,6 +13,8 @@ and
 [Amendment 5](#amendment-5--2026-08-16-a-business-rule-for-the-existing-undated-backlog)
 and
 [Amendment 6](#amendment-6--2026-08-17-the-unknown-location-leniency-stops-at-a-source-with-no-location-filter-of-its-own)
+and
+[Amendment 7](#amendment-7--2026-08-17-ciee-belongs-on-the-nationwide-list-too)
 
 ## Date
 
@@ -379,3 +381,49 @@ deployed, not a response to an incident.
 **Reversal cost:** trivial. Emptying `nationwideSources` in
 `criteria.yaml` restores the original symmetric-for-unknown-location
 behavior for every source, including Catho.
+
+## Amendment 7 — 2026-08-17: CIEE belongs on the nationwide list too
+
+Amendment 6 named the premise `nationwideSources` exists to test — "the
+source already narrowed results toward the search profile's region" —
+and asserted CIEE satisfied it, alongside Sólides, as "a manageable,
+mostly regional pool this project's own queries already narrow." A
+post-remediation audit (`docs/audit`, PR-016) checked that claim against
+the collector's actual request and found it false for CIEE specifically:
+`ciee-collector.ts`'s `buildUrl` sets only `size` and `page` on the
+outgoing request — no city, no query term, nothing. `criteria.city` and
+`criteria.jobName` are real fields on `CieeCollectorCriteriaSchema`, but
+`keep()` applies them client-side, _after_ the full national board has
+already been fetched. `config/criteria.yaml`'s own single CIEE query
+(no `city` configured) and ADR-021's stated intent — "CIEE runs as one
+query, with no city filter... [to give] M10's market analysis a national
+picture" — already documented this same fact in two other places;
+Amendment 6 simply got it wrong when it grouped CIEE with Sólides, whose
+every configured query genuinely does set `locations` server-side.
+
+The distinction Amendment 6 drew for Catho — "an unknown city from it is
+exactly as likely to be Manaus as Rio de Janeiro" — applies to CIEE
+exactly as written, unchanged. An unknown-location CIEE posting is not
+"probably nearby and the parser slipped," it is "the parser failed to
+read a `local.cidade` field the source could have populated for any of
+Brazil's 27 states."
+
+**Decision:** `nationwideSources` defaults to `["catho", "ciee"]`
+(`src/prefilter/domain/criteria.ts`), and `config/criteria.yaml` lists
+both explicitly. No change to `isLocationAllowed` itself, or to
+Sólides's exemption — its claim to genuine server-side narrowing holds,
+checked the same way CIEE's was: every Sólides query `criteria.yaml`
+configures sets `city`, and `SolidesCollector` turns it into a real
+`locations` request parameter.
+
+**Consequence:** an unknown-location CIEE posting that previously passed
+the pre-filter on leniency now gets `location_not_allowed` and never
+reaches Stage A. `docs/02-architecture.md`'s measured 88.2% cut
+(2026-08-16, `location_not_allowed` already the dominant rejection at
+1,971/2,327) should rise further — expected and correct, the same
+direction Amendment 6's introduction moved it for Catho, not a
+regression to investigate.
+
+**Reversal cost:** trivial — the same as Amendment 6's: removing `ciee`
+from `nationwideSources` in `criteria.yaml` restores leniency for it
+alone, with no code or schema change needed either way.

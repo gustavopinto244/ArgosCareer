@@ -422,6 +422,26 @@ describe("applyPreFilter — location and workMode", () => {
     expect(outcome.reason).toBe("location_not_allowed");
   });
 
+  it("rejects an unknown location from CIEE, a full-board crawl with no server-side location filter (docs/audit PR-016, ADR-011 Amendment 7)", () => {
+    const outcome = applyPreFilter(
+      posting({
+        source: "ciee",
+        location: { kind: "unknown" },
+        workMode: "unknown",
+      }),
+      baseCriteria({
+        location: {
+          cities: ["Rio de Janeiro", "Niterói"],
+          allowRemote: true,
+          nationwideSources: ["catho", "ciee"],
+        },
+      }),
+      [],
+      NOW,
+    );
+    expect(outcome.reason).toBe("location_not_allowed");
+  });
+
   it("still passes a known, in-region city from a nationwide-crawl source", () => {
     const outcome = applyPreFilter(
       posting({

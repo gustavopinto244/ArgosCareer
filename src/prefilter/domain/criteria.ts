@@ -11,15 +11,18 @@ export const LocationCriteriaSchema = z.object({
    * own client-side parsing succeeds (docs/audit AC-024). ADR-011's
    * leniency rule ("an unknown location cannot be ruled out, so it passes")
    * assumes the opposite: that the source already narrowed results to the
-   * search profile's region (Gupy's server-side `city` param) or serves a
-   * small enough pool that an unparsed city is unlikely to be wrong
-   * (CIEE/Sólides). Neither holds for a source listed here — an unknown
-   * city from it is exactly as likely to be Manaus as Rio de Janeiro, so
-   * `isLocationAllowed` rejects rather than passes it. Defaults to
-   * `["catho"]`, the one source this project collects via an unfiltered
-   * nationwide crawl (ADR-032) — empty for every other configured source.
+   * search profile's region — Gupy's server-side `city` param, or Sólides's
+   * (every configured query in `criteria.yaml` sets one). Neither holds for
+   * a source listed here — an unknown city from it is exactly as likely to
+   * be Manaus as Rio de Janeiro, so `isLocationAllowed` rejects rather than
+   * passes it. Defaults to `["catho", "ciee"]` (ADR-011 Amendment 7): Catho
+   * crawls its entire national sitemap (ADR-032), and CIEE's own collector
+   * sends no city parameter at all — `ciee-collector.ts`'s `buildUrl` only
+   * ever sets `size`/`page` — deliberately, to give M10's market analysis a
+   * national picture (ADR-021). Both learn geography only from client-side
+   * parsing after the fact, exactly the situation this list exists for.
    */
-  nationwideSources: z.array(z.string().min(1)).default(["catho"]),
+  nationwideSources: z.array(z.string().min(1)).default(["catho", "ciee"]),
 });
 
 /**

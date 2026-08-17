@@ -54,10 +54,10 @@ describe("CriteriaSchema", () => {
     expect(CriteriaSchema.parse(validCriteria()).maxFutureSkewDays).toBe(1);
   });
 
-  it("defaults location.nationwideSources to ['catho'] when omitted (docs/audit AC-024)", () => {
+  it("defaults location.nationwideSources to ['catho', 'ciee'] when omitted (docs/audit AC-024, PR-016)", () => {
     expect(
       CriteriaSchema.parse(validCriteria()).location.nationwideSources,
-    ).toEqual(["catho"]);
+    ).toEqual(["catho", "ciee"]);
   });
 
   it("rejects a tracks table missing one of the three required tracks", () => {
@@ -102,7 +102,7 @@ describe("CriteriaSchema", () => {
     expect(result.location).toEqual({
       cities: [],
       allowRemote: true,
-      nationwideSources: ["catho"],
+      nationwideSources: ["catho", "ciee"],
     });
   });
 
