@@ -54,6 +54,20 @@ describe("isAllowedCathoUrl (AC-034 — SSRF-shaped sitemap candidate)", () => {
   it("rejects an unparseable URL rather than throwing", () => {
     expect(isAllowedCathoUrl("not a url")).toBe(false);
   });
+
+  it("rejects a nonstandard port on the real host (docs/audit PR-020)", () => {
+    // URL.hostname never includes the port -- checking only hostname
+    // silently accepted this.
+    expect(
+      isAllowedCathoUrl("https://www.catho.com.br:9999/vagas/estagio-x/1/"),
+    ).toBe(false);
+  });
+
+  it("accepts the real host with the default https port stated explicitly", () => {
+    expect(
+      isAllowedCathoUrl("https://www.catho.com.br:443/vagas/estagio-x/1/"),
+    ).toBe(true);
+  });
 });
 
 describe("classifyPageResult (AC-002 — retryable vs. expired)", () => {

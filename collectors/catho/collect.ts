@@ -133,8 +133,15 @@ async function discoverCandidates(
   titlePattern: RegExp,
 ): Promise<SitemapCandidate[]> {
   const indexXml = await fetchText(SITEMAP_INDEX);
-  const sitemapUrls = extractLocs(indexXml).filter((url) =>
-    SITEMAP_ENTRY_PATTERN.test(url),
+  // `isAllowedCathoUrl` first, same discipline `toCandidate` already
+  // applies to posting URLs (docs/audit PR-020) — the sitemap index is
+  // fetched from a fixed, trusted URL, but its *content* is external,
+  // unauthenticated data. A compromised or malformed `<loc>` entry
+  // matching the path suffix alone used to be handed straight to
+  // `fetchText` (a plain `fetch` from this process, not even routed
+  // through Playwright), with no host check at all.
+  const sitemapUrls = extractLocs(indexXml).filter(
+    (url) => isAllowedCathoUrl(url) && SITEMAP_ENTRY_PATTERN.test(url),
   );
   console.log(`sitemap index: ${sitemapUrls.length} vaga sitemap(s) found`);
 
@@ -251,6 +258,25 @@ async function main(): Promise<void> {
     console.log(`fetching ${toFetch.length} page(s) this run`);
     const browser = await chromium.launch();
     const page = await browser.newPage();
+    // Blocks a disallowed redirect *before* the request for it is ever
+    // issued (docs/audit PR-020) -- checking `page.url()` only after
+    // `page.goto` resolves, as `classifyPageResult` still does below, means
+    // the request to the redirect target already happened by the time
+    // that check runs. Every request this page makes goes through here,
+    // including each hop of a redirect chain (Playwright treats them as
+    // separate requests) -- fine to be this broad, since the only things
+    // this collector reads are the document itself and an inline
+    // `application/ld+json` script (`loadCandidatePage`), never a
+    // same-page third-party resource.
+    await page.route("**/*", async (route) => {
+      const url = route.request().url();
+      if (isAllowedCathoUrl(url)) {
+        await route.continue();
+      } else {
+        console.warn(`blocked disallowed-host request: ${url}`);
+        await route.abort();
+      }
+    });
     const outcomeCounts = { collected: 0, expired: 0, retryable: 0 };
 
     try {

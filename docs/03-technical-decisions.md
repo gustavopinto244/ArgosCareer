@@ -55,6 +55,7 @@ revisited on its merits instead of re-argued from memory.
 | [041](adr/041-per-source-recovery-recency.md)                                 | Recovery recency is tracked per source, not per collect cycle                       | Accepted | 2026-08-17 |
 | [042](adr/042-composite-cache-identity-and-domain-validated-rows.md)          | Composite cache identity and domain-validated cache rows                            | Accepted | 2026-08-17 |
 | [043](adr/043-nullable-reconciliation-counts.md)                              | `receivedCount`/`schemaRejectedCount` are nullable, not default-zero                | Accepted | 2026-08-17 |
+| [044](adr/044-catho-exact-origin-allowlist-and-redirect-interception.md)      | Exact-origin allowlist and redirect interception for the Catho collector            | Accepted | 2026-08-17 |
 
 ## When an ADR is required
 
