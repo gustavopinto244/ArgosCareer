@@ -66,6 +66,7 @@ function emptyDigest(overrides: Partial<Digest> = {}): Digest {
       filtered: 0,
       scored: 0,
       failedSources: [],
+      truncatedSources: [],
     },
     ...overrides,
   };

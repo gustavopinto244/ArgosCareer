@@ -13,6 +13,12 @@ import { CollectParams, RunsService } from "./runs.service";
 export interface IngestExternalBody {
   readonly source?: string;
   readonly postings?: readonly ExternalRawPosting[];
+  /** Set by the caller when it hit its own configured cap this run
+   * (docs/audit PR-015) — jobspy's `results_wanted`, or Catho's
+   * `MAX_PAGES_PER_RUN`. This process never sees the source's raw
+   * response, so it can only carry forward what the caller already
+   * knows. */
+  readonly truncated?: boolean;
 }
 
 /**
@@ -73,6 +79,10 @@ export class RunsController {
     if (!Array.isArray(body.postings)) {
       throw new BadRequestException("'postings' must be an array");
     }
-    return this.runs.ingestExternal(body.source, body.postings);
+    return this.runs.ingestExternal(
+      body.source,
+      body.postings,
+      body.truncated ?? false,
+    );
   }
 }

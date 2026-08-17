@@ -120,6 +120,10 @@ function renderSummary(digest: Digest): string {
     summary.failedSources.length > 0
       ? summary.failedSources.join(", ")
       : "nenhuma";
+  const truncatedSources =
+    summary.truncatedSources.length > 0
+      ? summary.truncatedSources.join(", ")
+      : "nenhuma";
   return [
     "Resumo da execução",
     "",
@@ -128,6 +132,7 @@ function renderSummary(digest: Digest): string {
     `Após pré-filtro: ${summary.filtered}`,
     `Pontuadas: ${summary.scored}`,
     `Fontes com falha: ${failedSources}`,
+    `Fontes truncadas pelo limite: ${truncatedSources}`,
   ].join("\n");
 }
 

@@ -87,7 +87,15 @@ def main() -> None:
     if skipped:
         print(f"WARNING: {skipped} row(s) had no id, skipped")
 
-    body = {"source": "indeed", "postings": postings}
+    # jobspy has no "there were more, we stopped" signal of its own -- a
+    # result count that reached the requested budget is the same heuristic
+    # this project's other paginated collectors use (a full final page plus
+    # a cap being what stopped it, not the source running dry), applied
+    # here since this process never sees Indeed's raw response either
+    # (docs/audit PR-015).
+    truncated = len(jobs) >= results_wanted
+
+    body = {"source": "indeed", "postings": postings, "truncated": truncated}
     response = requests.post(
         f"{api_url}/runs/collect/external",
         json=body,

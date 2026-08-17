@@ -236,9 +236,13 @@ async function main(): Promise<void> {
   );
 
   const candidates = await discoverCandidates(titlePattern);
-  const toFetch = candidates
-    .filter((c) => needsPageFetch(state, c.id))
-    .slice(0, maxPagesPerRun);
+  const eligible = candidates.filter((c) => needsPageFetch(state, c.id));
+  const toFetch = eligible.slice(0, maxPagesPerRun);
+  // MAX_PAGES_PER_RUN cutting real candidates is genuine truncation, not
+  // the sitemap running dry (docs/audit PR-015) -- the remainder is not
+  // lost, just deferred to a later run's own budget, but this run left
+  // something uncollected that a later one needs to be watched for.
+  const truncated = eligible.length > maxPagesPerRun;
   console.log(
     `candidates: ${candidates.length} title-matched, ${toFetch.length} need a page load this run`,
   );
@@ -286,6 +290,7 @@ async function main(): Promise<void> {
   const body = {
     source: "catho",
     postings: pending.map((p) => ({ sourceId: p.id, payload: p })),
+    truncated,
   };
   let response: Response;
   try {

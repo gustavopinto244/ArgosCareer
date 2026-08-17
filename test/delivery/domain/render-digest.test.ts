@@ -66,6 +66,7 @@ function emptyDigest(overrides: Partial<Digest> = {}): Digest {
       filtered: 0,
       scored: 0,
       failedSources: [],
+      truncatedSources: [],
     },
     ...overrides,
   };
@@ -222,6 +223,7 @@ describe("renderDigestText", () => {
           filtered: 5,
           scored: 5,
           failedSources: ["gupy"],
+          truncatedSources: [],
         },
       }),
     );
@@ -235,5 +237,26 @@ describe("renderDigestText", () => {
   it("reports no failed sources as 'nenhuma'", () => {
     const text = renderDigestText(emptyDigest());
     expect(text).toContain("Fontes com falha: nenhuma");
+  });
+
+  it("renders a list of sources truncated by their own result cap (docs/audit PR-015)", () => {
+    const text = renderDigestText(
+      emptyDigest({
+        summary: {
+          collected: 10,
+          deduplicated: 8,
+          filtered: 5,
+          scored: 5,
+          failedSources: [],
+          truncatedSources: ["ciee", "indeed"],
+        },
+      }),
+    );
+    expect(text).toContain("Fontes truncadas pelo limite: ciee, indeed");
+  });
+
+  it("reports no truncated sources as 'nenhuma'", () => {
+    const text = renderDigestText(emptyDigest());
+    expect(text).toContain("Fontes truncadas pelo limite: nenhuma");
   });
 });

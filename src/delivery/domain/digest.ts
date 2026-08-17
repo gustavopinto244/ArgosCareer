@@ -58,6 +58,13 @@ export interface RunSummary {
   readonly filtered: number;
   readonly scored: number;
   readonly failedSources: readonly string[];
+  /** Source(s) that hit their own result cap in the window since the last
+   * delivery (docs/audit AC-013, PR-015) — visible so a "success" outcome
+   * that still left something uncollected is not indistinguishable from a
+   * clean run. Was already persisted per collect run (`runs.truncatedSources`)
+   * but never read back into anything an operator sees, internal or
+   * external source alike. */
+  readonly truncatedSources: readonly string[];
 }
 
 /**
