@@ -212,6 +212,7 @@ export class SchedulerService implements OnModuleInit {
           this.notifier,
           this.criteria,
           this.profile,
+          built.getUsage,
         );
 
         const run = runsRepo.findById(outcome.runId);

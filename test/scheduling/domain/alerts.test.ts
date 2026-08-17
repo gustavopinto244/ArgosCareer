@@ -29,6 +29,9 @@ function run(overrides: Partial<RunRow> = {}): RunRow {
     failureReason: null,
     failedSources: null,
     truncatedSources: null,
+    llmAttempts: 0,
+    llmCostUsd: 0,
+    llmAttemptsWithoutUsage: 0,
     ...overrides,
   };
 }

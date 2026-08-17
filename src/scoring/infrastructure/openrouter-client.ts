@@ -17,15 +17,22 @@ const DEFAULT_TIMEOUT_MS = 30_000;
  */
 const ChatCompletionResponseSchema = z
   .object({
-    choices: z
-      .array(
-        z
-          .object({
-            message: z.object({ content: z.string() }).passthrough(),
-          })
-          .passthrough(),
-      )
-      .min(1),
+    // Deliberately no `.min(1)` here (docs/audit AC-015): a response with a
+    // genuinely empty `choices` array — content filtered, no completion
+    // returned — is still a structurally valid envelope, and OpenRouter can
+    // still report real `usage` for it. Enforcing "at least one choice" at
+    // the schema level made the whole envelope fail validation together
+    // with `usage`, silently discarding usage the provider already
+    // reported. `complete()` below checks `choices[0]` itself and treats a
+    // missing first choice as its own failure — a business-rule check, not
+    // a shape one.
+    choices: z.array(
+      z
+        .object({
+          message: z.object({ content: z.string() }).passthrough(),
+        })
+        .passthrough(),
+    ),
     /**
      * Optional on purpose, like every other field read off a third-party
      * response here: usage accounting is reported by OpenRouter but is not
@@ -46,13 +53,51 @@ const ChatCompletionResponseSchema = z
   })
   .passthrough();
 
+/**
+ * How one `complete()` attempt ended — tracked independently of `calls`
+ * (docs/audit/AUDIT_REPORT.md AC-015): `calls` only ever counted a fully
+ * successful round trip, so a timeout, a network error, an HTTP error, a
+ * malformed body, or an unexpected shape were all invisible to
+ * `getUsage()` — the provider may have processed and billed a request
+ * this client never counted as an attempt at all.
+ */
+export type AttemptOutcome =
+  | "success"
+  | "httpError"
+  | "timeout"
+  | "networkError"
+  | "invalidEnvelope"
+  | "invalidOutput";
+
+const ZERO_OUTCOMES: Readonly<Record<AttemptOutcome, number>> = {
+  success: 0,
+  httpError: 0,
+  timeout: 0,
+  networkError: 0,
+  invalidEnvelope: 0,
+  invalidOutput: 0,
+};
+
 /** Running totals across every call this client has made. */
 export interface UsageTotals {
+  /** Successful round trips only — kept for backward compatibility with
+   * every existing caller (the M7 calibration script, ADR-014). */
   readonly calls: number;
   readonly promptTokens: number;
   readonly completionTokens: number;
   readonly cachedPromptTokens: number;
   readonly costUsd: number;
+  /** Every `complete()` invocation that reached the network, regardless of
+   * outcome — `attempts >= calls` always, and the gap is exactly what
+   * `calls` alone could never show (AC-015). */
+  readonly attempts: number;
+  readonly attemptsByOutcome: Readonly<Record<AttemptOutcome, number>>;
+  /** Attempts for which no `usage` object was ever available to add to
+   * `costUsd` — includes every non-success outcome (no parseable body to
+   * read usage from) and the rare case of a 2xx, schema-valid response
+   * that simply omitted `usage` (OpenRouter's own field is optional). A
+   * `costUsd` of 0 with a nonzero count here means "unknown," not "free." */
+  readonly attemptsWithoutUsage: number;
 }
 
 type FetchLike = typeof fetch;
@@ -91,6 +136,11 @@ export class OpenRouterClient {
   private completionTokens = 0;
   private cachedPromptTokens = 0;
   private costUsd = 0;
+  private attempts = 0;
+  private attemptsByOutcome: Record<AttemptOutcome, number> = {
+    ...ZERO_OUTCOMES,
+  };
+  private attemptsWithoutUsage = 0;
 
   constructor(options: OpenRouterClientOptions) {
     this.apiKey = options.apiKey;
@@ -116,10 +166,17 @@ export class OpenRouterClient {
       completionTokens: this.completionTokens,
       cachedPromptTokens: this.cachedPromptTokens,
       costUsd: this.costUsd,
+      attempts: this.attempts,
+      attemptsByOutcome: { ...this.attemptsByOutcome },
+      attemptsWithoutUsage: this.attemptsWithoutUsage,
     };
   }
 
   async complete(prompt: string): Promise<string> {
+    // Counted before the network call, not after a successful one — this is
+    // the direct fix for AC-015: every attempt that reaches the network is
+    // now visible, regardless of how it ends.
+    this.attempts += 1;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
 
@@ -139,12 +196,24 @@ export class OpenRouterClient {
         }),
         signal: controller.signal,
       });
+    } catch (cause) {
+      // Our own abort (timeout) vs. anything else (DNS, connection reset,
+      // TLS) — both are "no response," but distinguishing them is exactly
+      // what a retry/backoff policy one layer up needs (AC-016 is the
+      // matching finding for using it; this only records it).
+      this.attemptsByOutcome[
+        controller.signal.aborted ? "timeout" : "networkError"
+      ] += 1;
+      this.attemptsWithoutUsage += 1;
+      throw cause;
     } finally {
       clearTimeout(timer);
     }
 
     if (!response.ok) {
       const body = await response.text().catch(() => "");
+      this.attemptsByOutcome.httpError += 1;
+      this.attemptsWithoutUsage += 1;
       throw new Error(
         `OpenRouter responded ${response.status}: ${body}`.trim(),
       );
@@ -154,21 +223,37 @@ export class OpenRouterClient {
     try {
       json = await response.json();
     } catch (cause) {
+      this.attemptsByOutcome.invalidEnvelope += 1;
+      this.attemptsWithoutUsage += 1;
       throw new Error("Malformed OpenRouter response body", { cause });
     }
 
     const parsed = ChatCompletionResponseSchema.safeParse(json);
+    // Captured before the shape check below, deliberately — a response that
+    // is a valid chat-completion envelope but fails Stage A/B's own schema
+    // one layer up still spent real usage, and this is the one place that
+    // usage is ever visible (REMEDIATION_PLAN.md AC-015: "persistir usage
+    // retornado pelo provider mesmo quando o conteúdo falhar posteriormente
+    // no schema Stage A/B").
+    const usage = parsed.success ? parsed.data.usage : undefined;
+    if (usage) {
+      this.promptTokens += usage.prompt_tokens ?? 0;
+      this.completionTokens += usage.completion_tokens ?? 0;
+      this.cachedPromptTokens +=
+        usage.prompt_tokens_details?.cached_tokens ?? 0;
+      this.costUsd += usage.cost ?? 0;
+    } else {
+      this.attemptsWithoutUsage += 1;
+    }
+
     const firstChoice = parsed.success ? parsed.data.choices[0] : undefined;
     if (!firstChoice) {
+      this.attemptsByOutcome.invalidOutput += 1;
       throw new Error("Unexpected OpenRouter response shape");
     }
 
-    const usage = parsed.success ? parsed.data.usage : undefined;
     this.calls += 1;
-    this.promptTokens += usage?.prompt_tokens ?? 0;
-    this.completionTokens += usage?.completion_tokens ?? 0;
-    this.cachedPromptTokens += usage?.prompt_tokens_details?.cached_tokens ?? 0;
-    this.costUsd += usage?.cost ?? 0;
+    this.attemptsByOutcome.success += 1;
 
     return firstChoice.message.content;
   }

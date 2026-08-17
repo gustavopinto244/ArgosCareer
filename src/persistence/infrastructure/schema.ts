@@ -1,6 +1,7 @@
 import {
   index,
   integer,
+  real,
   sqliteTable,
   text,
   uniqueIndex,
@@ -199,4 +200,16 @@ export const runs = sqliteTable("runs", {
   // upstream source's last page was still full — a "success" run that
   // silently left more results uncollected, previously invisible.
   truncatedSources: text("truncated_sources"),
+  // scoreAndDeliver runs only, from OpenRouterClient.getUsage() (docs/audit
+  // AC-015). llmAttempts counts every network attempt regardless of
+  // outcome -- calls that never made it into scoredCount at all (a 429, a
+  // timeout, a malformed body) were previously invisible to any persisted
+  // number. llmCostUsd is a floor, not a reconciled total, whenever
+  // llmAttemptsWithoutUsage is nonzero -- the provider's own dashboard is
+  // still the source of truth for anything more precise.
+  llmAttempts: integer("llm_attempts").notNull().default(0),
+  llmCostUsd: real("llm_cost_usd").notNull().default(0),
+  llmAttemptsWithoutUsage: integer("llm_attempts_without_usage")
+    .notNull()
+    .default(0),
 });

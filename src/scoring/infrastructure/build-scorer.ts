@@ -6,14 +6,26 @@ import { Criteria } from "../../prefilter/domain/criteria";
 import { Profile } from "../../profile/domain/profile";
 import { ScorerPort } from "../domain/ports/scorer.port";
 import { ApiScorer } from "./api-scorer";
-import { OpenRouterClient } from "./openrouter-client";
+import { OpenRouterClient, UsageTotals } from "./openrouter-client";
 import { STAGE_B_PROMPT_VERSION, verifyPromptTemplates } from "./prompts";
 import { StageAExtractor } from "./stage-a-extractor";
 import { StageBMatcher } from "./stage-b-matcher";
 import { StubScorer } from "./stub-scorer";
 
 export type BuildScorerResult =
-  | { readonly ok: true; readonly scorer: ScorerPort }
+  | {
+      readonly ok: true;
+      readonly scorer: ScorerPort;
+      /**
+       * Present only for the `api` adapter — `StubScorer` makes no network
+       * call, so there is no usage to report. Exposed here rather than left
+       * reachable only from `scripts/run-calibration.ts`'s own, separately
+       * constructed client (docs/audit AC-015): production scoring runs
+       * went through this exact function and had no way to answer "what did
+       * tonight's run cost" at all before this existed.
+       */
+      readonly getUsage?: () => UsageTotals;
+    }
   | { readonly ok: false; readonly error: string };
 
 /**
@@ -79,6 +91,7 @@ export function buildScorer(
         criteria,
         new PostingsRepository(db),
       ),
+      getUsage: () => client.getUsage(),
     };
   }
 
