@@ -53,6 +53,19 @@ pass. `OllamaScorer` was built as the resolution — no cost, no cap — but a
 full calibration run against it, the correlation/precision-recall
 measurement, and the README table are still outstanding.
 
+> **This entry is frozen at the point it was written and is not the
+> current state** (docs/audit AC-033: this changelog stopped being updated
+> partway through M7 and never resumed through M8–M10, so it must not be
+> read as "what M7 shipped with," let alone the project's current
+> architecture). Concretely: `OllamaScorer`, described two paragraphs above
+> as the calibration resolution, was fully evaluated and **retired**
+> (ADR-016) — it never finished a real calibration pass (88% parse-failure
+> against `qwen3:4b`), Atlas never had Ollama installed, and `ApiScorer`'s
+> measured production cost made the local-model case moot. `CLAUDE.md`'s
+> milestone table and `docs/10-milestones.md` are the authoritative record
+> of current status for every milestone, M7 included; this section is
+> history, not a live document.
+
 ### Added — M6, vertical slice 🎯
 
 - The real `Digest` shape (`src/delivery/domain/digest.ts`), replacing the M1

@@ -1,8 +1,11 @@
 # Security
 
-ArgosCareer is a single-user personal system. It is not a service, has no users
-other than its author, and is not deployed anywhere reachable by third parties.
-The security surface is correspondingly small — but it handles a complete resume,
+ArgosCareer is a single-user personal system. It is not a service and has no
+users other than its author. It is reachable from two authenticated network
+paths — M9's Bearer-key API/MCP boundary over Tailscale (ADR-017), and a
+Cloudflare Tunnel route that accepts only n8n.cloud's LinkedIn-alert caller
+(ADR-030) — neither of which is a public, unauthenticated surface. The
+security surface is correspondingly small — but it handles a complete resume,
 credentials, and a public repository, so the boundaries are written down.
 
 ## Reporting
@@ -48,6 +51,14 @@ to imitate a browser. This is a security property, not politeness: a forged
 User-Agent is what turns "personal automation" into misrepresentation if it is
 ever examined, and it removes the operator's ability to contact whoever is
 generating traffic.
+
+**One named exception: Indeed, via `python-jobspy` (ADR-028).** The library's
+own Indeed scraper hardcodes a User-Agent impersonating Indeed's mobile app —
+not configurable — and targets `apis.indeed.com`, whose `robots.txt` disallows
+everything. Both rules above are broken here, deliberately, scoped to this one
+library's Indeed path only — it licenses nothing else, for any other source.
+Full reasoning in ADR-028; `CLAUDE.md` §6 states the exception plainly rather
+than letting the "every adapter" claim above stand unqualified.
 
 Scraping at scale is a non-goal (`docs/01-vision-and-scope.md`).
 
