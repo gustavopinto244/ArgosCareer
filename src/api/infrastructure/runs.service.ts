@@ -5,6 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
+import { ThrottlerException, ThrottlerStorage } from "@nestjs/throttler";
 import {
   CollectorResolver,
   executeCollect,
@@ -29,6 +30,7 @@ import { COLLECTOR } from "./collector.provider";
 import { CRITERIA, PROFILE } from "./config.provider";
 import { DATABASE } from "./database.provider";
 import { NOTIFIER } from "./notifier.provider";
+import { EXPENSIVE_THROTTLE } from "./throttler-limits";
 
 /** The three run kinds ADR-009's two crons (plus dedup, folded into the
  * collection cycle) actually produce — `docs/08-observability.md`'s health
@@ -71,7 +73,40 @@ export class RunsService {
     @Inject(CRITERIA) private readonly criteria: Criteria,
     @Inject(PROFILE) private readonly profile: Profile,
     @Inject(RUN_LOCK) private readonly runLock: RunLock,
+    @Inject(ThrottlerStorage)
+    private readonly throttlerStorage: ThrottlerStorage,
   ) {}
+
+  /**
+   * Rate-limits a spend/side-effect operation (docs/audit AC-021) —
+   * `collect`, `deliver`, `ingestExternal` — regardless of which protocol
+   * called it. `ApiModule`'s `ThrottlerGuard` already rate-limits every
+   * HTTP route, but MCP tool calls all share one `/mcp` route
+   * (`McpController`), invisible to a per-route HTTP guard; this check
+   * lives here instead, in the one place both `RunsController` and
+   * `McpController` actually call, so a leaked key spamming either
+   * protocol draws against the same budget. Throws `ThrottlerException`
+   * (429) once `EXPENSIVE_THROTTLE.limit` is exceeded within
+   * `EXPENSIVE_THROTTLE.ttl` — caught and translated by NestJS's exception
+   * filter for REST, and by `McpController`'s `safely()` for MCP.
+   */
+  private async enforceExpensiveOperationLimit(
+    operation: string,
+  ): Promise<void> {
+    const key = `expensive-operation:${operation}`;
+    const record = await this.throttlerStorage.increment(
+      key,
+      EXPENSIVE_THROTTLE.ttl,
+      EXPENSIVE_THROTTLE.limit,
+      EXPENSIVE_THROTTLE.ttl,
+      "expensive-operation",
+    );
+    if (record.isBlocked) {
+      throw new ThrottlerException(
+        `Rate limit exceeded for '${operation}' — at most ${EXPENSIVE_THROTTLE.limit} calls per ${EXPENSIVE_THROTTLE.ttl / 60_000} minute(s)`,
+      );
+    }
+  }
 
   /**
    * `docs/08-observability.md`: "an HTTP health endpoint reporting last
@@ -121,6 +156,7 @@ export class RunsService {
    * not another manual call racing itself.
    */
   async collect(params: CollectParams) {
+    await this.enforceExpensiveOperationLimit("collect");
     // An empty body means "run the configured cycle", the same thing the
     // cron does; a body with any field set is a deliberate one-off query
     // and overrides the configuration rather than adding to it.
@@ -168,6 +204,7 @@ export class RunsService {
    * notified.
    */
   async deliver() {
+    await this.enforceExpensiveOperationLimit("deliver");
     const built = buildScorer(this.db, this.criteria, this.profile);
     if (!built.ok) {
       throw new BadRequestException(`Misconfigured scorer: ${built.error}`);
@@ -205,6 +242,7 @@ export class RunsService {
     postings: readonly ExternalRawPosting[],
     truncated: boolean = false,
   ) {
+    await this.enforceExpensiveOperationLimit("ingestExternal");
     const normalize = normalizerFor(source);
     if (!normalize) {
       throw new BadRequestException(

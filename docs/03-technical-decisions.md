@@ -57,6 +57,7 @@ revisited on its merits instead of re-argued from memory.
 | [043](adr/043-nullable-reconciliation-counts.md)                              | `receivedCount`/`schemaRejectedCount` are nullable, not default-zero                | Accepted | 2026-08-17 |
 | [044](adr/044-catho-exact-origin-allowlist-and-redirect-interception.md)      | Exact-origin allowlist and redirect interception for the Catho collector            | Accepted | 2026-08-17 |
 | [045](adr/045-catho-checkpoint-durability-and-quarantine-replay.md)           | Bounded incremental checkpoints, a state-file lock, and quarantine replay           | Accepted | 2026-08-17 |
+| [046](adr/046-rate-limit-the-shared-api-key.md)                               | Rate-limit the shared API key, enforced once regardless of protocol                 | Accepted | 2026-08-17 |
 
 ## When an ADR is required
 

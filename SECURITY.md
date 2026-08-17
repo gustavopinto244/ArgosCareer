@@ -97,6 +97,16 @@ Atlas is a personal server behind Cloudflare Tunnel with no inbound ports open.
 The M9 HTTP API is not exposed publicly without authentication, and the M8
 scheduled pipeline listens on nothing.
 
+**One `API_KEY` authorizes every caller** — n8n, host-side collectors and
+Hermes alike (ADR-017's documented starting point; Cloudflare Access/JWT is
+the named upgrade path, not built until a second consumer or public
+exposure actually arrives). A leaked key is a real risk this boundary does
+not eliminate, only bounds: every route is rate-limited (`ThrottlerGuard`),
+and `collect`/`deliver`/`ingestExternal` — the three that spend real
+OpenRouter budget or send a real Telegram message — carry a tighter,
+shared limit enforced once in `RunsService` so it holds regardless of
+whether the caller reaches them via REST or MCP (docs/audit AC-021).
+
 Secrets reach the container through environment variables from a `.env` file
 readable only by its owner — never baked into an image, never in a
 `docker-compose.yml` that gets committed.

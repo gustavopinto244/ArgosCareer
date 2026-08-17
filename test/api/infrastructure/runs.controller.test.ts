@@ -229,6 +229,19 @@ describe("GET /runs", () => {
     expect(res.body.runs[0].runId).toBe(second);
   });
 
+  it("stays under the default rate limit for more calls than the expensive endpoints allow (docs/audit AC-021)", async () => {
+    // Proves the tighter EXPENSIVE_THROTTLE is scoped to the specific
+    // spend/side-effect routes, not applied globally -- a plain read stays
+    // well within the default 20/min ceiling at a volume that would 429 on
+    // /runs/deliver.
+    for (let i = 0; i < 5; i++) {
+      const res = await auth(
+        request(app.getHttpServer()).get("/runs?kind=collect"),
+      );
+      expect(res.status).toBe(200);
+    }
+  });
+
   it("rejects a non-positive-integer limit", async () => {
     const res = await auth(
       request(app.getHttpServer()).get("/runs?kind=collect&limit=abc"),
@@ -587,6 +600,20 @@ describe("POST /runs/deliver", () => {
 
     expect(res.status).toBe(400);
     expect(fakeNotifier.sent).toHaveLength(0);
+  });
+
+  it("rejects a 4th call within the window with 429 (docs/audit AC-021)", async () => {
+    for (let i = 0; i < 3; i++) {
+      const res = await auth(
+        request(app.getHttpServer()).post("/runs/deliver"),
+      );
+      expect(res.status).toBe(201);
+    }
+
+    const fourth = await auth(
+      request(app.getHttpServer()).post("/runs/deliver"),
+    );
+    expect(fourth.status).toBe(429);
   });
 });
 
