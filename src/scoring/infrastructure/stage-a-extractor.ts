@@ -64,6 +64,11 @@ export class StageAExtractor {
     private readonly ask: AskModel,
     private readonly extractionsRepo: ExtractionsRepository,
     private readonly promptVersion: string = STAGE_A_PROMPT_VERSION,
+    /** Which model `ask` actually calls (docs/audit AC-007) — part of the
+     * cache key so switching `LLM_MODEL` cannot silently reuse a different
+     * model's extraction. Defaulted for tests that do not care about model
+     * identity; `build-scorer.ts` always passes the real configured value. */
+    private readonly model: string = "unknown",
   ) {}
 
   async extract(
@@ -74,6 +79,7 @@ export class StageAExtractor {
     const cached = this.extractionsRepo.find(
       posting.fingerprint,
       this.promptVersion,
+      this.model,
       contentHash,
     );
     if (cached) {
@@ -129,6 +135,7 @@ export class StageAExtractor {
     this.extractionsRepo.upsert(
       posting.fingerprint,
       this.promptVersion,
+      this.model,
       contentHash,
       result.data,
       now(),

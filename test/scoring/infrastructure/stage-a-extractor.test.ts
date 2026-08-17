@@ -80,6 +80,7 @@ describe("StageAExtractor.extract", () => {
       extractionsRepo.find(
         posting().fingerprint,
         "a-v3",
+        "unknown",
         hashExtractionInput(posting().title, posting().description),
       ),
     ).toEqual({
@@ -100,6 +101,7 @@ describe("StageAExtractor.extract", () => {
     extractionsRepo.upsert(
       posting().fingerprint,
       "a-v3",
+      "unknown",
       hashExtractionInput(posting().title, posting().description),
       {
         requirements: [
@@ -237,6 +239,39 @@ describe("StageAExtractor.extract", () => {
       );
     }
   });
+
+  it("does not reuse a cached extraction produced by a different model (docs/audit AC-007)", async () => {
+    const ask = vi.fn(async () =>
+      JSON.stringify({
+        requirements: [
+          { text: "Node.js", category: "language", weight: "mandatory" },
+        ],
+        seniority: null,
+        experienceYears: null,
+      }),
+    );
+    const extractorA = new StageAExtractor(
+      ask,
+      extractionsRepo,
+      "a-v3",
+      "model-a",
+    );
+    const extractorB = new StageAExtractor(
+      ask,
+      extractionsRepo,
+      "a-v3",
+      "model-b",
+    );
+
+    await extractorA.extract(posting(), () => NOW);
+    expect(ask).toHaveBeenCalledTimes(1);
+
+    // Same fingerprint, same prompt version, same content -- only the
+    // model differs. Switching LLM_MODEL must not silently reuse the
+    // other model's extraction as if it were this one's.
+    await extractorB.extract(posting(), () => NOW);
+    expect(ask).toHaveBeenCalledTimes(2);
+  });
 });
 
 /**
@@ -297,6 +332,7 @@ describe("StageAExtractor.extract — posting with no description", () => {
       extractionsRepo.find(
         p.fingerprint,
         "a-v3",
+        "unknown",
         hashExtractionInput(p.title, p.description),
       ),
     ).toBeNull();

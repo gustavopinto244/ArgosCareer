@@ -2,6 +2,7 @@ import { z } from "zod";
 import { Profile } from "../../profile/domain/profile";
 import { MatchesRepository } from "../../persistence/infrastructure/matches-repository";
 import { isKnownProfileEvidence } from "../domain/evidence-provenance";
+import { hashRequirements } from "../domain/requirements-hash";
 import { createMatch, Match, Requirement } from "../domain/types";
 import { AskModel, parseModelOutputWithRetries } from "./llm-output";
 import { buildStageBPrompt, STAGE_B_PROMPT_VERSION } from "./prompts";
@@ -99,6 +100,11 @@ export class StageBMatcher {
     private readonly matchesRepo: MatchesRepository,
     private readonly promptVersion: string = STAGE_B_PROMPT_VERSION,
     private readonly concurrency: number = DEFAULT_STAGE_B_CONCURRENCY,
+    /** Which model `ask` actually calls (docs/audit AC-007) — part of the
+     * cache key so switching `LLM_MODEL` cannot silently reuse a different
+     * model's matches. Defaulted for tests that do not care about model
+     * identity; `build-scorer.ts` always passes the real configured value. */
+    private readonly model: string = "unknown",
   ) {}
 
   async match(
@@ -108,10 +114,13 @@ export class StageBMatcher {
     profileHash: string,
     now: () => Date = () => new Date(),
   ): Promise<MatchingResult> {
+    const requirementsHash = hashRequirements(requirements);
     const cached = this.matchesRepo.find(
       fingerprint,
       profileHash,
       this.promptVersion,
+      this.model,
+      requirementsHash,
     );
     if (cached) return { ok: true, matches: cached };
 
@@ -188,6 +197,8 @@ export class StageBMatcher {
       fingerprint,
       profileHash,
       this.promptVersion,
+      this.model,
+      requirementsHash,
       matches,
       now(),
     );

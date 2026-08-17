@@ -7,7 +7,11 @@ import { Profile } from "../../profile/domain/profile";
 import { ScorerPort } from "../domain/ports/scorer.port";
 import { ApiScorer } from "./api-scorer";
 import { OpenRouterClient, UsageTotals } from "./openrouter-client";
-import { STAGE_B_PROMPT_VERSION, verifyPromptTemplates } from "./prompts";
+import {
+  STAGE_A_PROMPT_VERSION,
+  STAGE_B_PROMPT_VERSION,
+  verifyPromptTemplates,
+} from "./prompts";
 import { StageAExtractor } from "./stage-a-extractor";
 import { StageBMatcher } from "./stage-b-matcher";
 import { StubScorer } from "./stub-scorer";
@@ -80,12 +84,18 @@ export function buildScorer(
     return {
       ok: true,
       scorer: new ApiScorer(
-        new StageAExtractor(ask, new ExtractionsRepository(db)),
+        new StageAExtractor(
+          ask,
+          new ExtractionsRepository(db),
+          STAGE_A_PROMPT_VERSION,
+          model,
+        ),
         new StageBMatcher(
           ask,
           new MatchesRepository(db),
           STAGE_B_PROMPT_VERSION,
           criteria.scoring.stageBConcurrency,
+          model,
         ),
         profile,
         criteria,
