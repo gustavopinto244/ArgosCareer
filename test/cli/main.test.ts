@@ -910,7 +910,11 @@ describe("executeCollect — multi-source dispatch", () => {
     expect(run?.schemaRejectedCount).toBe(6);
   });
 
-  it("defaults received/schemaRejected to 0 when a collector does not report them", async () => {
+  it("reports received/schemaRejected as null, not a false 0, when a collector does not report them (docs/audit PR-014)", async () => {
+    // Reversing this test's own prior name and expectation: a run where a
+    // collector cannot report these counts used to look identical to one
+    // that genuinely received zero items. null is the honest "unreconcilable
+    // this run," never silently folded into the sum.
     const collector = stubCollector({
       source: "gupy",
       collectedAt: new Date(),
@@ -925,8 +929,41 @@ describe("executeCollect — multi-source dispatch", () => {
       0,
     );
 
-    expect(outcome.received).toBe(0);
-    expect(outcome.schemaRejected).toBe(0);
+    expect(outcome.received).toBeNull();
+    expect(outcome.schemaRejected).toBeNull();
+
+    const run = new RunsRepository(db).findRecent("collect", 1)[0];
+    expect(run?.receivedCount).toBeNull();
+    expect(run?.schemaRejectedCount).toBeNull();
+  });
+
+  it("stays null if any query in the run cannot report a count, even when others can (docs/audit PR-014)", async () => {
+    let call = 0;
+    const collector = {
+      collect: async () => {
+        call += 1;
+        return call === 1
+          ? {
+              source: "gupy",
+              collectedAt: new Date(),
+              postings: [],
+              receivedCount: 5,
+              schemaRejectedCount: 1,
+            }
+          : { source: "gupy", collectedAt: new Date(), postings: [] };
+      },
+    };
+
+    const outcome = await executeCollect(
+      db,
+      () => collector,
+      [{}, {}],
+      undefined,
+      0,
+    );
+
+    expect(outcome.received).toBeNull();
+    expect(outcome.schemaRejected).toBeNull();
   });
 
   it("records which source(s) reported truncation (docs/audit AC-013)", async () => {
@@ -1166,6 +1203,21 @@ describe("executeIngestExternal", () => {
     const stored = new PostingsRepository(db).findActive();
     expect(stored).toHaveLength(2);
     expect(stored.map((p) => p.source)).toEqual(["indeed", "indeed"]);
+  });
+
+  it("leaves receivedCount/schemaRejectedCount null, not a false 0 -- external ingest has no reconcilable raw count of its own (docs/audit PR-014)", async () => {
+    const { normalize } = fakeNormalizer();
+    const outcome = await executeIngestExternal(
+      db,
+      "indeed",
+      normalize,
+      [{ sourceId: "in-1", payload: { title: "Estágio A", company: "X" } }],
+      () => NOW,
+    );
+
+    const run = new RunsRepository(db).findById(outcome.runId);
+    expect(run?.receivedCount).toBeNull();
+    expect(run?.schemaRejectedCount).toBeNull();
   });
 
   it("records the caller-supplied truncated flag on the run row (docs/audit PR-015)", async () => {

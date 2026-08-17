@@ -18,10 +18,15 @@ export interface RunCounts {
   readonly tooOldCount?: number;
   readonly unnormalizableCount?: number;
   /** Total raw items collectors reported receiving this run, before their
-   * own item schema validated any of them (docs/audit AC-012). */
-  readonly receivedCount?: number;
-  /** Of `receivedCount`, how many failed a collector's own item schema. */
-  readonly schemaRejectedCount?: number;
+   * own item schema validated any of them (docs/audit AC-012). `null`
+   * (distinct from omitting the field, which leaves the column untouched)
+   * means at least one query this run could not report a reconcilable
+   * count — a real zero is only ever a query that ran and truly received
+   * nothing (docs/audit PR-014). */
+  readonly receivedCount?: number | null;
+  /** Of `receivedCount`, how many failed a collector's own item schema.
+   * Same `null`-means-unreconcilable convention as `receivedCount`. */
+  readonly schemaRejectedCount?: number | null;
   readonly failureReason?: string | null;
   /** Serialized to JSON text by `finish` — read back with
    * `parseFailedSources`. */

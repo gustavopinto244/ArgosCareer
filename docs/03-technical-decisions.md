@@ -54,6 +54,7 @@ revisited on its merits instead of re-argued from memory.
 | [040](adr/040-persisted-claim-as-scoring-admission-barrier.md)                | A persisted, atomic claim as the scoring admission barrier                          | Accepted | 2026-08-17 |
 | [041](adr/041-per-source-recovery-recency.md)                                 | Recovery recency is tracked per source, not per collect cycle                       | Accepted | 2026-08-17 |
 | [042](adr/042-composite-cache-identity-and-domain-validated-rows.md)          | Composite cache identity and domain-validated cache rows                            | Accepted | 2026-08-17 |
+| [043](adr/043-nullable-reconciliation-counts.md)                              | `receivedCount`/`schemaRejectedCount` are nullable, not default-zero                | Accepted | 2026-08-17 |
 
 ## When an ADR is required
 
