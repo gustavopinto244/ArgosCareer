@@ -503,6 +503,16 @@ export interface CompletionOptions {
   readonly stage?: LlmOperationStage;
   readonly timeoutMs?: number;
   readonly maxCompletionTokens?: number;
+  /** ADR-052 Amendment 2: caps OpenRouter's `reasoning.max_tokens`, the
+   * documented control for a reasoning model's internal chain-of-thought
+   * (openrouter.ai/docs/use-cases/reasoning-tokens). Isolated Stage A calls
+   * against this project's own failing postings showed `reasoning` alone
+   * running 70,000+ characters, exhausting `maxCompletionTokens` before
+   * `content` ever got written — raising the completion ceiling (Amendment
+   * 1) did not fix this because reasoning has no ceiling of its own without
+   * this option. `undefined` omits the field, leaving OpenRouter's default
+   * (provider-decided) reasoning budget in place. */
+  readonly reasoningMaxTokens?: number;
 }
 
 export interface OpenRouterClientOptions {
@@ -724,6 +734,7 @@ export class OpenRouterClient {
     const timeoutMs = options.timeoutMs ?? this.timeoutMs;
     const maxCompletionTokens =
       options.maxCompletionTokens ?? this.maxCompletionTokens;
+    const reasoningMaxTokens = options.reasoningMaxTokens;
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
       throw new Error("OpenRouter timeoutMs must be a positive safe integer");
     }
@@ -733,6 +744,14 @@ export class OpenRouterClient {
     ) {
       throw new Error(
         "OpenRouter maxCompletionTokens must be a positive safe integer",
+      );
+    }
+    if (
+      reasoningMaxTokens !== undefined &&
+      (!Number.isSafeInteger(reasoningMaxTokens) || reasoningMaxTokens <= 0)
+    ) {
+      throw new Error(
+        "OpenRouter reasoningMaxTokens must be a positive safe integer",
       );
     }
     const startedAt = Date.now();
@@ -777,6 +796,9 @@ export class OpenRouterClient {
           model: this.model,
           messages: [{ role: "user", content: prompt }],
           max_tokens: maxCompletionTokens,
+          ...(reasoningMaxTokens !== undefined
+            ? { reasoning: { max_tokens: reasoningMaxTokens } }
+            : {}),
         }),
         signal: controller.signal,
       });

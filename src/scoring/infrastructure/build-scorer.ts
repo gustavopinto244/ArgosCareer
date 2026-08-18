@@ -32,6 +32,19 @@ export const STAGE_B_TIMEOUT_MS = 30_000;
  * reasoning output ahead of the JSON requirement list itself. */
 export const STAGE_A_MAX_COMPLETION_TOKENS = DEFAULT_MAX_COMPLETION_TOKENS * 4;
 export const STAGE_B_MAX_COMPLETION_TOKENS = 768;
+/** ADR-052 Amendment 2: raising the completion ceiling alone (Amendment 1)
+ * did not fix the incident — isolated single calls against this project's
+ * own failing postings showed `reasoning` alone running 70,000+ characters
+ * and exhausting the ceiling before `content` was ever written, reproduced
+ * with and without emoji, across providers. `reasoning.max_tokens` bounds
+ * that separately, sized so roughly 60% of each stage's completion budget
+ * stays reserved for the JSON answer itself: ~37% of the ceiling to
+ * reasoning, matching between stages. Not zero (`effort: "none"`) —
+ * reasoning plausibly helps classify blocking/mandatory/desirable
+ * correctly on an ambiguous posting, and this incident has no evidence one
+ * way or the other on that trade-off yet. */
+export const STAGE_A_REASONING_MAX_TOKENS = 3_000;
+export const STAGE_B_REASONING_MAX_TOKENS = 300;
 
 export type BuildScorerResult =
   | {
@@ -102,12 +115,14 @@ export function buildScorer(
         stage: "stage-a",
         timeoutMs: STAGE_A_TIMEOUT_MS,
         maxCompletionTokens: STAGE_A_MAX_COMPLETION_TOKENS,
+        reasoningMaxTokens: STAGE_A_REASONING_MAX_TOKENS,
       });
     const askStageB = (prompt: string) =>
       client.complete(prompt, {
         stage: "stage-b",
         timeoutMs: STAGE_B_TIMEOUT_MS,
         maxCompletionTokens: STAGE_B_MAX_COMPLETION_TOKENS,
+        reasoningMaxTokens: STAGE_B_REASONING_MAX_TOKENS,
       });
     return {
       ok: true,
