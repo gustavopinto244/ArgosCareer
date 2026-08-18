@@ -426,7 +426,7 @@ A1/A3 receive their cold-cache backlog benchmark.
 
 ## B6 — Stage A/B's LLM call failure rate was 70% on the 2026-08-17 calibration run
 
-**Status:** observed once, not yet root-caused ·
+**Status:** recurrence confirmed, root cause still open ·
 **Found:** 2026-08-17, calibration run `01M09542FFR83M5V8HPSAQ68F3`
 
 `runs.llm_outcome_counts` for that run: 125 attempts, 37 `success`, 31
@@ -451,6 +451,17 @@ uniform across the batch.
 `collect`, then compare `runs.llm_outcome_counts` against this entry's
 125/37/31/57 split. If the failure rate holds, it is a systemic issue with
 the model/client pairing, not one-run noise, and should get its own ADR.
+
+> **Follow-up, 2026-08-18.** The planned check recurred on production run
+> `01M09Q92RQQF91PDS6YVD1FB4J`: 3 postings passed the pre-filter, only 1
+> scored, and 23 OpenRouter attempts split into 9 transport-level successes,
+> 4 timeouts and 10 `invalidOutput` responses. The two failed postings both
+> stopped in Stage A after four attempts and had already failed the same way
+> on the preceding run, with the same `a-v4`/`b-v4` prompts and configured
+> model. This confirms a recurring model/client/provider problem, but does
+> not support a prompt-regression diagnosis. Full evidence, limitations and
+> prioritized remediation are recorded in
+> [`docs/audit/SCORING-INCIDENT-2026-08-18.md`](audit/SCORING-INCIDENT-2026-08-18.md).
 
 ---
 
