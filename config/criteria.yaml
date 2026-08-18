@@ -344,6 +344,15 @@ tracks:
     - suporte a sistemas
     - service desk
     - suporte técnico
+    # Added 2026-08-18, same probe discipline as the block above, against
+    # that day's fresh 2,513-posting corpus (prefilter-calibration-followup
+    # audit): "suporte e operações" 1 match, on-track (Phoebus Tecnologia —
+    # "Estagiário de Suporte e Operações"), zero false positives. The bare
+    # words are deliberately NOT listed: "suporte" alone returns 5 matches
+    # and "operações" alone 7, both mostly off-track noise (academic
+    # support, hospital/logistics/education "operações") -- exactly the
+    # false-positive risk ADR-011's whole-phrase discipline exists to avoid.
+    - suporte e operações
 
 # Phrases that veto a track even when one of its keywords matched (ADR-015).
 # Every entry below was observed as a real false positive in the collected
