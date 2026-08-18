@@ -31,6 +31,7 @@ function baseCriteria(overrides: Partial<Criteria> = {}): Criteria {
       automation: ["automação"],
     },
     trackExclusions: { dev: [], security: [], automation: [] },
+    rejectUnknownTrack: false,
     schedule: {
       collection: { intervalHours: 4 },
       scoreAndDeliver: { time: "03:00", timezone: "America/Sao_Paulo" },
@@ -573,6 +574,61 @@ describe("applyPreFilter — track classification", () => {
   });
 });
 
+describe("applyPreFilter — rejectUnknownTrack (ADR-051)", () => {
+  it("does nothing when the flag is false (the default)", () => {
+    const outcome = applyPreFilter(
+      posting({ title: "Estágio em Recursos Humanos" }),
+      baseCriteria({ rejectUnknownTrack: false }),
+      [],
+      NOW,
+    );
+    expect(outcome.passed).toBe(true);
+    expect(outcome.tracks).toEqual([]);
+  });
+
+  it("rejects an unknown-track posting when the flag is true", () => {
+    const outcome = applyPreFilter(
+      posting({ title: "Estágio em Recursos Humanos" }),
+      baseCriteria({ rejectUnknownTrack: true }),
+      [],
+      NOW,
+    );
+    expect(outcome.passed).toBe(false);
+    expect(outcome.reason).toBe("track_unknown");
+    expect(outcome.tracks).toEqual([]);
+  });
+
+  it("still passes a posting that matches a configured track", () => {
+    const outcome = applyPreFilter(
+      posting({ title: "Estágio em Desenvolvimento Backend" }),
+      baseCriteria({ rejectUnknownTrack: true }),
+      [],
+      NOW,
+    );
+    expect(outcome.passed).toBe(true);
+    expect(outcome.tracks).toEqual(["dev"]);
+  });
+
+  it("still reports track_unknown even for a track excluded by trackExclusions (ADR-015 veto lands as unknown)", () => {
+    const outcome = applyPreFilter(
+      posting({ title: "Estágio em Segurança do Trabalho" }),
+      baseCriteria({
+        rejectUnknownTrack: true,
+        trackExclusions: {
+          dev: [],
+          security: ["segurança do trabalho"],
+          automation: [],
+        },
+      }),
+      [],
+      NOW,
+    );
+    expect(outcome.passed).toBe(false);
+    expect(outcome.reason).toBe("track_unknown");
+    expect(outcome.tracks).toEqual([]);
+  });
+});
+
 describe("applyPreFilter — ordering", () => {
   it("reports the first failing rule when a posting fails several at once", () => {
     // Fails title blocklist, title required is moot, company blocked, and
@@ -589,6 +645,19 @@ describe("applyPreFilter — ordering", () => {
       NOW,
     );
     expect(outcome.reason).toBe("title_blocked");
+  });
+
+  it("checks track before company, when title passes", () => {
+    const outcome = applyPreFilter(
+      posting({
+        title: "Estágio em Recursos Humanos",
+        company: "Empresa Bloqueada",
+      }),
+      baseCriteria({ rejectUnknownTrack: true }),
+      [],
+      NOW,
+    );
+    expect(outcome.reason).toBe("track_unknown");
   });
 
   it("checks company before location, when title passes", () => {

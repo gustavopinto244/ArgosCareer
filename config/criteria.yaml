@@ -328,6 +328,22 @@ tracks:
     - ansible
     - kubernetes
     - docker
+    # Generic IT-support/infra vocabulary (ADR-051 Amendment 1), measured
+    # with `npm run probe:terms`-style whole-word matching against the real
+    # corpus before adding: "TI" 61 matches, all genuinely IT (helpdesk,
+    # infra, sysadmin) with zero false positives sampled; "tecnologia da
+    # informação" and "suporte a sistemas" 1 match each, "service desk" 2,
+    # "suporte técnico" 3. Placed under automation (0.7), not security
+    # (1.0) -- these are IT-operations-flavored, not information-security
+    # work, and CLAUDE.md's own priority split already puts
+    # infrastructure/automation a tier below security. "help desk" and
+    # "helpdesk" measured zero matches on the current corpus -- not added,
+    # per ADR-011's discipline of only listing measured, non-zero terms.
+    - ti
+    - tecnologia da informação
+    - suporte a sistemas
+    - service desk
+    - suporte técnico
 
 # Phrases that veto a track even when one of its keywords matched (ADR-015).
 # Every entry below was observed as a real false positive in the collected
@@ -370,6 +386,16 @@ trackExclusions:
     - segurança predial
     - técnico de segurança
     - segurança alimentar
+
+# Reject a posting pre-LLM when its title matches none of the tracks above
+# (ADR-051). Measured on the 2026-08-17 calibration run: of the 28 postings
+# that passed the pre-filter, all 28 classified unknown -- none matched dev,
+# security or automation -- and the delivered digest was Segurança do
+# Trabalho, Jurídico, RH, Marketing, Contabilidade, Design, Fisioterapia and
+# similar, not one genuine backend/security/infra posting among them.
+# unknownTrackCapScore below still exists and still applies if this is ever
+# turned back off.
+rejectUnknownTrack: true
 
 # Provisional until M7 calibration (docs/04-scoring-model.md). dev and
 # security share 1.0 — equal first priorities (docs/01-vision-and-scope.md).

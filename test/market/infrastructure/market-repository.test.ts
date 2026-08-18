@@ -47,6 +47,7 @@ function criteria(): Criteria {
     maxFutureSkewDays: 1,
     tracks: { dev: ["backend"], security: ["segurança"], automation: [] },
     trackExclusions: { dev: [], security: [], automation: [] },
+    rejectUnknownTrack: false,
     schedule: {
       collection: { intervalHours: 4 },
       scoreAndDeliver: { time: "03:00", timezone: "America/Sao_Paulo" },

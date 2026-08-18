@@ -103,6 +103,7 @@ prefilter:
   locations:
   blockedCompanies:
   minKeywordAdherence:
+  rejectUnknownTrack: # reject pre-LLM when no track matches (ADR-051)
 scoring:
   weights: # 35 / 20 / 45 (ADR-026; originally 65 / 20 / 15)
   thresholds: # apply 70, review 45

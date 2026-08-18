@@ -62,6 +62,7 @@ revisited on its merits instead of re-argued from memory.
 | [048](adr/048-checkpoint-telegram-delivery-with-manual-reconciliation.md)     | Checkpoint Telegram delivery with manual reconciliation                             | Accepted   | 2026-08-17 |
 | [049](adr/049-bound-trace-and-resume-model-work.md)                           | Bound, trace, and resume model work                                                 | Accepted   | 2026-08-17 |
 | [050](adr/050-bound-hot-path-work-and-batch-persistence.md)                   | Bound hot-path work and batch persistence                                           | Accepted   | 2026-08-17 |
+| [051](adr/051-reject-unknown-track-postings-pre-llm.md)                       | Reject unknown-track postings before the LLM, behind a flag                         | Accepted   | 2026-08-17 |
 
 ## When an ADR is required
 

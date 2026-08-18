@@ -8,6 +8,7 @@ import { titleMatchesAny } from "./title-match";
 export type PreFilterRejectionReason =
   | "title_blocked"
   | "title_missing_required_term"
+  | "track_unknown"
   | "company_blocked"
   | "expired"
   | "too_old"
@@ -183,11 +184,14 @@ function hasMinKeywordAdherence(
 /**
  * Deterministic rules, run before any LLM call (docs/02-architecture.md).
  * Short-circuits at the first failing rule — every rejection records exactly
- * one reason. Rule order runs cheapest and most decisive first: two string
- * checks, then three single-field checks (company, deadline, age), then
- * location (which reads two fields), then keyword adherence (which scans the
- * whole profile keyword list) last, since it is the most expensive check and
- * the least likely to matter once everything before it has already run.
+ * one reason. Rule order runs cheapest and most decisive first: three
+ * title-only string checks (blocklist, required term, track — `tracks` is
+ * already computed above for every posting, so gating on it here costs
+ * nothing extra), then three single-field checks (company, deadline, age),
+ * then location (which reads two fields), then keyword adherence (which
+ * scans the whole profile keyword list) last, since it is the most expensive
+ * check and the least likely to matter once everything before it has
+ * already run.
  */
 export function applyPreFilter(
   posting: Posting,
@@ -218,6 +222,15 @@ export function applyPreFilter(
   }
   if (!titleMatchesAny(posting.title, criteria.titleRequired)) {
     return outcome(false, "title_missing_required_term");
+  }
+  // ADR-051: an unknown track is not, by itself, evidence a posting is
+  // off-topic (docs/04's `unknownTrackCapScore` already treats it as
+  // "a classifier gap, not necessarily a bad posting") — but measured
+  // against a real run, every unknown-track posting that reached the LLM
+  // was actually off-area (RH, Jurídico, Marketing, ...), so this is opt-in
+  // via `rejectUnknownTrack`, not baked into `tracks.length === 0` itself.
+  if (criteria.rejectUnknownTrack && tracks.length === 0) {
+    return outcome(false, "track_unknown");
   }
   if (isCompanyBlocked(posting, criteria)) {
     return outcome(false, "company_blocked");
