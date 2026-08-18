@@ -618,13 +618,31 @@ agendado é uma reprodução mais segura enquanto ainda restam retries automáti
 
 ## Status
 
-**Remediação de transporte implementada (ADR-052); validação em produção ainda
-pendente.**
+**Resolvido, confirmado em produção (2026-08-18, mesma sessão).**
 
-A implementação agora interpreta erros in-band do OpenRouter, separa os limites
-de Stage A/B, habilita routing metadata, persiste causa operacional sanitizada e
-separa alerta de impacto do sinal de saúde. Não houve mudança de prompt ou
-modelo. O próximo passo é um run pós-deploy com cache frio suficiente para
-medir sucesso, latência e custo por estágio/provider; só esses dados podem
-fechar o incidente ou justificar política de routing, structured output ou
-troca de modelo.
+A implementação inicial (ADR-052) interpretou erros in-band do OpenRouter,
+separou os limites de Stage A/B, habilitou routing metadata e persistiu causa
+operacional sanitizada — mas a validação pós-deploy (run
+`01M0AJ0CY37MD7XAWX5XZEQNR0`) mostrou que a causa real ainda não tinha sido
+encontrada: o timeout de 30s de fato era curto (corrigido, 0 timeouts no
+Stage A após subir para 120s), mas o impacto no digest não mudou — a falha só
+trocou de forma, virando `finishReason: "length"` uniforme em 8 providers.
+
+A causa raiz real: chamadas isoladas, sem retry, contra as duas vagas que
+falhavam em todo run mostraram um campo `reasoning` de 70.000+ caracteres em
+100% das tentativas, consumindo o teto de tokens inteiro antes do modelo
+escrever a resposta — reproduzido com e sem emoji, então não era o Unicode.
+`deepseek/deepseek-v4-flash-0731` é um modelo de raciocínio, e nada limitava
+seu budget de "pensamento" separadamente do budget de resposta. Subir o teto
+geral (Amendment 1) só deu mais espaço pro mesmo comportamento.
+
+**Correção (Amendment 2):** `reasoning.max_tokens` (controle documentado da
+OpenRouter) limita Stage A a 3.000 e Stage B a 300, reservando a maior parte
+de cada budget pra resposta. Confirmado duas vezes: uma chamada isolada pras
+duas vagas problemáticas retornou `finish_reason: "stop"` com JSON válido, e
+o run de produção final (`01M0AZQ7Q83008FXK00AQKK36X`) pontuou **4 de 4**
+vagas filtradas — `scoreFailureCounts: {}` — incluindo as duas que travavam
+desde o início do incidente.
+
+Detalhe completo em [ADR-052](../adr/052-classify-openrouter-in-band-errors-and-separate-scoring-signals.md)
+e sua Amendment 2.

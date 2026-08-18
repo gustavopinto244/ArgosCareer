@@ -426,7 +426,7 @@ A1/A3 receive their cold-cache backlog benchmark.
 
 ## B6 — Stage A/B's LLM call failure rate was 70% on the 2026-08-17 calibration run
 
-**Status:** transport remediation implemented; production validation pending ·
+**Status:** resolved, confirmed against production ·
 **Found:** 2026-08-17, calibration run `01M09542FFR83M5V8HPSAQ68F3`
 
 `runs.llm_outcome_counts` for that run: 125 attempts, 37 `success`, 31
@@ -466,14 +466,36 @@ the model/client pairing, not one-run noise, and should get its own ADR.
 > **Remediation, 2026-08-18 (ADR-052).** The client now recognizes OpenRouter's
 > documented top-level and choice-level HTTP 200 error envelopes, classifies
 > canonical `error_type` values, opts into router metadata and persists only
-> content-free stage/provider diagnostics. Stage A uses 120 s / 2,048 tokens;
-> Stage B uses 30 s / 768 tokens. Run rows retain stage/outcome, provider,
-> error-type and score-failure counts. The old alert was split: every missing
-> score reports digest impact, while an accounted operation-rate signal needs
-> at least 10 attempts and no longer claims a prompt/model regression. Raw
-> response-body logging was removed. Unit/integration coverage is complete;
-> a cold-cache production run is still required before this issue can be
-> called operationally closed.
+> content-free stage/provider diagnostics. Run rows retain stage/outcome,
+> provider, error-type and score-failure counts. The old alert was split:
+> every missing score reports digest impact, while an accounted
+> operation-rate signal needs at least 10 attempts and no longer claims a
+> prompt/model regression.
+>
+> **Amendment 1 validated, did not close it.** A manual `deliver`
+> (`01M0AJ0CY37MD7XAWX5XZEQNR0`) confirmed the 120s Stage A timeout worked
+> (0 timeouts, down from 4) but digest impact was unchanged (1/3 scored) —
+> the failure mode shifted to `finishReason: "length"` with empty content,
+> uniform across 8 providers.
+>
+> **Actual root cause, found the same session.** Two single, no-retry calls
+> against the same two postings that had failed every run — as collected
+> and with all emoji stripped — reproduced the same `length` truncation
+> every time, each carrying a `reasoning` field 70,000+ characters long.
+> `deepseek/deepseek-v4-flash-0731` is a reasoning model; its
+> chain-of-thought was consuming the entire completion budget before
+> writing the JSON answer. Raising the ceiling to 8,192 tokens (Amendment 1)
+> only gave it more room to do the same thing for longer, at the cost of
+> more timeouts and a circuit-breaker trip.
+>
+> **Fix, Amendment 2.** `reasoning.max_tokens` (OpenRouter's documented
+> control) caps Stage A at 3,000 and Stage B at 300, leaving the majority
+> of each budget for the answer. Confirmed twice: an isolated call for both
+> previously-failing postings returned `finish_reason: "stop"` with valid
+> JSON (18 and 6 requirements), then a full production `deliver`
+> (`01M0AZQ7Q83008FXK00AQKK36X`) scored **4 of 4** filtered postings —
+> `scoreFailureCounts: {}` — including both postings that had failed every
+> run of this incident. **Resolved.**
 
 ---
 
