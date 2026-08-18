@@ -424,6 +424,36 @@ A1/A3 receive their cold-cache backlog benchmark.
 
 ---
 
+## B6 — Stage A/B's LLM call failure rate was 70% on the 2026-08-17 calibration run
+
+**Status:** observed once, not yet root-caused ·
+**Found:** 2026-08-17, calibration run `01M09542FFR83M5V8HPSAQ68F3`
+
+`runs.llm_outcome_counts` for that run: 125 attempts, 37 `success`, 31
+`timeout`, 57 `invalidOutput` ("Unexpected OpenRouter response shape"), 0 of
+every other category. Only 5 of the 28 pre-filter-passing postings finished
+scoring; the rest fell back to the `lowConfidence` review path (ADR-006),
+which is why most of that run's digest read "⚠ Não foi possível pontuar
+automaticamente" instead of a real score.
+
+Not investigated further this session — out of scope for the pre-filter
+work ADR-051 covers, and the pre-filter changes in ADR-051/Amendment 1
+(28 → 6 pre-filter passes) mean the next calibration run pays for far fewer
+Stage A/B calls, which will itself shrink the sample this was measured on.
+Worth root-causing if it recurs: candidates not yet checked are
+`LLM_MODEL`'s actual output shape against what `openrouter-client.ts`
+expects, whether `timeout` (30s) is short for this model specifically, and
+whether the 57 `invalidOutput` failures cluster on particular postings
+(retried into a different failure each time, per the transcript) or are
+uniform across the batch.
+
+**Planned check, 2026-08-18:** re-run `argos deliver` after a fresh
+`collect`, then compare `runs.llm_outcome_counts` against this entry's
+125/37/31/57 split. If the failure rate holds, it is a systemic issue with
+the model/client pairing, not one-run noise, and should get its own ADR.
+
+---
+
 ## C1 — Production run rows are permanently open
 
 **Status:** fixed (the two known rows), the underlying gap stays open ·

@@ -261,6 +261,24 @@ export const CriteriaSchema = z.object({
     })
     .default({ dev: [], security: [], automation: [] }),
   /**
+   * Reject a posting pre-LLM when `classifyTrack` matches none of `tracks`
+   * (ADR-051). Defaulted `false` so a criteria file predating this stays
+   * valid and behaves exactly as it did — same discipline as
+   * `trackExclusions`.
+   *
+   * Before this existed, an unknown-track posting still passed the
+   * pre-filter and was scored: `unknownTrackCapScore` (ADR-025) stopped it
+   * from ever reaching `apply`, but did not stop it from spending Stage
+   * A/B budget or from cluttering the "review" section when scoring
+   * failed. Measured on the 2026-08-17 calibration run: of 28 postings
+   * that passed the pre-filter, all 28 classified `unknown` — none matched
+   * `dev`, `security` or `automation` — and the delivered digest was
+   * Segurança do Trabalho, Jurídico, RH, Marketing, Contabilidade, Design,
+   * Fisioterapia and similar, not a single genuine backend/security/infra
+   * posting among them.
+   */
+  rejectUnknownTrack: z.boolean().default(false),
+  /**
    * Each in [0, 1] (docs/audit AC-025) — `computeTrackAlignment` takes the
    * max of the matched tracks' weights and multiplies it by
    * `scoring.weights.trackAlignment`'s share of the 100-point total, so a
