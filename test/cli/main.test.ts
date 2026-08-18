@@ -22,8 +22,12 @@ import {
   runMigrations,
 } from "../../src/persistence/infrastructure/db";
 import { PostingsRepository } from "../../src/persistence/infrastructure/postings-repository";
-import { PostingEventsRepository } from "../../src/persistence/infrastructure/posting-events-repository";
 import {
+  parsePostingEventMetadata,
+  PostingEventsRepository,
+} from "../../src/persistence/infrastructure/posting-events-repository";
+import {
+  parseScoreFailureCounts,
   RunsRepository,
   parseFailedSources,
   parseTruncatedSources,
@@ -1499,6 +1503,52 @@ describe("executeDeliver", () => {
         invalidOutput: 0,
         httpError: 0,
       },
+      attemptsByStageOutcome: {
+        "stage-a": {
+          success: 0,
+          timeout: 0,
+          networkError: 0,
+          rateLimited: 0,
+          serverError: 0,
+          providerError: 0,
+          authError: 0,
+          configError: 0,
+          requestError: 0,
+          invalidEnvelope: 0,
+          invalidOutput: 0,
+          httpError: 0,
+        },
+        "stage-b": {
+          success: 0,
+          timeout: 0,
+          networkError: 0,
+          rateLimited: 0,
+          serverError: 0,
+          providerError: 0,
+          authError: 0,
+          configError: 0,
+          requestError: 0,
+          invalidEnvelope: 0,
+          invalidOutput: 0,
+          httpError: 0,
+        },
+        unknown: {
+          success: 2,
+          timeout: 1,
+          networkError: 0,
+          rateLimited: 0,
+          serverError: 0,
+          providerError: 0,
+          authError: 0,
+          configError: 0,
+          requestError: 0,
+          invalidEnvelope: 0,
+          invalidOutput: 0,
+          httpError: 0,
+        },
+      },
+      providerCounts: {},
+      errorTypeCounts: {},
       attemptsWithoutUsage: 1,
       blockedByCircuit: 0,
     });
@@ -1681,6 +1731,11 @@ describe("executeDeliver", () => {
         reason: "extraction_failed",
         attempts: 3,
         permanent: false,
+        diagnostic: {
+          stage: "stage-a",
+          kind: "transport_failed",
+          category: "timeout",
+        },
       }),
     };
     const { notifier, digests } = recordingNotifier();
@@ -1709,6 +1764,18 @@ describe("executeDeliver", () => {
     const run = runsRepo.findById(outcome.runId);
     expect(run?.scoredCount).toBe(0);
     expect(run?.filteredCount).toBe(1);
+    expect(parseScoreFailureCounts(run!)).toEqual({ extraction_failed: 1 });
+
+    const scoreEvent = new PostingEventsRepository(db)
+      .findByRun(outcome.runId)
+      .find((event) => event.stage === "score");
+    expect(parsePostingEventMetadata(scoreEvent!)).toMatchObject({
+      diagnostic: {
+        stage: "stage-a",
+        kind: "transport_failed",
+        category: "timeout",
+      },
+    });
   });
 
   describe("docs/audit PR-002 — recoverable scoring failures", () => {
@@ -1734,6 +1801,11 @@ describe("executeDeliver", () => {
           reason: "extraction_failed",
           attempts: 3,
           permanent: false,
+          diagnostic: {
+            stage: "stage-a",
+            kind: "transport_failed",
+            category: "timeout",
+          },
         }),
       };
     }
@@ -1886,6 +1958,11 @@ describe("executeDeliver", () => {
             reason: "extraction_failed",
             attempts: 1,
             permanent: true,
+            diagnostic: {
+              stage: "stage-a",
+              kind: "permanent_error",
+              category: "authError",
+            },
           };
         },
       };
@@ -1932,6 +2009,11 @@ describe("executeDeliver", () => {
             reason: "extraction_failed",
             attempts: 3,
             permanent: false,
+            diagnostic: {
+              stage: "stage-a",
+              kind: "transport_failed",
+              category: "timeout",
+            },
           };
         },
       };
@@ -1984,6 +2066,11 @@ describe("executeDeliver", () => {
           reason: "extraction_failed",
           attempts: 3,
           permanent: false,
+          diagnostic: {
+            stage: "stage-a",
+            kind: "transport_failed",
+            category: "timeout",
+          },
         }),
       };
       const { notifier } = recordingNotifier();

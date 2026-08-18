@@ -539,6 +539,10 @@ describe("StageBMatcher.match — failure, never throws", () => {
       reason: "matching_failed",
       attempts: 3,
       permanent: false,
+      diagnostic: {
+        kind: "output_invalid_json",
+        lastAttemptLatencyMs: expect.any(Number),
+      },
     });
     expect(
       matchesRepo.find("fp1", "hash1", "b-v4", "unknown", "any-hash"),
@@ -585,6 +589,11 @@ describe("StageBMatcher.match — failure, never throws", () => {
       reason: "matching_failed",
       attempts: 1,
       permanent: true,
+      diagnostic: {
+        kind: "permanent_error",
+        category: "authError",
+        lastAttemptLatencyMs: expect.any(Number),
+      },
     });
   });
 });

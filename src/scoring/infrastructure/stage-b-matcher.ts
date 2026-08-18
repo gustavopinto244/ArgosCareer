@@ -7,6 +7,7 @@ import {
 } from "../domain/evidence-provenance";
 import { sanitizeLogLabel } from "../domain/log-label";
 import { hashRequirements } from "../domain/requirements-hash";
+import { LlmFailureDiagnostic } from "../domain/failure-diagnostic";
 import {
   createMatch,
   Match,
@@ -45,6 +46,7 @@ export type MatchingResult =
        * itself reported `permanent_error`, never for the local
        * `buildStageBPrompt` template-read failure below. */
       readonly permanent: boolean;
+      readonly diagnostic: LlmFailureDiagnostic;
     };
 
 /** One requirement's answer, or the attempt count that failed to produce it. */
@@ -58,6 +60,7 @@ type Answer =
       readonly ok: false;
       readonly attempts: number;
       readonly permanent: boolean;
+      readonly diagnostic: LlmFailureDiagnostic;
     };
 
 /**
@@ -204,6 +207,7 @@ export class StageBMatcher {
         reason: "matching_failed",
         attempts: 0,
         permanent: false,
+        diagnostic: { kind: "prompt_build_failed" },
       };
     }
 
@@ -259,6 +263,7 @@ export class StageBMatcher {
           ok: false,
           attempts: result.attempts,
           permanent: result.reason === "permanent_error" && result.batchFatal,
+          diagnostic: result.diagnostic,
         };
       }
 
@@ -325,6 +330,7 @@ export class StageBMatcher {
           reason: "matching_failed",
           attempts: answer.attempts,
           permanent: answer.permanent,
+          diagnostic: answer.diagnostic,
         };
       }
       matches.push(answer.match);
@@ -343,6 +349,7 @@ export class StageBMatcher {
         reason: "matching_failed",
         attempts: 0,
         permanent: false,
+        diagnostic: { kind: "output_schema_rejected" },
       };
     }
 

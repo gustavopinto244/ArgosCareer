@@ -47,6 +47,7 @@ export class ApiScorer implements ScorerPort {
         reason: extraction.reason,
         attempts: extraction.attempts,
         permanent: extraction.permanent,
+        diagnostic: { stage: "stage-a", ...extraction.diagnostic },
       };
     }
 
@@ -71,6 +72,7 @@ export class ApiScorer implements ScorerPort {
         reason: matching.reason,
         attempts: matching.attempts,
         permanent: matching.permanent,
+        diagnostic: { stage: "stage-b", ...matching.diagnostic },
       };
     }
 

@@ -54,6 +54,12 @@ export interface RunCounts {
   readonly llmCachedPromptTokens?: number;
   readonly llmBlockedByCircuit?: number;
   readonly llmOutcomeCounts?: Readonly<Record<string, number>>;
+  readonly llmStageOutcomeCounts?: Readonly<
+    Record<string, Readonly<Record<string, number>>>
+  >;
+  readonly llmProviderCounts?: Readonly<Record<string, number>>;
+  readonly llmErrorTypeCounts?: Readonly<Record<string, number>>;
+  readonly scoreFailureCounts?: Readonly<Record<string, number>>;
 }
 
 /** Both `failedSources` and `truncatedSources` are raw JSON text (schema.ts's
@@ -108,9 +114,58 @@ export function parseSourceQueryStats(
 export function parseLlmOutcomeCounts(
   row: Pick<RunRow, "llmOutcomeCounts">,
 ): Readonly<Record<string, number>> {
-  if (!row.llmOutcomeCounts) return {};
+  return parseNumericRecordColumn(row.llmOutcomeCounts);
+}
+
+function parseNumericRecordColumn(
+  value: string | null,
+): Readonly<Record<string, number>> {
+  if (!value) return {};
   try {
-    const parsed: unknown = JSON.parse(row.llmOutcomeCounts);
+    return parseNumericRecord(JSON.parse(value));
+  } catch {
+    return {};
+  }
+}
+
+function parseNumericRecord(value: unknown): Readonly<Record<string, number>> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(value).filter(
+      (entry): entry is [string, number] =>
+        typeof entry[1] === "number" &&
+        Number.isFinite(entry[1]) &&
+        entry[1] >= 0,
+    ),
+  );
+}
+
+export function parseLlmProviderCounts(
+  row: Pick<RunRow, "llmProviderCounts">,
+): Readonly<Record<string, number>> {
+  return parseNumericRecordColumn(row.llmProviderCounts);
+}
+
+export function parseLlmErrorTypeCounts(
+  row: Pick<RunRow, "llmErrorTypeCounts">,
+): Readonly<Record<string, number>> {
+  return parseNumericRecordColumn(row.llmErrorTypeCounts);
+}
+
+export function parseScoreFailureCounts(
+  row: Pick<RunRow, "scoreFailureCounts">,
+): Readonly<Record<string, number>> {
+  return parseNumericRecordColumn(row.scoreFailureCounts);
+}
+
+export function parseLlmStageOutcomeCounts(
+  row: Pick<RunRow, "llmStageOutcomeCounts">,
+): Readonly<Record<string, Readonly<Record<string, number>>>> {
+  if (!row.llmStageOutcomeCounts) return {};
+  try {
+    const parsed: unknown = JSON.parse(row.llmStageOutcomeCounts);
     if (
       typeof parsed !== "object" ||
       parsed === null ||
@@ -119,12 +174,9 @@ export function parseLlmOutcomeCounts(
       return {};
     }
     return Object.fromEntries(
-      Object.entries(parsed).filter(
-        (entry): entry is [string, number] =>
-          typeof entry[1] === "number" &&
-          Number.isFinite(entry[1]) &&
-          entry[1] >= 0,
-      ),
+      Object.entries(parsed)
+        .map(([stage, counts]) => [stage, parseNumericRecord(counts)] as const)
+        .filter(([, counts]) => Object.keys(counts).length > 0),
     );
   } catch {
     return {};
@@ -162,6 +214,10 @@ export class RunsRepository {
       attemptedSources,
       sourceQueryStats,
       llmOutcomeCounts,
+      llmStageOutcomeCounts,
+      llmProviderCounts,
+      llmErrorTypeCounts,
+      scoreFailureCounts,
       ...rest
     } = counts;
     this.db
@@ -185,6 +241,18 @@ export class RunsRepository {
         ...(llmOutcomeCounts === undefined
           ? {}
           : { llmOutcomeCounts: JSON.stringify(llmOutcomeCounts) }),
+        ...(llmStageOutcomeCounts === undefined
+          ? {}
+          : { llmStageOutcomeCounts: JSON.stringify(llmStageOutcomeCounts) }),
+        ...(llmProviderCounts === undefined
+          ? {}
+          : { llmProviderCounts: JSON.stringify(llmProviderCounts) }),
+        ...(llmErrorTypeCounts === undefined
+          ? {}
+          : { llmErrorTypeCounts: JSON.stringify(llmErrorTypeCounts) }),
+        ...(scoreFailureCounts === undefined
+          ? {}
+          : { scoreFailureCounts: JSON.stringify(scoreFailureCounts) }),
       })
       .where(eq(runs.runId, runId))
       .run();

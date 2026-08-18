@@ -2,6 +2,7 @@ import { z } from "zod";
 import { Posting, Seniority } from "../../posting/domain/posting";
 import { ExtractionsRepository } from "../../persistence/infrastructure/extractions-repository";
 import { normalizePostingContent } from "../domain/posting-content-hash";
+import { LlmFailureDiagnostic } from "../domain/failure-diagnostic";
 import {
   MAX_REQUIREMENT_CATEGORY_CHARS,
   MAX_REQUIREMENT_TEXT_CHARS,
@@ -101,6 +102,7 @@ export type ExtractionResult =
        * stop the batch instead of spending one doomed call per remaining
        * posting. */
       readonly permanent: boolean;
+      readonly diagnostic: LlmFailureDiagnostic;
     };
 
 /**
@@ -208,6 +210,7 @@ export class StageAExtractor {
         reason: "extraction_failed",
         attempts: 0,
         permanent: false,
+        diagnostic: { kind: "prompt_build_failed" },
       };
     }
 
@@ -224,6 +227,7 @@ export class StageAExtractor {
         reason: "extraction_failed",
         attempts: result.attempts,
         permanent: result.reason === "permanent_error" && result.batchFatal,
+        diagnostic: result.diagnostic,
       };
     }
 

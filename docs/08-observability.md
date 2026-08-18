@@ -100,12 +100,15 @@ source/query with received/schema/business rejection, normalization, age,
 new/already-seen, truncation and failure fields. A `null` upstream count means
 the source could not report it; it is never silently converted into zero.
 
-Scoring runs persist attempts, outcomes, prompt/completion/cached token totals,
-circuit-breaker refusals, provider-reported cost and attempts without usable
-usage. The last count is important: when nonzero, local cost is explicitly a
-floor rather than a reconciled provider bill. Posting-level append-only events
-carry source/sourceId even before normalization creates a fingerprint, plus
-small structured metadata emitted by each stage for its identities and counts.
+Scoring runs persist attempts, outcomes, outcomes split by Stage A/B,
+provider/error-type counts, score-failure counts, prompt/completion/cached token
+totals, circuit-breaker refusals, provider-reported cost and attempts without
+usable usage. The last count is important: when nonzero, local cost is
+explicitly a floor rather than a reconciled provider bill. Posting-level
+append-only score events carry a content-free failure diagnostic (stage,
+category, `error_type`, provider/model, finish reason, generation id, HTTP
+status and final-attempt latency); prompts, response content and profile
+evidence are excluded.
 
 Those counters are not decoration. They are the input to every alert below, and
 the evidence behind the pre-filter cut numbers `02-architecture.md` measures
@@ -142,14 +145,15 @@ the direct, non-checkpointed path.
 Delivered through the same Telegram notifier as the digest. A separate alerting
 channel for a personal project would be infrastructure nobody maintains.
 
-| Condition                                                             | Why it matters                              | Action                      |
-| --------------------------------------------------------------------- | ------------------------------------------- | --------------------------- |
-| A source returns **zero postings** on consecutive **collection** runs | The canonical silent failure of principle 1 | Alert naming the source     |
-| A source **errors** on consecutive collection runs                    | Adapter broken or blocked                   | Alert with the error        |
-| **Scoring failure rate** above threshold                              | Model or prompt regression (ADR-006)        | Alert with the rate         |
-| The **`scoreAndDeliver`** run did not start when scheduled            | No digest that day (ADR-009)                | Alert immediately           |
-| A **`collection`** run did not start when scheduled                   | Self-heals next cycle, a few hours later    | Alert only after two misses |
-| Delivery failed                                                       | The product did not reach the user          | Retry, then alert           |
+| Condition                                                                  | Why it matters                                  | Action                               |
+| -------------------------------------------------------------------------- | ----------------------------------------------- | ------------------------------------ |
+| A source returns **zero postings** on consecutive **collection** runs      | The canonical silent failure of principle 1     | Alert naming the source              |
+| A source **errors** on consecutive collection runs                         | Adapter broken or blocked                       | Alert with the error                 |
+| Any eligible posting is left **without a score**                           | Immediate digest impact (ADR-052)               | Alert with failure breakdown         |
+| Accounted **LLM operation failure rate** is above threshold (≥10 attempts) | Scorer/provider health, not proof of regression | Alert with outcome/routing breakdown |
+| The **`scoreAndDeliver`** run did not start when scheduled                 | No digest that day (ADR-009)                    | Alert immediately                    |
+| A **`collection`** run did not start when scheduled                        | Self-heals next cycle, a few hours later        | Alert only after two misses          |
+| Delivery failed                                                            | The product did not reach the user              | Retry, then alert                    |
 
 **Consecutive, not single — and the two run kinds need different patience.**
 Collection runs every few hours (ADR-009), so one empty or missed cycle is
@@ -157,6 +161,13 @@ routine; a missed `collection` run alerts only after two in a row. A missed
 `scoreAndDeliver` run means no digest that day, so it alerts on the first miss.
 Conflating the two thresholds would either desensitize you to a missed digest or
 page you for a normal quiet collection cycle.
+
+Digest impact and regression are also deliberately not conflated. A single
+small run can prove that postings were left without scores, so impact alerts on
+the first affected posting. The operation-rate signal needs at least 10 fully
+accounted network attempts. Neither is called a regression: that word is
+reserved for a future alert with a version/baseline comparison and consecutive
+degraded runs.
 
 ### The run summary is the everyday signal
 

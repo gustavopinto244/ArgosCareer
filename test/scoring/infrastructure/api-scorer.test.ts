@@ -185,6 +185,11 @@ describe("ApiScorer.score", () => {
       reason: "extraction_failed",
       attempts: 3,
       permanent: false,
+      diagnostic: {
+        stage: "stage-a",
+        kind: "output_invalid_json",
+        lastAttemptLatencyMs: expect.any(Number),
+      },
     });
     expect(matchSpy).not.toHaveBeenCalled();
     matchSpy.mockRestore();
@@ -204,6 +209,11 @@ describe("ApiScorer.score", () => {
       reason: "matching_failed",
       attempts: 3,
       permanent: false,
+      diagnostic: {
+        stage: "stage-b",
+        kind: "output_invalid_json",
+        lastAttemptLatencyMs: expect.any(Number),
+      },
     });
   });
 
@@ -220,6 +230,12 @@ describe("ApiScorer.score", () => {
       reason: "extraction_failed",
       attempts: 1,
       permanent: true,
+      diagnostic: {
+        stage: "stage-a",
+        kind: "permanent_error",
+        category: "authError",
+        lastAttemptLatencyMs: expect.any(Number),
+      },
     });
   });
 
@@ -239,6 +255,12 @@ describe("ApiScorer.score", () => {
       reason: "matching_failed",
       attempts: 1,
       permanent: true,
+      diagnostic: {
+        stage: "stage-b",
+        kind: "permanent_error",
+        category: "configError",
+        lastAttemptLatencyMs: expect.any(Number),
+      },
     });
   });
 
