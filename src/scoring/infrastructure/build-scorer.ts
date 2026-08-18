@@ -6,7 +6,11 @@ import { Criteria } from "../../prefilter/domain/criteria";
 import { Profile } from "../../profile/domain/profile";
 import { ScorerPort } from "../domain/ports/scorer.port";
 import { ApiScorer } from "./api-scorer";
-import { OpenRouterClient, UsageTotals } from "./openrouter-client";
+import {
+  DEFAULT_MAX_COMPLETION_TOKENS,
+  OpenRouterClient,
+  UsageTotals,
+} from "./openrouter-client";
 import {
   STAGE_A_PROMPT_VERSION,
   STAGE_B_PROMPT_VERSION,
@@ -15,6 +19,14 @@ import {
 import { StageAExtractor } from "./stage-a-extractor";
 import { StageBMatcher } from "./stage-b-matcher";
 import { StubScorer } from "./stub-scorer";
+
+/** Initial operation-specific limits from the 2026-08-18 incident audit.
+ * Stage A produces a full requirement list and has historically taken
+ * 40–67s cold; Stage B produces one bounded object per requirement. */
+export const STAGE_A_TIMEOUT_MS = 120_000;
+export const STAGE_B_TIMEOUT_MS = 30_000;
+export const STAGE_A_MAX_COMPLETION_TOKENS = DEFAULT_MAX_COMPLETION_TOKENS;
+export const STAGE_B_MAX_COMPLETION_TOKENS = 768;
 
 export type BuildScorerResult =
   | {
@@ -80,18 +92,29 @@ export function buildScorer(
         ? { baseUrl: process.env.LLM_BASE_URL }
         : {}),
     });
-    const ask = client.complete.bind(client);
+    const askStageA = (prompt: string) =>
+      client.complete(prompt, {
+        stage: "stage-a",
+        timeoutMs: STAGE_A_TIMEOUT_MS,
+        maxCompletionTokens: STAGE_A_MAX_COMPLETION_TOKENS,
+      });
+    const askStageB = (prompt: string) =>
+      client.complete(prompt, {
+        stage: "stage-b",
+        timeoutMs: STAGE_B_TIMEOUT_MS,
+        maxCompletionTokens: STAGE_B_MAX_COMPLETION_TOKENS,
+      });
     return {
       ok: true,
       scorer: new ApiScorer(
         new StageAExtractor(
-          ask,
+          askStageA,
           new ExtractionsRepository(db),
           STAGE_A_PROMPT_VERSION,
           model,
         ),
         new StageBMatcher(
-          ask,
+          askStageB,
           new MatchesRepository(db),
           STAGE_B_PROMPT_VERSION,
           criteria.scoring.stageBConcurrency,

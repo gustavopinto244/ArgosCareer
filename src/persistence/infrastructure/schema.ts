@@ -339,6 +339,16 @@ export const runs = sqliteTable("runs", {
     .default(0),
   llmBlockedByCircuit: integer("llm_blocked_by_circuit").notNull().default(0),
   llmOutcomeCounts: text("llm_outcome_counts"),
+  // JSON maps containing only operational labels and counts. The nested
+  // stage map makes a Stage A timeout distinguishable from a Stage B one;
+  // provider/error-type maps expose routing and in-band provider failures
+  // without storing prompts or model output.
+  llmStageOutcomeCounts: text("llm_stage_outcome_counts"),
+  llmProviderCounts: text("llm_provider_counts"),
+  llmErrorTypeCounts: text("llm_error_type_counts"),
+  // extraction_failed / matching_failed / max_retries_exceeded and, when a
+  // batch-fatal error stops the loop, not_attempted_after_batch_failure.
+  scoreFailureCounts: text("score_failure_counts"),
 });
 
 /**

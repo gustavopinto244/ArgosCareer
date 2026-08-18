@@ -154,6 +154,10 @@ describe("StageAExtractor.extract", () => {
       reason: "extraction_failed",
       attempts: 3,
       permanent: false,
+      diagnostic: {
+        kind: "output_invalid_json",
+        lastAttemptLatencyMs: expect.any(Number),
+      },
     });
   });
 
@@ -192,6 +196,11 @@ describe("StageAExtractor.extract", () => {
       reason: "extraction_failed",
       attempts: 1,
       permanent: true,
+      diagnostic: {
+        kind: "permanent_error",
+        category: "authError",
+        lastAttemptLatencyMs: expect.any(Number),
+      },
     });
   });
 
@@ -209,6 +218,10 @@ describe("StageAExtractor.extract", () => {
       reason: "extraction_failed",
       attempts: 3,
       permanent: false,
+      diagnostic: {
+        kind: "output_schema_rejected",
+        lastAttemptLatencyMs: expect.any(Number),
+      },
     });
   });
 
@@ -419,6 +432,10 @@ describe("StageAExtractor.extract", () => {
         reason: "extraction_failed",
         attempts: 3,
         permanent: false,
+        diagnostic: {
+          kind: "output_schema_rejected",
+          lastAttemptLatencyMs: expect.any(Number),
+        },
       });
     });
 
@@ -445,6 +462,10 @@ describe("StageAExtractor.extract", () => {
         reason: "extraction_failed",
         attempts: 3,
         permanent: false,
+        diagnostic: {
+          kind: "output_schema_rejected",
+          lastAttemptLatencyMs: expect.any(Number),
+        },
       });
     });
   });

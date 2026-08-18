@@ -169,6 +169,13 @@
       "when": 1786990650283,
       "tag": "0023_fancy_celestials",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1787054738075,
+      "tag": "0024_safe_cargill",
+      "breakpoints": true
     }
   ]
 }

@@ -1,4 +1,10 @@
-import { RunRow } from "../../persistence/infrastructure/runs-repository";
+import {
+  parseLlmErrorTypeCounts,
+  parseLlmOutcomeCounts,
+  parseLlmProviderCounts,
+  parseScoreFailureCounts,
+  RunRow,
+} from "../../persistence/infrastructure/runs-repository";
 
 /**
  * `docs/08-observability.md`'s alerting table, as pure functions over
@@ -48,16 +54,24 @@ export function evaluateCollectionHealth(
 }
 
 /**
- * A single `scoreAndDeliver` run's own outcome: delivery failure, and a
- * scoring failure rate above `threshold`. `filteredCount` is how many
- * postings passed the pre-filter and were eligible for scoring;
- * `scoredCount` is how many actually scored — the gap is scoring failures
- * (ADR-006), without a dedicated counter column, because the two numbers
- * `executeDeliver` already records are exactly the inputs this needs.
+ * A single `scoreAndDeliver` run's own outcome. Digest impact and scorer
+ * health are separate signals: any posting left without a score is real
+ * user impact, while an attempt-rate alert needs a minimum sample and says
+ * nothing about regression unless a separate baseline proves one.
  */
+const MIN_LLM_ATTEMPTS_FOR_RATE_ALERT = 10;
+
+function countSummary(counts: Readonly<Record<string, number>>): string {
+  return Object.entries(counts)
+    .filter(([, count]) => count > 0)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([name, count]) => `${name}=${count}`)
+    .join(", ");
+}
+
 export function evaluateDeliveryOutcome(
   run: RunRow,
-  scoreFailureRateThreshold: number,
+  failureRateThreshold: number,
 ): Alert[] {
   const alerts: Alert[] = [];
 
@@ -65,12 +79,53 @@ export function evaluateDeliveryOutcome(
     alerts.push({ text: `Delivery failed (run ${run.runId}).` });
   }
 
-  if (run.filteredCount > 0) {
-    const failureRate =
-      (run.filteredCount - run.scoredCount) / run.filteredCount;
-    if (failureRate >= scoreFailureRateThreshold) {
+  const missingScores = Math.max(0, run.filteredCount - run.scoredCount);
+  if (missingScores > 0) {
+    const persistedCounts = parseScoreFailureCounts(run);
+    const persistedTotal = Object.values(persistedCounts).reduce(
+      (sum, count) => sum + count,
+      0,
+    );
+    const failureCounts =
+      persistedTotal === missingScores
+        ? persistedCounts
+        : { unclassified: missingScores };
+    const breakdown = countSummary(failureCounts);
+    alerts.push({
+      text: `Scoring impact on run ${run.runId}: ${missingScores}/${run.filteredCount} postings were left without a score${breakdown ? ` (${breakdown})` : ""}.`,
+    });
+  }
+
+  const outcomeCounts = parseLlmOutcomeCounts(run);
+  const accountedAttempts = Object.values(outcomeCounts).reduce(
+    (sum, count) => sum + count,
+    0,
+  );
+  const totalOperations = run.llmAttempts + run.llmBlockedByCircuit;
+  if (
+    run.llmAttempts >= MIN_LLM_ATTEMPTS_FOR_RATE_ALERT &&
+    accountedAttempts === run.llmAttempts &&
+    totalOperations > 0
+  ) {
+    const failedOperations = totalOperations - (outcomeCounts.success ?? 0);
+    const failureRate = failedOperations / totalOperations;
+    if (failureRate >= failureRateThreshold) {
+      const outcomes = countSummary(
+        Object.fromEntries(
+          Object.entries(outcomeCounts).filter(([name]) => name !== "success"),
+        ),
+      );
+      const providers = countSummary(parseLlmProviderCounts(run));
+      const errorTypes = countSummary(parseLlmErrorTypeCounts(run));
+      const details = [
+        outcomes && `outcomes: ${outcomes}`,
+        providers && `providers: ${providers}`,
+        errorTypes && `error types: ${errorTypes}`,
+        run.llmBlockedByCircuit > 0 &&
+          `circuit blocks: ${run.llmBlockedByCircuit}`,
+      ].filter(Boolean);
       alerts.push({
-        text: `Scoring failure rate ${(failureRate * 100).toFixed(0)}% on run ${run.runId} (${run.filteredCount - run.scoredCount}/${run.filteredCount} failed) — possible model or prompt regression.`,
+        text: `Scorer health on run ${run.runId}: ${failedOperations}/${totalOperations} LLM operations failed (${(failureRate * 100).toFixed(0)}%)${details.length > 0 ? ` — ${details.join("; ")}` : ""}.`,
       });
     }
   }

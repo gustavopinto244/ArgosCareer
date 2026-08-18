@@ -62,6 +62,9 @@ describe("OpenRouterClient.complete — success", () => {
     expect((init.headers as Record<string, string>).Authorization).toBe(
       "Bearer test-key",
     );
+    expect(
+      (init.headers as Record<string, string>)["X-OpenRouter-Metadata"],
+    ).toBe("enabled");
     const body = JSON.parse(init.body as string) as {
       model: string;
       messages: { role: string; content: string }[];
@@ -70,6 +73,28 @@ describe("OpenRouterClient.complete — success", () => {
     expect(body.model).toBe("test/model");
     expect(body.messages).toEqual([{ role: "user", content: "say hi" }]);
     expect(body.max_tokens).toBe(2_048);
+  });
+
+  it("applies completion limits per operation and accounts by stage", async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({ choices: [{ message: { content: "x" } }] }),
+    );
+    const c = client(fetchImpl);
+
+    await c.complete("stage A prompt", {
+      stage: "stage-a",
+      timeoutMs: 120_000,
+      maxCompletionTokens: 1_234,
+    });
+
+    const [, init] = fetchImpl.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ];
+    const body = JSON.parse(init.body as string) as { max_tokens: number };
+    expect(body.max_tokens).toBe(1_234);
+    expect(c.getUsage().attemptsByStageOutcome["stage-a"].success).toBe(1);
+    expect(c.getUsage().attemptsByStageOutcome.unknown.success).toBe(0);
   });
 
   it("respects a custom baseUrl", async () => {
@@ -138,6 +163,79 @@ describe("OpenRouterClient.complete — failure, throws with a clear message", (
     await expect(client(fetchImpl).complete("prompt")).rejects.toThrow(
       /unexpected/i,
     );
+  });
+
+  it("classifies a top-level provider error carried by HTTP 200", async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({
+        id: "gen-test-1",
+        model: "deepseek/test",
+        error: {
+          code: 503,
+          message: "upstream echoed content that must not be persisted",
+          metadata: { error_type: "provider_overloaded" },
+        },
+        openrouter_metadata: {
+          attempts: [
+            { provider: "Chutes", model: "deepseek/test", status: 503 },
+          ],
+        },
+        usage: { prompt_tokens: 20, completion_tokens: 0, cost: 0.002 },
+      }),
+    );
+    const c = client(fetchImpl);
+
+    const error = await c
+      .complete("prompt", { stage: "stage-a" })
+      .catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(LlmTransportError);
+    expect(error).toMatchObject({
+      category: "providerError",
+      errorType: "provider_overloaded",
+      provider: "Chutes",
+      model: "deepseek/test",
+      generationId: "gen-test-1",
+      status: 200,
+    });
+    expect((error as Error).message).not.toContain("echoed content");
+    const usage = c.getUsage();
+    expect(usage.attemptsByOutcome.providerError).toBe(1);
+    expect(usage.attemptsByOutcome.invalidOutput).toBe(0);
+    expect(usage.attemptsByStageOutcome["stage-a"].providerError).toBe(1);
+    expect(usage.providerCounts).toEqual({ Chutes: 1 });
+    expect(usage.errorTypeCounts).toEqual({ provider_overloaded: 1 });
+    expect(usage.costUsd).toBeCloseTo(0.002);
+  });
+
+  it("classifies a choice-level in-band error instead of returning partial content", async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({
+        choices: [
+          {
+            message: { content: "partial output" },
+            finish_reason: "error",
+            error: {
+              code: 429,
+              message: "rate limited",
+              metadata: { error_type: "rate_limit_exceeded" },
+            },
+          },
+        ],
+        provider: "DeepInfra",
+      }),
+    );
+
+    const error = await client(fetchImpl)
+      .complete("prompt", { stage: "stage-b" })
+      .catch((cause: unknown) => cause);
+
+    expect(error).toMatchObject({
+      category: "rateLimited",
+      errorType: "rate_limit_exceeded",
+      provider: "DeepInfra",
+      finishReason: "error",
+    });
   });
 
   it("throws when fetch itself rejects (network failure)", async () => {
@@ -367,15 +465,15 @@ describe("OpenRouterClient.getUsage — attempt accounting (docs/audit AC-015)",
       }),
     );
     const c = client(fetchImpl);
-    await expect(c.complete("prompt")).rejects.toThrow(/unexpected/i);
+    await expect(c.complete("prompt")).resolves.toBe("x");
 
     const usage = c.getUsage();
-    expect(usage.calls).toBe(0);
+    expect(usage.calls).toBe(1);
     expect(usage.promptTokens).toBe(0);
     expect(usage.completionTokens).toBe(0);
     expect(usage.costUsd).toBe(0);
     expect(usage.attemptsWithoutUsage).toBe(1);
-    expect(usage.attemptsByOutcome.invalidOutput).toBe(1);
+    expect(usage.attemptsByOutcome.success).toBe(1);
   });
 
   it("accumulates attempts and outcomes across multiple calls on the same client", async () => {

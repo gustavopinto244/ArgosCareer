@@ -426,7 +426,7 @@ A1/A3 receive their cold-cache backlog benchmark.
 
 ## B6 — Stage A/B's LLM call failure rate was 70% on the 2026-08-17 calibration run
 
-**Status:** recurrence confirmed, root cause still open ·
+**Status:** transport remediation implemented; production validation pending ·
 **Found:** 2026-08-17, calibration run `01M09542FFR83M5V8HPSAQ68F3`
 
 `runs.llm_outcome_counts` for that run: 125 attempts, 37 `success`, 31
@@ -462,6 +462,18 @@ the model/client pairing, not one-run noise, and should get its own ADR.
 > not support a prompt-regression diagnosis. Full evidence, limitations and
 > prioritized remediation are recorded in
 > [`docs/audit/SCORING-INCIDENT-2026-08-18.md`](audit/SCORING-INCIDENT-2026-08-18.md).
+
+> **Remediation, 2026-08-18 (ADR-052).** The client now recognizes OpenRouter's
+> documented top-level and choice-level HTTP 200 error envelopes, classifies
+> canonical `error_type` values, opts into router metadata and persists only
+> content-free stage/provider diagnostics. Stage A uses 120 s / 2,048 tokens;
+> Stage B uses 30 s / 768 tokens. Run rows retain stage/outcome, provider,
+> error-type and score-failure counts. The old alert was split: every missing
+> score reports digest impact, while an accounted operation-rate signal needs
+> at least 10 attempts and no longer claims a prompt/model regression. Raw
+> response-body logging was removed. Unit/integration coverage is complete;
+> a cold-cache production run is still required before this issue can be
+> called operationally closed.
 
 ---
 

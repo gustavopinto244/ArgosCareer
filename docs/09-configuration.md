@@ -115,7 +115,7 @@ schedule: # two independent crons, ADR-009
 alerts:
   consecutiveEmptyCollectionRuns: # tolerant — collection is frequent
   missedScoreAndDeliverRun: # not tolerant — this is the digest
-  scoreFailureRateThreshold:
+  scoreFailureRateThreshold: # legacy name; LLM-operation health threshold (ADR-052); any missing score alerts independently
 ```
 
 The Portuguese strings in `titleBlocklist` and `titleRequired` are **data being

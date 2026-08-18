@@ -939,6 +939,9 @@ export async function executeDeliver(
       llmCachedPromptTokens: usage.cachedPromptTokens,
       llmBlockedByCircuit: usage.blockedByCircuit,
       llmOutcomeCounts: usage.attemptsByOutcome,
+      llmStageOutcomeCounts: usage.attemptsByStageOutcome,
+      llmProviderCounts: usage.providerCounts,
+      llmErrorTypeCounts: usage.errorTypeCounts,
     };
   }
   const startedAt = now();
@@ -949,6 +952,20 @@ export async function executeDeliver(
   let filteredCount = 0;
   let scoredCount = 0;
   let batchFatalReason: string | undefined;
+  const scoreFailureCounts: Record<string, number> = {};
+
+  function finalScoreFailureCounts(): Readonly<Record<string, number>> {
+    const counts = { ...scoreFailureCounts };
+    const recordedFailures = Object.values(counts).reduce(
+      (sum, count) => sum + count,
+      0,
+    );
+    const notAttempted = filteredCount - scoredCount - recordedFailures;
+    if (notAttempted > 0) {
+      counts.not_attempted_after_run_failure = notAttempted;
+    }
+    return counts;
+  }
 
   // Every exit from here on must close the run row. It did not before: when
   // `scorer.score` threw (2026-08-16, a prompt template missing from the
@@ -970,6 +987,7 @@ export async function executeDeliver(
       filteredCount,
       scoredCount,
       deliveredCount: 0,
+      scoreFailureCounts: finalScoreFailureCounts(),
       ...usageCounts(),
     });
     throw cause;
@@ -1066,6 +1084,8 @@ export async function executeDeliver(
         postingsRepo.getScoreFailureCount(posting.fingerprint) >=
         maxScoreFailures
       ) {
+        scoreFailureCounts.max_retries_exceeded =
+          (scoreFailureCounts.max_retries_exceeded ?? 0) + 1;
         const scoredAt = now();
         postingEventsRepo.record({
           runId,
@@ -1112,7 +1132,11 @@ export async function executeDeliver(
                 stageBCacheHit: result.stageBCacheHit,
                 evidenceRejectedCount: result.evidenceRejectedCount,
               }
-            : { attempts: result.attempts, batchFatal: result.permanent }),
+            : {
+                attempts: result.attempts,
+                batchFatal: result.permanent,
+                diagnostic: result.diagnostic,
+              }),
         },
         occurredAt: scoredAt,
       });
@@ -1123,6 +1147,8 @@ export async function executeDeliver(
         scoredEntries.push({ posting, outcome: result });
         scoredCount += 1;
       } else {
+        scoreFailureCounts[result.reason] =
+          (scoreFailureCounts[result.reason] ?? 0) + 1;
         // ADR-006 / docs/audit AC-009: a posting that fails scoring is not
         // discarded -- it carries the failure reason into the digest's
         // review section instead of silently vanishing. Deliberately not
@@ -1179,6 +1205,7 @@ export async function executeDeliver(
         filteredCount,
         scoredCount,
         deliveredCount: 0,
+        scoreFailureCounts: finalScoreFailureCounts(),
         ...usageCounts(),
       });
       return {
@@ -1237,6 +1264,7 @@ export async function executeDeliver(
         filteredCount,
         scoredCount,
         deliveredCount: sent.length,
+        scoreFailureCounts: finalScoreFailureCounts(),
         ...usageCounts(),
       },
     );

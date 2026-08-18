@@ -1,5 +1,6 @@
 import { Logger } from "@nestjs/common";
 import { z } from "zod";
+import { LlmFailureDiagnostic } from "../domain/failure-diagnostic";
 import {
   isBatchFatalFailure,
   isTransientFailure,
@@ -28,6 +29,8 @@ export type LlmParseResult<T> =
       readonly lastError: string;
       /** Whether the failure proves the rest of this run is also doomed. */
       readonly batchFatal: boolean;
+      /** Content-free operational cause, safe to persist with the posting. */
+      readonly diagnostic: LlmFailureDiagnostic;
     };
 
 const logger = new Logger("LlmOutput");
@@ -152,6 +155,28 @@ export async function parseModelOutputWithRetries<T>(
         cause instanceof LlmTransportError ? cause.category : "networkError";
       const message = cause instanceof Error ? cause.message : String(cause);
       lastError = `Request failed: ${message}`;
+      const transportDiagnostic =
+        cause instanceof LlmTransportError
+          ? {
+              category: cause.category,
+              ...(cause.errorType ? { errorType: cause.errorType } : {}),
+              ...(cause.provider ? { provider: cause.provider } : {}),
+              ...(cause.model ? { model: cause.model } : {}),
+              ...(cause.finishReason
+                ? { finishReason: cause.finishReason }
+                : {}),
+              ...(cause.generationId
+                ? { generationId: cause.generationId }
+                : {}),
+              ...(cause.status !== undefined
+                ? { httpStatus: cause.status }
+                : {}),
+              lastAttemptLatencyMs: cause.latencyMs ?? latencyMs,
+            }
+          : {
+              category: "networkError" as const,
+              lastAttemptLatencyMs: latencyMs,
+            };
 
       if (!isTransientFailure(category)) {
         logger.warn(
@@ -163,6 +188,7 @@ export async function parseModelOutputWithRetries<T>(
           attempts: totalAttempts,
           lastError,
           batchFatal: isBatchFatalFailure(category),
+          diagnostic: { kind: "permanent_error", ...transportDiagnostic },
         };
       }
 
@@ -177,6 +203,7 @@ export async function parseModelOutputWithRetries<T>(
           attempts: totalAttempts,
           lastError,
           batchFatal: false,
+          diagnostic: { kind: "transport_failed", ...transportDiagnostic },
         };
       }
 
@@ -211,6 +238,10 @@ export async function parseModelOutputWithRetries<T>(
           attempts: totalAttempts,
           lastError,
           batchFatal: false,
+          diagnostic: {
+            kind: "output_invalid_json",
+            lastAttemptLatencyMs: latencyMs,
+          },
         };
       }
       prompt = buildRetryPrompt(initialPrompt, lastError);
@@ -243,6 +274,10 @@ export async function parseModelOutputWithRetries<T>(
         attempts: totalAttempts,
         lastError,
         batchFatal: false,
+        diagnostic: {
+          kind: "output_schema_rejected",
+          lastAttemptLatencyMs: latencyMs,
+        },
       };
     }
     prompt = buildRetryPrompt(initialPrompt, lastError);

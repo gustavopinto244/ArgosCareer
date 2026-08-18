@@ -4,6 +4,7 @@ import {
   normalizeModelOutput,
   parseModelOutputWithRetries,
 } from "../../../src/scoring/infrastructure/llm-output";
+import { LlmTransportError } from "../../../src/scoring/infrastructure/openrouter-client";
 
 const Schema = z.object({
   status: z.enum(["met", "partial", "not_met"]),
@@ -150,6 +151,39 @@ describe("parseModelOutputWithRetries — exhausted retries, never throws", () =
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("preserves safe provider diagnostics when transport retries are exhausted", async () => {
+    const ask = vi.fn().mockRejectedValue(
+      new LlmTransportError("provider failed", "providerError", {
+        errorType: "provider_unavailable",
+        provider: "Chutes",
+        model: "deepseek/test",
+        finishReason: "error",
+        generationId: "gen-1",
+        status: 200,
+        latencyMs: 42,
+      }),
+    );
+    const result = await parseModelOutputWithRetries(Schema, ask, "prompt", {
+      maxTransportAttempts: 1,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "transport_failed",
+      diagnostic: {
+        kind: "transport_failed",
+        category: "providerError",
+        errorType: "provider_unavailable",
+        provider: "Chutes",
+        model: "deepseek/test",
+        finishReason: "error",
+        generationId: "gen-1",
+        httpStatus: 200,
+        lastAttemptLatencyMs: 42,
+      },
+    });
   });
 
   it("respects a custom maxRepairAttempts", async () => {

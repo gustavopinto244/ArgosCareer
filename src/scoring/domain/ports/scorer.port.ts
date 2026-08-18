@@ -1,6 +1,7 @@
 import { Posting } from "../../../posting/domain/posting";
 import { Recommendation } from "../recommendation";
 import { ScoreFailureReason, ScoreOutcome } from "../types";
+import { ScoringFailureDiagnostic } from "../failure-diagnostic";
 
 export type { ScoreFailureReason };
 
@@ -51,6 +52,8 @@ export type ScoreResult =
        * `StubScorer` never sets it (it never calls a model at all).
        */
       readonly permanent: boolean;
+      /** Content-free cause and stage, persisted in posting_events. */
+      readonly diagnostic: ScoringFailureDiagnostic;
     };
 
 /**

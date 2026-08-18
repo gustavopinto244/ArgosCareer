@@ -60,6 +60,13 @@ postings.
 For each requirement independently: `met | partial | not_met`, **with a mandatory
 evidence quote from the profile.**
 
+Stage A and Stage B share one transport client but not one request budget
+(ADR-052): Stage A starts with a 120-second / 2,048-token ceiling because it
+extracts the whole posting; Stage B keeps 30 seconds / 768 tokens because each
+call returns one match object. OpenRouter errors embedded in HTTP 200 are
+classified before output parsing, and a content-free cause is preserved on a
+failed score event.
+
 ```ts
 type Match = {
   requirement: Requirement;

@@ -1,19 +1,17 @@
 import { Logger } from "@nestjs/common";
 import { z } from "zod";
+import { LlmFailureCategory } from "../domain/failure-diagnostic";
 import { CircuitBreaker, CircuitBreakerOpenError } from "./circuit-breaker";
 
 const logger = new Logger("OpenRouterClient");
 
-/** Bound on how much of a raw response body a diagnostic log line ever
- * carries (docs/11-known-issues.md B6) — enough to see `finish_reason`,
- * an error envelope, or truncation itself, without risking a giant body
- * flooding the log. */
-const MAX_LOGGED_BODY_CHARS = 2_000;
+const MAX_DIAGNOSTIC_CHARS = 200;
 
-function truncateForLog(text: string): string {
-  return text.length > MAX_LOGGED_BODY_CHARS
-    ? `${text.slice(0, MAX_LOGGED_BODY_CHARS)}…(truncated, ${text.length} chars total)`
-    : text;
+function boundedDiagnostic(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim();
+  if (!normalized) return undefined;
+  return normalized.slice(0, MAX_DIAGNOSTIC_CHARS);
 }
 
 /**
@@ -41,9 +39,60 @@ const UsageSchema = z
   })
   .passthrough();
 
+const ProviderErrorSchema = z
+  .object({
+    code: z.union([z.number().int(), z.string()]).optional(),
+    // Parsed so the envelope remains forward-compatible, but deliberately
+    // never logged or persisted: provider messages can echo user content.
+    message: z.string().optional(),
+    metadata: z
+      .object({
+        error_type: z.string().optional(),
+        provider_code: z.union([z.string(), z.number()]).optional(),
+        provider_name: z.string().optional(),
+        model_slug: z.string().optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+
+const RouterMetadataSchema = z
+  .object({
+    endpoints: z
+      .object({
+        available: z
+          .array(
+            z
+              .object({
+                provider: z.string().optional(),
+                model: z.string().optional(),
+                selected: z.boolean().optional(),
+              })
+              .passthrough(),
+          )
+          .optional(),
+      })
+      .passthrough()
+      .optional(),
+    attempts: z
+      .array(
+        z
+          .object({
+            provider: z.string().optional(),
+            model: z.string().optional(),
+            status: z.number().int().optional(),
+          })
+          .passthrough(),
+      )
+      .optional(),
+  })
+  .passthrough();
+
 /**
  * Tolerant on purpose (same reasoning as `GupyJobSchema`): this is a
- * third-party API and only the one field actually used is required.
+ * third-party API. Success requirements are checked after documented error
+ * envelopes have been recognized, so no field is universally required here.
  */
 const ChatCompletionResponseSchema = z
   .object({
@@ -56,19 +105,30 @@ const ChatCompletionResponseSchema = z
     // reported. `complete()` below checks `choices[0]` itself and treats a
     // missing first choice as its own failure — a business-rule check, not
     // a shape one.
-    choices: z.array(
-      z
-        .object({
-          message: z.object({ content: z.string() }).passthrough(),
-        })
-        .passthrough(),
-    ),
-    /**
-     * Optional on purpose, like every other field read off a third-party
-     * response here: usage accounting is reported by OpenRouter but is not
-     * something a call should fail over if a provider omits it.
-     */
-    usage: UsageSchema.optional(),
+    choices: z
+      .array(
+        z
+          .object({
+            message: z
+              .object({ content: z.string().nullable().optional() })
+              .passthrough()
+              .optional(),
+            finish_reason: z.string().nullable().optional(),
+            error: ProviderErrorSchema.optional(),
+          })
+          .passthrough(),
+      )
+      .optional(),
+    error: ProviderErrorSchema.optional(),
+    id: z.string().optional(),
+    model: z.string().optional(),
+    provider: z.string().optional(),
+    openrouter_metadata: RouterMetadataSchema.optional(),
+    // Usage validity is independent of completion validity. Keep the raw
+    // value here and let `captureUsage` validate it separately so a malformed
+    // accounting block cannot hide a documented provider error or discard
+    // otherwise valid model content.
+    usage: z.unknown().optional(),
   })
   .passthrough();
 
@@ -133,6 +193,12 @@ export class LlmTransportError extends Error {
   readonly category: FailureCategory;
   readonly retryAfterMs: number | undefined;
   readonly status: number | undefined;
+  readonly errorType: string | undefined;
+  readonly provider: string | undefined;
+  readonly model: string | undefined;
+  readonly finishReason: string | undefined;
+  readonly generationId: string | undefined;
+  readonly latencyMs: number | undefined;
 
   constructor(
     message: string,
@@ -141,6 +207,12 @@ export class LlmTransportError extends Error {
       cause?: unknown;
       retryAfterMs?: number | undefined;
       status?: number;
+      errorType?: string;
+      provider?: string;
+      model?: string;
+      finishReason?: string;
+      generationId?: string;
+      latencyMs?: number;
     },
   ) {
     super(
@@ -151,6 +223,12 @@ export class LlmTransportError extends Error {
     this.category = category;
     this.retryAfterMs = options?.retryAfterMs;
     this.status = options?.status;
+    this.errorType = options?.errorType;
+    this.provider = options?.provider;
+    this.model = options?.model;
+    this.finishReason = options?.finishReason;
+    this.generationId = options?.generationId;
+    this.latencyMs = options?.latencyMs;
   }
 }
 
@@ -161,8 +239,7 @@ export class LlmTransportError extends Error {
  * network." It is still a failure category the retry layer needs to
  * classify, hence its own union rather than reusing `AttemptOutcome`.
  */
-export type FailureCategory =
-  Exclude<AttemptOutcome, "success"> | "circuitOpen";
+export type FailureCategory = LlmFailureCategory;
 
 /**
  * Which categories are worth retrying at all. `authError` and `configError`
@@ -251,6 +328,111 @@ function classifyHttpStatus(
   return "httpError";
 }
 
+/** OpenRouter documents `error.metadata.error_type` as the stable signal
+ * across providers and response skins. It wins over the outer HTTP status,
+ * which can be 200 after generation has already started. */
+function classifyErrorType(
+  errorType: string | undefined,
+  fallbackStatus: number,
+): Exclude<AttemptOutcome, "success"> {
+  switch (errorType) {
+    case "authentication":
+      return "authError";
+    case "payment_required":
+    case "not_found":
+      return "configError";
+    case "rate_limit_exceeded":
+      return "rateLimited";
+    case "provider_overloaded":
+    case "provider_unavailable":
+      return "providerError";
+    case "timeout":
+      return "timeout";
+    case "server":
+    case "unmapped":
+      return "serverError";
+    case "context_length_exceeded":
+    case "max_tokens_exceeded":
+    case "token_limit_exceeded":
+    case "string_too_long":
+    case "permission_denied":
+    case "invalid_request":
+    case "invalid_prompt":
+    case "precondition_failed":
+    case "payload_too_large":
+    case "unprocessable":
+    case "content_policy_violation":
+    case "refusal":
+    case "invalid_image":
+    case "image_too_large":
+    case "image_too_small":
+    case "unsupported_image_format":
+    case "image_not_found":
+    case "image_download_failed":
+      return "requestError";
+    default:
+      return classifyHttpStatus(fallbackStatus);
+  }
+}
+
+interface ResponseDiagnostic {
+  readonly errorType?: string;
+  readonly provider?: string;
+  readonly model?: string;
+  readonly finishReason?: string;
+  readonly generationId?: string;
+}
+
+type ParsedCompletionEnvelope = z.infer<typeof ChatCompletionResponseSchema>;
+
+function responseDiagnostic(
+  envelope: ParsedCompletionEnvelope,
+  response: Response,
+  error: z.infer<typeof ProviderErrorSchema> | undefined,
+): ResponseDiagnostic {
+  const metadata = envelope.openrouter_metadata;
+  const selected = metadata?.endpoints?.available?.find(
+    (endpoint) => endpoint.selected,
+  );
+  const lastAttempt = metadata?.attempts?.at(-1);
+  const firstChoice = envelope.choices?.[0];
+
+  const provider = boundedDiagnostic(
+    envelope.provider ??
+      error?.metadata?.provider_name ??
+      lastAttempt?.provider ??
+      selected?.provider,
+  );
+  const model = boundedDiagnostic(
+    envelope.model ??
+      error?.metadata?.model_slug ??
+      lastAttempt?.model ??
+      selected?.model,
+  );
+  const errorType = boundedDiagnostic(error?.metadata?.error_type);
+  const finishReason = boundedDiagnostic(firstChoice?.finish_reason);
+  const generationId = boundedDiagnostic(
+    envelope.id ?? response.headers.get("x-generation-id"),
+  );
+
+  return {
+    ...(errorType ? { errorType } : {}),
+    ...(provider ? { provider } : {}),
+    ...(model ? { model } : {}),
+    ...(finishReason ? { finishReason } : {}),
+    ...(generationId ? { generationId } : {}),
+  };
+}
+
+function numericErrorCode(
+  error: z.infer<typeof ProviderErrorSchema> | undefined,
+): number | undefined {
+  if (typeof error?.code === "number") return error.code;
+  if (typeof error?.code !== "string") return undefined;
+  const parsed = Number(error.code);
+  return Number.isInteger(parsed) ? parsed : undefined;
+}
+
 /** Clamp so an untrustworthy or huge `Retry-After` cannot stall a nightly
  * batch run for a single posting — "quando confiável" (AC-016) means bounded,
  * not blindly obeyed. */
@@ -292,10 +474,17 @@ export interface UsageTotals {
    * `calls` alone could never show (AC-015). */
   readonly attempts: number;
   readonly attemptsByOutcome: Readonly<Record<AttemptOutcome, number>>;
-  /** Attempts for which no `usage` object was ever available to add to
-   * `costUsd` — includes every non-success outcome (no parseable body to
-   * read usage from) and the rare case of a 2xx, schema-valid response
-   * that simply omitted `usage` (OpenRouter's own field is optional). A
+  /** Same attempts split by the operation that issued them. */
+  readonly attemptsByStageOutcome: Readonly<
+    Record<LlmOperationStage, Readonly<Record<AttemptOutcome, number>>>
+  >;
+  /** Provider/model routing metadata is deliberately reduced to counters. */
+  readonly providerCounts: Readonly<Record<string, number>>;
+  readonly errorTypeCounts: Readonly<Record<string, number>>;
+  /** Attempts for which no usable `usage` object was available to add to
+   * `costUsd`, regardless of whether the completion itself succeeded. A
+   * provider error can still report usage, while a schema-valid success can
+   * omit it (OpenRouter's own field is optional). A
    * `costUsd` of 0 with a nonzero count here means "unknown," not "free." */
   readonly attemptsWithoutUsage: number;
   /** Calls the circuit breaker (docs/audit AC-016) refused outright, before
@@ -307,6 +496,14 @@ export interface UsageTotals {
 }
 
 type FetchLike = typeof fetch;
+
+export type LlmOperationStage = "stage-a" | "stage-b" | "unknown";
+
+export interface CompletionOptions {
+  readonly stage?: LlmOperationStage;
+  readonly timeoutMs?: number;
+  readonly maxCompletionTokens?: number;
+}
 
 export interface OpenRouterClientOptions {
   apiKey: string;
@@ -360,6 +557,16 @@ export class OpenRouterClient {
   private attemptsByOutcome: Record<AttemptOutcome, number> = {
     ...ZERO_OUTCOMES,
   };
+  private attemptsByStageOutcome: Record<
+    LlmOperationStage,
+    Record<AttemptOutcome, number>
+  > = {
+    "stage-a": { ...ZERO_OUTCOMES },
+    "stage-b": { ...ZERO_OUTCOMES },
+    unknown: { ...ZERO_OUTCOMES },
+  };
+  private providerCounts: Record<string, number> = {};
+  private errorTypeCounts: Record<string, number> = {};
   private attemptsWithoutUsage = 0;
   private blockedByCircuit = 0;
 
@@ -413,9 +620,35 @@ export class OpenRouterClient {
       costUsd: this.costUsd,
       attempts: this.attempts,
       attemptsByOutcome: { ...this.attemptsByOutcome },
+      attemptsByStageOutcome: {
+        "stage-a": { ...this.attemptsByStageOutcome["stage-a"] },
+        "stage-b": { ...this.attemptsByStageOutcome["stage-b"] },
+        unknown: { ...this.attemptsByStageOutcome.unknown },
+      },
+      providerCounts: { ...this.providerCounts },
+      errorTypeCounts: { ...this.errorTypeCounts },
       attemptsWithoutUsage: this.attemptsWithoutUsage,
       blockedByCircuit: this.blockedByCircuit,
     };
+  }
+
+  private recordOutcome(
+    outcome: AttemptOutcome,
+    stage: LlmOperationStage,
+  ): void {
+    this.attemptsByOutcome[outcome] += 1;
+    this.attemptsByStageOutcome[stage][outcome] += 1;
+  }
+
+  private recordResponseDiagnostic(diagnostic: ResponseDiagnostic): void {
+    if (diagnostic.provider) {
+      this.providerCounts[diagnostic.provider] =
+        (this.providerCounts[diagnostic.provider] ?? 0) + 1;
+    }
+    if (diagnostic.errorType) {
+      this.errorTypeCounts[diagnostic.errorType] =
+        (this.errorTypeCounts[diagnostic.errorType] ?? 0) + 1;
+    }
   }
 
   private captureUsage(value: unknown): boolean {
@@ -473,8 +706,9 @@ export class OpenRouterClient {
   private async readBodyWithDeadline(
     response: Response,
     controller: AbortController,
+    timeoutMs: number,
   ): Promise<string> {
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       return await this.readBody(response, controller.signal);
     } finally {
@@ -482,7 +716,27 @@ export class OpenRouterClient {
     }
   }
 
-  async complete(prompt: string): Promise<string> {
+  async complete(
+    prompt: string,
+    options: CompletionOptions = {},
+  ): Promise<string> {
+    const stage = options.stage ?? "unknown";
+    const timeoutMs = options.timeoutMs ?? this.timeoutMs;
+    const maxCompletionTokens =
+      options.maxCompletionTokens ?? this.maxCompletionTokens;
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+      throw new Error("OpenRouter timeoutMs must be a positive safe integer");
+    }
+    if (
+      !Number.isSafeInteger(maxCompletionTokens) ||
+      maxCompletionTokens <= 0
+    ) {
+      throw new Error(
+        "OpenRouter maxCompletionTokens must be a positive safe integer",
+      );
+    }
+    const startedAt = Date.now();
+
     try {
       this.circuitBreaker.beforeCall();
     } catch (cause) {
@@ -496,6 +750,7 @@ export class OpenRouterClient {
         {
           cause,
           retryAfterMs: (cause as CircuitBreakerOpenError).retryAfterMs,
+          latencyMs: Date.now() - startedAt,
         },
       );
     }
@@ -505,7 +760,7 @@ export class OpenRouterClient {
     // now visible, regardless of how it ends.
     this.attempts += 1;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
 
     let response: Response;
     try {
@@ -516,11 +771,12 @@ export class OpenRouterClient {
           "Content-Type": "application/json",
           "HTTP-Referer": APP_URL,
           "X-Title": APP_TITLE,
+          "X-OpenRouter-Metadata": "enabled",
         },
         body: JSON.stringify({
           model: this.model,
           messages: [{ role: "user", content: prompt }],
-          max_tokens: this.maxCompletionTokens,
+          max_tokens: maxCompletionTokens,
         }),
         signal: controller.signal,
       });
@@ -529,32 +785,39 @@ export class OpenRouterClient {
       // TLS) — both are "no response," but distinguishing them is what the
       // retry/backoff policy one layer up needs (docs/audit AC-016).
       const category = controller.signal.aborted ? "timeout" : "networkError";
-      this.attemptsByOutcome[category] += 1;
+      this.recordOutcome(category, stage);
       this.attemptsWithoutUsage += 1;
       this.circuitBreaker.onFailure(isBreakerTrippingFailure(category));
       throw new LlmTransportError((cause as Error).message, category, {
         cause,
+        latencyMs: Date.now() - startedAt,
       });
     } finally {
       clearTimeout(timer);
     }
 
     if (!response.ok) {
-      const body = await this.readBodyWithDeadline(response, controller).catch(
-        () => "",
-      );
-      const category = classifyHttpStatus(response.status);
-      this.attemptsByOutcome[category] += 1;
+      const body = await this.readBodyWithDeadline(
+        response,
+        controller,
+        timeoutMs,
+      ).catch(() => "");
       let errorJson: unknown;
       try {
         errorJson = JSON.parse(body);
       } catch {
         errorJson = null;
       }
-      const usage =
-        errorJson !== null && typeof errorJson === "object"
-          ? (errorJson as { usage?: unknown }).usage
-          : undefined;
+      const parsedEnvelope = ChatCompletionResponseSchema.safeParse(errorJson);
+      const envelope = parsedEnvelope.success ? parsedEnvelope.data : undefined;
+      const error = envelope?.error ?? envelope?.choices?.[0]?.error;
+      const diagnostic = envelope
+        ? responseDiagnostic(envelope, response, error)
+        : {};
+      const category = classifyErrorType(diagnostic.errorType, response.status);
+      this.recordOutcome(category, stage);
+      this.recordResponseDiagnostic(diagnostic);
+      const usage = envelope?.usage;
       if (!this.captureUsage(usage)) this.attemptsWithoutUsage += 1;
       const retryAfterMs = parseRetryAfterMs(
         response.headers.get("retry-after"),
@@ -563,30 +826,38 @@ export class OpenRouterClient {
       throw new LlmTransportError(
         `OpenRouter responded ${response.status}`,
         category,
-        { status: response.status, retryAfterMs },
+        {
+          status: response.status,
+          retryAfterMs,
+          ...diagnostic,
+          latencyMs: Date.now() - startedAt,
+        },
       );
     }
 
     let bodyText = "";
     let json: unknown;
     try {
-      bodyText = await this.readBodyWithDeadline(response, controller);
+      bodyText = await this.readBodyWithDeadline(
+        response,
+        controller,
+        timeoutMs,
+      );
       json = JSON.parse(bodyText);
     } catch (cause) {
       const category = controller.signal.aborted
         ? "timeout"
         : "invalidEnvelope";
-      this.attemptsByOutcome[category] += 1;
+      this.recordOutcome(category, stage);
       this.attemptsWithoutUsage += 1;
       // A content/response-shape problem, not evidence the provider is
       // down (docs/audit PR-009) — see isBreakerTrippingFailure.
       this.circuitBreaker.onFailure(isBreakerTrippingFailure(category));
-      // docs/11-known-issues.md B6: the raw body is the one thing missing
-      // to root-cause a malformed envelope — logged only here, where it is
-      // actually available (an aborted read may leave `bodyText` empty).
+      // Do not log the body: it can contain partial model output derived
+      // from posting/profile data. Shape and size are sufficient here.
       if (category === "invalidEnvelope" && bodyText) {
         logger.debug(
-          `Malformed OpenRouter response body (200, unparsable JSON): ${truncateForLog(bodyText)}`,
+          `Malformed OpenRouter response body (200, unparsable JSON, ${bodyText.length} chars)`,
         );
       }
       throw new LlmTransportError(
@@ -594,7 +865,7 @@ export class OpenRouterClient {
           ? "OpenRouter response body timed out"
           : "Malformed OpenRouter response body",
         category,
-        { cause },
+        { cause, latencyMs: Date.now() - startedAt },
       );
     }
 
@@ -612,29 +883,66 @@ export class OpenRouterClient {
     // no schema Stage A/B").
     if (!hasUsage) this.attemptsWithoutUsage += 1;
 
-    const firstChoice = parsed.success ? parsed.data.choices[0] : undefined;
-    if (!firstChoice) {
-      this.attemptsByOutcome.invalidOutput += 1;
-      // Same reasoning as invalidEnvelope above (docs/audit PR-009): a
-      // content-filtered or empty-choices response is a fact about this
-      // one call, not the provider as a whole.
+    if (!parsed.success) {
+      this.recordOutcome("invalidOutput", stage);
       this.circuitBreaker.onFailure(isBreakerTrippingFailure("invalidOutput"));
-      // docs/11-known-issues.md B6: this is the response OpenRouter actually
-      // sent back — the one thing missing to tell content filtering, a
-      // provider-side routing failure and a genuinely empty `choices` apart.
       logger.debug(
-        `Unexpected OpenRouter response shape (200, empty/missing choices[0]): ${truncateForLog(bodyText)}`,
+        "Unexpected OpenRouter response shape (200, invalid completion envelope)",
       );
       throw new LlmTransportError(
         "Unexpected OpenRouter response shape",
         "invalidOutput",
+        { latencyMs: Date.now() - startedAt },
+      );
+    }
+
+    const firstChoice = parsed.data.choices?.[0];
+    const providerError = firstChoice?.error ?? parsed.data.error;
+    const diagnostic = responseDiagnostic(parsed.data, response, providerError);
+    this.recordResponseDiagnostic(diagnostic);
+
+    if (providerError || firstChoice?.finish_reason === "error") {
+      const category = classifyErrorType(
+        diagnostic.errorType,
+        numericErrorCode(providerError) ?? 502,
+      );
+      this.recordOutcome(category, stage);
+      this.circuitBreaker.onFailure(isBreakerTrippingFailure(category));
+      logger.debug(
+        `OpenRouter in-band error (HTTP 200): ${JSON.stringify({ category, ...diagnostic, hasUsage })}`,
+      );
+      throw new LlmTransportError(
+        `OpenRouter generation failed (${diagnostic.errorType ?? category})`,
+        category,
+        {
+          status: response.status,
+          ...diagnostic,
+          latencyMs: Date.now() - startedAt,
+        },
+      );
+    }
+
+    const content = firstChoice?.message?.content;
+    if (typeof content !== "string") {
+      this.recordOutcome("invalidOutput", stage);
+      // Same reasoning as invalidEnvelope above (docs/audit PR-009): a
+      // content-filtered or empty-choices response is a fact about this
+      // one call, not the provider as a whole.
+      this.circuitBreaker.onFailure(isBreakerTrippingFailure("invalidOutput"));
+      logger.debug(
+        `Unexpected OpenRouter response shape (200, no string content): ${JSON.stringify(diagnostic)}`,
+      );
+      throw new LlmTransportError(
+        "Unexpected OpenRouter response shape",
+        "invalidOutput",
+        { ...diagnostic, latencyMs: Date.now() - startedAt },
       );
     }
 
     this.calls += 1;
-    this.attemptsByOutcome.success += 1;
+    this.recordOutcome("success", stage);
     this.circuitBreaker.onSuccess();
 
-    return firstChoice.message.content;
+    return content;
   }
 }

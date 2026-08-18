@@ -618,9 +618,13 @@ agendado é uma reprodução mais segura enquanto ainda restam retries automáti
 
 ## Status
 
-**Incidente confirmado; causa raiz ainda aberta.**
+**Remediação de transporte implementada (ADR-052); validação em produção ainda
+pendente.**
 
-O próximo passo não é uma nova calibração de score. É corrigir a camada de
-transporte/observabilidade, reproduzir com provider e erro identificáveis e só
-depois decidir, via ADR, entre timeout por estágio, política de routing,
-structured output ou troca de modelo.
+A implementação agora interpreta erros in-band do OpenRouter, separa os limites
+de Stage A/B, habilita routing metadata, persiste causa operacional sanitizada e
+separa alerta de impacto do sinal de saúde. Não houve mudança de prompt ou
+modelo. O próximo passo é um run pós-deploy com cache frio suficiente para
+medir sucesso, latência e custo por estágio/provider; só esses dados podem
+fechar o incidente ou justificar política de routing, structured output ou
+troca de modelo.

@@ -10,7 +10,11 @@ import {
   RunsRepository,
   parseAttemptedSources,
   parseFailedSources,
+  parseLlmErrorTypeCounts,
   parseLlmOutcomeCounts,
+  parseLlmProviderCounts,
+  parseLlmStageOutcomeCounts,
+  parseScoreFailureCounts,
   parseSourceQueryStats,
   parseTruncatedSources,
 } from "../../src/persistence/infrastructure/runs-repository";
@@ -250,6 +254,13 @@ describe("RunsRepository", () => {
       llmCachedPromptTokens: 60,
       llmBlockedByCircuit: 2,
       llmOutcomeCounts: { success: 2, timeout: 1, authError: 1 },
+      llmStageOutcomeCounts: {
+        "stage-a": { success: 1, timeout: 1 },
+        "stage-b": { success: 1, authError: 1 },
+      },
+      llmProviderCounts: { Chutes: 3, DeepInfra: 1 },
+      llmErrorTypeCounts: { provider_unavailable: 1 },
+      scoreFailureCounts: { extraction_failed: 1 },
     });
 
     const row = repository.findById(runId);
@@ -267,6 +278,18 @@ describe("RunsRepository", () => {
       authError: 1,
     });
     expect(parseLlmOutcomeCounts({ llmOutcomeCounts: "[]" })).toEqual({});
+    expect(parseLlmStageOutcomeCounts(row!)).toEqual({
+      "stage-a": { success: 1, timeout: 1 },
+      "stage-b": { success: 1, authError: 1 },
+    });
+    expect(parseLlmProviderCounts(row!)).toEqual({
+      Chutes: 3,
+      DeepInfra: 1,
+    });
+    expect(parseLlmErrorTypeCounts(row!)).toEqual({
+      provider_unavailable: 1,
+    });
+    expect(parseScoreFailureCounts(row!)).toEqual({ extraction_failed: 1 });
   });
 });
 

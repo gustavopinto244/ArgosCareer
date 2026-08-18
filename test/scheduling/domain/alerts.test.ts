@@ -40,6 +40,10 @@ function run(overrides: Partial<RunRow> = {}): RunRow {
     llmCachedPromptTokens: 0,
     llmBlockedByCircuit: 0,
     llmOutcomeCounts: null,
+    llmStageOutcomeCounts: null,
+    llmProviderCounts: null,
+    llmErrorTypeCounts: null,
+    scoreFailureCounts: null,
     ...overrides,
   };
 }
@@ -108,20 +112,55 @@ describe("evaluateDeliveryOutcome", () => {
     expect(alerts).toEqual([]);
   });
 
-  it("alerts when the scoring failure rate meets the threshold", () => {
+  it("alerts on digest impact regardless of the health threshold", () => {
     const alerts = evaluateDeliveryOutcome(
-      run({ filteredCount: 10, scoredCount: 4 }), // 60% failed
+      run({
+        filteredCount: 10,
+        scoredCount: 4,
+        scoreFailureCounts: JSON.stringify({ extraction_failed: 6 }),
+      }),
       0.5,
     );
-    expect(alerts.some((a) => a.text.includes("60%"))).toBe(true);
+    expect(alerts).toEqual([
+      {
+        text: "Scoring impact on run run-1: 6/10 postings were left without a score (extraction_failed=6).",
+      },
+    ]);
+    expect(alerts[0]?.text).not.toContain("regression");
   });
 
-  it("does not alert when the scoring failure rate is below the threshold", () => {
+  it("still reports one affected posting in a small sample", () => {
     const alerts = evaluateDeliveryOutcome(
       run({ filteredCount: 10, scoredCount: 9 }), // 10% failed
       0.5,
     );
-    expect(alerts).toEqual([]);
+    expect(alerts[0]?.text).toContain(
+      "1/10 postings were left without a score",
+    );
+  });
+
+  it("separately reports scorer health with enough accounted attempts", () => {
+    const alerts = evaluateDeliveryOutcome(
+      run({
+        filteredCount: 3,
+        scoredCount: 1,
+        llmAttempts: 23,
+        llmOutcomeCounts: JSON.stringify({
+          success: 9,
+          timeout: 4,
+          providerError: 10,
+        }),
+        llmProviderCounts: JSON.stringify({ Chutes: 14, DeepInfra: 9 }),
+        llmErrorTypeCounts: JSON.stringify({ provider_unavailable: 10 }),
+        scoreFailureCounts: JSON.stringify({ extraction_failed: 2 }),
+      }),
+      0.5,
+    );
+
+    expect(alerts).toHaveLength(2);
+    expect(alerts[1]?.text).toContain("14/23 LLM operations failed (61%)");
+    expect(alerts[1]?.text).toContain("provider_unavailable=10");
+    expect(alerts[1]?.text).not.toContain("regression");
   });
 
   it("does not divide by zero when nothing passed the pre-filter", () => {
