@@ -1,5 +1,20 @@
+import { Logger } from "@nestjs/common";
 import { z } from "zod";
 import { CircuitBreaker, CircuitBreakerOpenError } from "./circuit-breaker";
+
+const logger = new Logger("OpenRouterClient");
+
+/** Bound on how much of a raw response body a diagnostic log line ever
+ * carries (docs/11-known-issues.md B6) — enough to see `finish_reason`,
+ * an error envelope, or truncation itself, without risking a giant body
+ * flooding the log. */
+const MAX_LOGGED_BODY_CHARS = 2_000;
+
+function truncateForLog(text: string): string {
+  return text.length > MAX_LOGGED_BODY_CHARS
+    ? `${text.slice(0, MAX_LOGGED_BODY_CHARS)}…(truncated, ${text.length} chars total)`
+    : text;
+}
 
 /**
  * Honest identification per OpenRouter's convention (the same etiquette
@@ -552,9 +567,11 @@ export class OpenRouterClient {
       );
     }
 
+    let bodyText = "";
     let json: unknown;
     try {
-      json = JSON.parse(await this.readBodyWithDeadline(response, controller));
+      bodyText = await this.readBodyWithDeadline(response, controller);
+      json = JSON.parse(bodyText);
     } catch (cause) {
       const category = controller.signal.aborted
         ? "timeout"
@@ -564,6 +581,14 @@ export class OpenRouterClient {
       // A content/response-shape problem, not evidence the provider is
       // down (docs/audit PR-009) — see isBreakerTrippingFailure.
       this.circuitBreaker.onFailure(isBreakerTrippingFailure(category));
+      // docs/11-known-issues.md B6: the raw body is the one thing missing
+      // to root-cause a malformed envelope — logged only here, where it is
+      // actually available (an aborted read may leave `bodyText` empty).
+      if (category === "invalidEnvelope" && bodyText) {
+        logger.debug(
+          `Malformed OpenRouter response body (200, unparsable JSON): ${truncateForLog(bodyText)}`,
+        );
+      }
       throw new LlmTransportError(
         category === "timeout"
           ? "OpenRouter response body timed out"
@@ -594,6 +619,12 @@ export class OpenRouterClient {
       // content-filtered or empty-choices response is a fact about this
       // one call, not the provider as a whole.
       this.circuitBreaker.onFailure(isBreakerTrippingFailure("invalidOutput"));
+      // docs/11-known-issues.md B6: this is the response OpenRouter actually
+      // sent back — the one thing missing to tell content filtering, a
+      // provider-side routing failure and a genuinely empty `choices` apart.
+      logger.debug(
+        `Unexpected OpenRouter response shape (200, empty/missing choices[0]): ${truncateForLog(bodyText)}`,
+      );
       throw new LlmTransportError(
         "Unexpected OpenRouter response shape",
         "invalidOutput",
