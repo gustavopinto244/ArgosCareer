@@ -97,6 +97,52 @@ describe("OpenRouterClient.complete — success", () => {
     expect(c.getUsage().attemptsByStageOutcome.unknown.success).toBe(0);
   });
 
+  it("caps reasoning tokens when reasoningMaxTokens is set (ADR-052 Amendment 2)", async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({ choices: [{ message: { content: "x" } }] }),
+    );
+    await client(fetchImpl).complete("stage A prompt", {
+      reasoningMaxTokens: 3_000,
+    });
+
+    const [, init] = fetchImpl.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ];
+    const body = JSON.parse(init.body as string) as {
+      reasoning?: { max_tokens: number };
+    };
+    expect(body.reasoning).toEqual({ max_tokens: 3_000 });
+  });
+
+  it("rejects a non-positive reasoningMaxTokens without making a network call", async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({ choices: [{ message: { content: "x" } }] }),
+    );
+    const error = await client(fetchImpl)
+      .complete("prompt", { reasoningMaxTokens: 0 })
+      .catch((cause: unknown) => cause);
+
+    expect((error as Error).message).toMatch(/reasoningMaxTokens/);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("omits the reasoning field when reasoningMaxTokens is not set", async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({ choices: [{ message: { content: "x" } }] }),
+    );
+    await client(fetchImpl).complete("say hi");
+
+    const [, init] = fetchImpl.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ];
+    const body = JSON.parse(init.body as string) as {
+      reasoning?: unknown;
+    };
+    expect(body.reasoning).toBeUndefined();
+  });
+
   it("respects a custom baseUrl", async () => {
     const fetchImpl = vi.fn(async () =>
       jsonResponse({ choices: [{ message: { content: "x" } }] }),

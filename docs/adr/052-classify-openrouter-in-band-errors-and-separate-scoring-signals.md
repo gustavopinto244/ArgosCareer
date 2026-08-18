@@ -148,3 +148,52 @@ Same discipline as the ADR's original bounds: an initial measurement value,
 not a calibrated one. If `finishReason: "length"` recurs at 8,192, the next
 move is measuring actual completion-token usage on a successful Stage A call
 (currently not persisted per-attempt) before raising it again blindly.
+
+## Amendment 2 — 2026-08-18: cap reasoning tokens directly; raising the ceiling alone did not work
+
+Amendment 1 shipped and was validated with a real `deliver` run
+(`01M0AP3D2ZFVNNDCK4M6DDR29D`). Digest impact was unchanged — still 1/3
+postings scored — and the failure mode got worse: 6 of 7 Stage A attempts
+timed out at ~120s (versus 0 timeouts pre-Amendment-1), and the circuit
+breaker tripped once. Raising `maxCompletionTokens` gave the model more
+room, and it used all of it without finishing.
+
+Both failing postings — same two fingerprints in every run of this incident
+— were isolated and called directly against OpenRouter, once each, no retry
+loop, both as originally collected and with all emoji stripped (testing the
+one alternate hypothesis this ADR's diagnosis had not ruled out). All four
+calls returned `finish_reason: "length"` with `content: null` or
+mid-JSON-truncated. All four carried a `reasoning` field 70,000–75,000
+characters long — chain-of-thought the model produces before ever writing
+the JSON answer, consuming the entire completion-token budget regardless of
+emoji or provider (GMICloud in all four, this time). This — not routing
+variance, not a documented in-band error, not Unicode content — is the
+actual mechanism: `deepseek/deepseek-v4-flash-0731` is a reasoning model,
+and Stage A's completion ceiling was always shared between reasoning and
+the answer, with no way to bound the former.
+
+OpenRouter documents a `reasoning` request object for exactly this
+(`openrouter.ai/docs/use-cases/reasoning-tokens`): `reasoning.max_tokens`
+caps the chain-of-thought budget independently of `max_tokens`;
+`reasoning.effort: "none"` disables it outright.
+
+**Decision:** add `reasoningMaxTokens` to `OpenRouterClient.complete`'s
+per-call options, sent as `reasoning: { max_tokens }` when present. Set
+`STAGE_A_REASONING_MAX_TOKENS = 3_000` (of 8,192 — ~37%, leaving the
+majority for the JSON answer) and `STAGE_B_REASONING_MAX_TOKENS = 300` (of
+768, the same ratio). Not `effort: "none"`: reasoning may still help the
+model classify an ambiguous requirement's `weight` correctly, and this
+incident produced no evidence either way on that trade-off — capping is the
+smaller, more reversible move.
+
+### Consequences
+
+- A reasoning model can no longer silently spend an entire operation's
+  completion budget on chain-of-thought never surfaced to `content`.
+- Not yet re-validated against production — the next `deliver` (scheduled or
+  manual) is what confirms whether 3,000/300 is enough, still leaves the
+  same two postings unscored, or needs its own follow-up amendment.
+- If reasoning quality measurably matters for weight classification, a
+  future amendment might raise these caps or split them per requirement
+  category rather than drop them to `none`; no data supports that decision
+  yet.
