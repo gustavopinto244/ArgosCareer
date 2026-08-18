@@ -114,3 +114,37 @@ until a version/baseline comparison and consecutive-run rule exist.
 - `scoreFailureRateThreshold` retains its old name to avoid invalidating
   existing criteria files, but now gates the LLM-operation health signal. Any
   missing score alerts independently of that threshold.
+
+## Amendment 1 — 2026-08-18: Stage A's completion-token ceiling, not the provider, was the dominant cause
+
+Post-deploy validation (manual `deliver`, run `01M0AJ0CY37MD7XAWX5XZEQNR0`) confirmed
+part of this ADR's decision and falsified another candidate cause. Confirmed: the
+120s Stage A timeout worked — zero `timeout` outcomes this run, versus 4 the
+run before. Falsified: `llmErrorTypeCounts` came back `{}` — none of the
+13 `invalidOutput` failures carried a documented OpenRouter error envelope, so
+the in-band-HTTP-200-error hypothesis this ADR led with was not what actually
+happened here.
+
+What the new diagnostic fields did show, uniformly, across all 13 failures:
+`finishReason: "length"` with empty `message.content`, spread across **8
+different providers** (GMICloud, CoreWeave, SiliconFlow, StreamLake, Sail
+Research, Parasail, AkashML, AtlasCloud). Uniform across that much provider
+diversity rules out one flaky provider and points at the shared variable
+instead: `STAGE_A_MAX_COMPLETION_TOKENS`, still `DEFAULT_MAX_COMPLETION_TOKENS`
+(2,048) from before this ADR — untouched because the original diagnosis
+suspected transport, not the token budget. `deepseek/deepseek-v4-flash-0731`
+most plausibly spends part of that budget on reasoning output that never
+reaches `message.content`, leaving nothing for the JSON requirement list Stage
+A actually needs. Stage B, at 768 tokens for one short object, failed far less
+(2/17) — consistent with a budget problem that bites harder the more the model
+has to produce.
+
+**Decision:** raise `STAGE_A_MAX_COMPLETION_TOKENS` to 8,192 — 4x, generous
+headroom for reasoning tokens plus a full requirement list, still far below
+`DEFAULT_MAX_RESPONSE_BYTES`. Left `STAGE_B_MAX_COMPLETION_TOKENS` alone: its
+failure rate was already low and its output is one bounded object, not a list.
+
+Same discipline as the ADR's original bounds: an initial measurement value,
+not a calibrated one. If `finishReason: "length"` recurs at 8,192, the next
+move is measuring actual completion-token usage on a successful Stage A call
+(currently not persisted per-attempt) before raising it again blindly.
