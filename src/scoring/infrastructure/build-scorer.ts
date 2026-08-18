@@ -25,7 +25,12 @@ import { StubScorer } from "./stub-scorer";
  * 40–67s cold; Stage B produces one bounded object per requirement. */
 export const STAGE_A_TIMEOUT_MS = 120_000;
 export const STAGE_B_TIMEOUT_MS = 30_000;
-export const STAGE_A_MAX_COMPLETION_TOKENS = DEFAULT_MAX_COMPLETION_TOKENS;
+/** ADR-052 Amendment 1: post-deploy validation showed every Stage A
+ * `invalidOutput` failure was `finishReason: "length"` with empty content,
+ * uniform across 8 different providers — a token-budget problem, not a
+ * transport or provider one. 4x the shared default, generous headroom for
+ * reasoning output ahead of the JSON requirement list itself. */
+export const STAGE_A_MAX_COMPLETION_TOKENS = DEFAULT_MAX_COMPLETION_TOKENS * 4;
 export const STAGE_B_MAX_COMPLETION_TOKENS = 768;
 
 export type BuildScorerResult =
