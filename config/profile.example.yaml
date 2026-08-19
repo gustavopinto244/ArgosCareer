@@ -18,10 +18,14 @@ courseStart: 2026-03-01
 courseEnd: 2029-12-01
 
 # Present and visible rather than omitted — replace with a real answer.
-# See CLAUDE.md §9 for why these three specifically are flagged.
+# See CLAUDE.md §9 for why the first three specifically are flagged.
 englishLevel: "⚠ VERIFY"
 minimumStipend: "⚠ VERIFY"
 maxWeeklyHours: "⚠ VERIFY"
+# Onsite/hybrid is geography-bound, remote is not — state both. Example:
+# "Disponível para trabalho presencial ou híbrido em <cidade>, e para
+# trabalho remoto em qualquer lugar do mundo."
+workAvailability: "⚠ VERIFY"
 
 competencies:
   - name: TypeScript

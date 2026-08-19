@@ -23,6 +23,7 @@ function profile(overrides: Partial<Profile> = {}): Profile {
     englishLevel: "intermediate",
     minimumStipend: "R$ 1500",
     maxWeeklyHours: "30",
+    workAvailability: "40h remoto, disponível dias úteis.",
     competencies: [
       {
         name: "Node.js",
@@ -167,12 +168,15 @@ describe("buildStageBPrompt", () => {
     expect(prompt).toContain("ainda não iniciou o curso");
   });
 
-  it("includes englishLevel, maxWeeklyHours and minimumStipend as quotable evidence", () => {
+  it("includes englishLevel, maxWeeklyHours, workAvailability and minimumStipend as quotable evidence", () => {
     const prompt = buildStageBPrompt(requirement, profile());
 
     expect(prompt).toContain("[English level] Nível de inglês: intermediate.");
     expect(prompt).toContain(
       "[Availability] Disponibilidade de até 30 horas semanais.",
+    );
+    expect(prompt).toContain(
+      "[Work availability] 40h remoto, disponível dias úteis.",
     );
     expect(prompt).toContain(
       "[Compensation] Bolsa-auxílio mínima aceita: R$ 1500.",

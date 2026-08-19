@@ -765,3 +765,24 @@ Revisit once the worksheet is closer to the full 50 `docs/04` calls for.
 >   picked up — flag if this conditional-clause shape recurs on other
 >   postings before spending the prompt-version cost on a single
 >   observation.
+
+> **`workAvailability` profile field added, 2026-08-19.** Closes the
+> Smarthis work-mode gap above: `profile.ts` gained a fourth declared
+> field alongside `englishLevel`/`minimumStipend`/`maxWeeklyHours`,
+> rendered by `evidence-catalog.ts` as a `[Work availability]` quotable
+> line the same way the other three are. `config/profile.yaml` now states
+> "Disponível para trabalho presencial ou híbrido no Rio de Janeiro,
+> Niterói ou São Gonçalo, e para trabalho remoto em qualquer lugar do
+> mundo." Verified the plumbing directly against the real corpus
+> (`loadProfile` + `buildEvidenceCatalog`): the new line is generated and
+> present in what Stage B is allowed to quote. **Re-scoring the real
+> Smarthis posting with a live call, the model still answered `not_met`
+> for "modelo híbrido ou remoto" despite the evidence being available** —
+> the field is correctly wired, but one real call not using available
+> evidence is exactly the calibration-measured ~0.4 correlation ceiling
+> already known about this model/prompt pairing, not a defect in this
+> change. The evidence now exists for every future scoring attempt
+> regardless; whether the model reliably uses it is a separate,
+> already-tracked question. The CS-fundamentals gap (Bemobi Wave) is not
+> addressed here — it needs real evidence (a course, a project) only a
+> human can supply, not invented (CLAUDE.md §15).

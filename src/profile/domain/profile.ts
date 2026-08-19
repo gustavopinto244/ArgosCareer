@@ -63,6 +63,15 @@ const ProfileBaseSchema = z.object({
   englishLevel: z.string().min(1),
   minimumStipend: z.string().min(1),
   maxWeeklyHours: z.string().min(1),
+  /**
+   * Where and how the candidate can actually work — onsite/hybrid is
+   * geography-bound, remote is not. `evidence-catalog.ts` renders this as
+   * a quotable line the same way it does `maxWeeklyHours`; without it,
+   * "disponibilidade para atuar em modelo híbrido ou remoto" (a common
+   * mandatory requirement) had no evidence to cite and scored `not_met`
+   * regardless of the true answer (docs/11-known-issues.md B9).
+   */
+  workAvailability: z.string().min(1),
   competencies: z.array(CompetencySchema).min(1),
   resumeVariants: z.array(ResumeVariantSchema).min(1),
 });

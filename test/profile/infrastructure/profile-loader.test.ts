@@ -27,6 +27,7 @@ courseEnd: 2029-12-01
 englishLevel: "⚠ VERIFY"
 minimumStipend: "⚠ VERIFY"
 maxWeeklyHours: "⚠ VERIFY"
+workAvailability: "⚠ VERIFY"
 competencies:
   - name: Node.js
     tracks: [dev]

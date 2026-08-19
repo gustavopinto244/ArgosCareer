@@ -41,6 +41,7 @@ function validProfile() {
     englishLevel: UNVERIFIED,
     minimumStipend: UNVERIFIED,
     maxWeeklyHours: UNVERIFIED,
+    workAvailability: UNVERIFIED,
     competencies: [nodeCompetency, firewallCompetency],
     resumeVariants: [backendVariant, infraSecurityVariant],
   };
