@@ -1465,6 +1465,80 @@ describe("executeDeliver", () => {
     expect(run?.deliveredCount).toBe(1);
   });
 
+  it("routes a periodGate result to the digest's periodBlocked section, not review/discard (period-gate.ts)", async () => {
+    const collector = stubCollector({
+      source: "gupy",
+      collectedAt: new Date(),
+      postings: [
+        {
+          source: "gupy",
+          sourceId: "1",
+          payload: gupyPayload(1, "Estágio em Backend"),
+        },
+      ],
+    });
+    await executeCollect(db, () => collector, [{}], undefined, 0);
+
+    const criteria = deliverCriteria();
+    const periodGateScorer: ScorerPort = {
+      score: async () => ({
+        ok: true,
+        score: 35,
+        verdict: "discard",
+        breakdown: {
+          mandatoryCoverage: 1,
+          desirableCoverage: 1,
+          trackAlignment: 1,
+        },
+        blockingFailure: {
+          text: "Estar cursando a partir do 4º período.",
+          category: "academic",
+          weight: "blocking",
+        },
+        blockingFailures: [
+          {
+            text: "Estar cursando a partir do 4º período.",
+            category: "academic",
+            weight: "blocking",
+          },
+        ],
+        lowConfidence: false,
+        criticalGaps: [],
+        periodGate: { minimumPeriod: 4, opensAtLabel: "2027.2" },
+        recommendedVariant: null,
+        highlights: [],
+        missingTerms: [],
+        inputTruncated: false,
+        stageACacheHit: false,
+        stageBCacheHit: false,
+        evidenceRejectedCount: 0,
+      }),
+    };
+    const { notifier, digests } = recordingNotifier();
+
+    const outcome = await executeDeliver(
+      db,
+      periodGateScorer,
+      notifier,
+      criteria,
+      deliverProfile(),
+    );
+
+    expect(outcome.error).toBeUndefined();
+    expect(digests).toHaveLength(1);
+    expect(digests[0]?.recommended).toHaveLength(0);
+    expect(digests[0]?.review).toHaveLength(0);
+    expect(digests[0]?.periodBlocked).toEqual([
+      expect.objectContaining({ opensAtLabel: "2027.2" }),
+    ]);
+
+    // Not marked notified — a period-blocked posting should surface again
+    // every run until it actually opens, not be consumed like a real digest
+    // entry (the same reasoning digest.ts's own doc comment states).
+    const postingsRepo = new PostingsRepository(db);
+    expect(postingsRepo.findUnnotified()).toHaveLength(1);
+  });
+
   it("persists OpenRouter usage onto the run row when getUsage is provided (docs/audit AC-015)", async () => {
     const collector = stubCollector({
       source: "gupy",
@@ -2126,8 +2200,10 @@ describe("executeDeliver", () => {
               trackAlignment: 1,
             },
             blockingFailure: null,
+            blockingFailures: [],
             lowConfidence: false,
             criticalGaps: [],
+            periodGate: null,
             recommendedVariant: null,
             highlights: [],
             missingTerms: [],

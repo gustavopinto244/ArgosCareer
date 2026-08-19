@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { PeriodGate } from "./period-gate";
 
 /** weight ∈ {blocking, mandatory, desirable} (docs/04-scoring-model.md) */
 export type RequirementWeight = "blocking" | "mandatory" | "desirable";
@@ -161,8 +162,27 @@ export interface ScoreOutcome {
   readonly verdict: Verdict;
   readonly breakdown: ScoreBreakdown;
   readonly blockingFailure: Requirement | null;
+  /**
+   * Every unmet verifiable `blocking` requirement, not just the first
+   * (`blockingFailure`, kept for existing consumers — first-in-match-order,
+   * unchanged). `period-gate.ts` needs the full set: a posting blocked by a
+   * not-yet-reached academic period *and* something else is a real
+   * rejection independent of timing, and telling those apart requires
+   * knowing whether the period gate was the only failure.
+   */
+  readonly blockingFailures: readonly Requirement[];
   readonly lowConfidence: boolean;
   readonly criticalGaps: readonly Requirement[];
+  /**
+   * Non-null when a not-yet-reached academic period is the *entire* reason
+   * this posting is capped (`period-gate.ts`) — the candidate is not
+   * currently eligible but will be on a known date. `executeDeliver` reads
+   * this to route the posting into the digest's `periodBlocked` section
+   * instead of `discard`/`review` (CLAUDE.md §9: "planning information, not
+   * a rejection"). `null` covers both "no period gate" and "a period gate,
+   * but not the only blocking failure" — both are ordinary rejections.
+   */
+  readonly periodGate: PeriodGate | null;
   /**
    * Set only on the synthetic `ScoreOutcome` `executeDeliver` builds for a
    * posting that failed scoring entirely (docs/audit AC-009) — `null` or
@@ -193,8 +213,10 @@ export function scoreFailureOutcome(reason: ScoreFailureReason): ScoreOutcome {
       trackAlignment: 0,
     },
     blockingFailure: null,
+    blockingFailures: [],
     lowConfidence: true,
     criticalGaps: [],
+    periodGate: null,
     scoreFailureReason: reason,
   };
 }

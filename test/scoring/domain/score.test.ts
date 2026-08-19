@@ -135,6 +135,114 @@ describe("computeScore — blocking requirements", () => {
     const outcome = computeScore(matches, ["dev"], baseConfig);
     expect(outcome.blockingFailure).toBeNull();
   });
+
+  it("exposes every unmet blocking requirement in blockingFailures, not just the first", () => {
+    const first = requirement("blocking", "first blocker");
+    const second = requirement("blocking", "second blocker");
+    const matches = [
+      createMatch(first, "not_met", null),
+      createMatch(second, "not_met", null),
+    ];
+    const outcome = computeScore(matches, ["dev"], baseConfig);
+    expect(outcome.blockingFailure).toEqual(first);
+    expect(outcome.blockingFailures).toEqual([first, second]);
+  });
+});
+
+describe("computeScore — period gate", () => {
+  const courseStart = new Date("2026-03-01T00:00:00Z");
+  // Period 2 as of this date (matches academic-period.test.ts's own fixture).
+  const period2Today = new Date("2026-08-14T00:00:00Z");
+
+  it("is null when no academicContext is supplied — every existing caller's behavior", () => {
+    const blocking = requirement(
+      "blocking",
+      "Estar cursando a partir do 4º período.",
+    );
+    const matches = [
+      createMatch(blocking, "not_met", null),
+      createMatch(requirement("mandatory"), "met", "e"),
+      createMatch(requirement("desirable"), "met", "e"),
+    ];
+    const outcome = computeScore(matches, ["dev"], baseConfig);
+    expect(outcome.periodGate).toBeNull();
+  });
+
+  it("routes a sole not-yet-reached period gate to periodGate instead of only capping the score", () => {
+    const blocking = requirement(
+      "blocking",
+      "Estar cursando a partir do 4º período.",
+    );
+    const matches = [
+      createMatch(blocking, "not_met", null),
+      createMatch(requirement("mandatory"), "met", "e"),
+      createMatch(requirement("desirable"), "met", "e"),
+    ];
+    const outcome = computeScore(matches, ["dev"], baseConfig, {
+      courseStart,
+      today: period2Today,
+    });
+    // Still capped — periodGate is additional context, not a different score.
+    expect(outcome.score).toBe(35);
+    expect(outcome.periodGate).toEqual({
+      minimumPeriod: 4,
+      opensAtLabel: "2027.2",
+    });
+  });
+
+  it("stays null when the rest of the posting would not even clear review uncapped", () => {
+    const blocking = requirement(
+      "blocking",
+      "Estar cursando a partir do 4º período.",
+    );
+    const matches = [
+      createMatch(blocking, "not_met", null),
+      createMatch(requirement("mandatory"), "not_met", null),
+      createMatch(requirement("desirable"), "not_met", null),
+    ];
+    const outcome = computeScore(matches, ["dev"], baseConfig, {
+      courseStart,
+      today: period2Today,
+    });
+    // rawScore = 65*0 + 20*0 + 15*1 = 15, well below the review threshold —
+    // a weak match that also has a period gate, not "a good fit, just early".
+    expect(outcome.periodGate).toBeNull();
+  });
+
+  it("stays null when another blocking requirement fails alongside the period gate", () => {
+    const periodBlocking = requirement(
+      "blocking",
+      "Estar cursando a partir do 4º período.",
+    );
+    const otherBlocking = requirement("blocking", "Ter CNH categoria B.");
+    const matches = [
+      createMatch(periodBlocking, "not_met", null),
+      createMatch(otherBlocking, "not_met", null),
+      createMatch(requirement("mandatory"), "met", "e"),
+    ];
+    const outcome = computeScore(matches, ["dev"], baseConfig, {
+      courseStart,
+      today: period2Today,
+    });
+    expect(outcome.periodGate).toBeNull();
+  });
+
+  it("stays null when the candidate has already reached the required period", () => {
+    const blocking = requirement(
+      "blocking",
+      "Estar cursando a partir do 2º período.",
+    );
+    const matches = [
+      createMatch(blocking, "not_met", null),
+      createMatch(requirement("mandatory"), "met", "e"),
+      createMatch(requirement("desirable"), "met", "e"),
+    ];
+    const outcome = computeScore(matches, ["dev"], baseConfig, {
+      courseStart,
+      today: period2Today,
+    });
+    expect(outcome.periodGate).toBeNull();
+  });
 });
 
 // `["dev"]`, not `[]` — these tests isolate the mandatory/threshold math via

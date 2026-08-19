@@ -44,3 +44,19 @@ export function computeAcademicPeriod(
   if (rawPeriod > 8) return { status: "completed" };
   return { status: "in_progress", period: rawPeriod };
 }
+
+/**
+ * The inverse of `computeAcademicPeriod`: given the same `courseStart`, which
+ * calendar half-year does a given `period` fall in — "2027.1" — for
+ * `period-gate.ts`'s "opens for you in ..." label. Exact inverse of
+ * `absoluteSemesterIndex`: `period` was defined as
+ * `absoluteSemesterIndex(today) - absoluteSemesterIndex(courseStart) + 1`,
+ * so solving for the target index and converting back to year/half gives the
+ * calendar term without re-deriving the boundary arithmetic a second time.
+ */
+export function periodCalendarLabel(courseStart: Date, period: number): string {
+  const targetIndex = absoluteSemesterIndex(courseStart) + period - 1;
+  const half = targetIndex % 2 === 0 ? 1 : 2;
+  const year = half === 1 ? targetIndex / 2 : (targetIndex - 1) / 2;
+  return `${year}.${half}`;
+}

@@ -80,6 +80,7 @@ export class ApiScorer implements ScorerPort {
       matching.matches,
       tracks,
       buildScoringConfig(this.criteria),
+      { courseStart: this.profile.courseStart, today: evaluatedAt },
     );
     const recommendation = computeRecommendation(
       matching.matches,

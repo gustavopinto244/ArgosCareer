@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { computeAcademicPeriod } from "../../../src/profile/domain/academic-period";
+import {
+  computeAcademicPeriod,
+  periodCalendarLabel,
+} from "../../../src/profile/domain/academic-period";
 
 const courseStart = new Date("2026-03-01T00:00:00Z");
 
@@ -70,5 +73,16 @@ describe("computeAcademicPeriod", () => {
       new Date("2029-08-01T00:00:00Z"),
     );
     expect(result).toEqual({ status: "in_progress", period: 8 });
+  });
+});
+
+describe("periodCalendarLabel", () => {
+  it("is the exact inverse of computeAcademicPeriod at each of its own checkpoints", () => {
+    // Same fixture dates this file already asserts computeAcademicPeriod
+    // against — the inverse must round-trip them, not just look plausible.
+    expect(periodCalendarLabel(courseStart, 1)).toBe("2026.1");
+    expect(periodCalendarLabel(courseStart, 2)).toBe("2026.2");
+    expect(periodCalendarLabel(courseStart, 3)).toBe("2027.1");
+    expect(periodCalendarLabel(courseStart, 8)).toBe("2029.2");
   });
 });

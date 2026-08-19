@@ -615,3 +615,59 @@ posting regardless of pre-filter outcome.
 should be checked against the corpus (how many active postings would flip)
 before committing to a specific fix (e.g. `desenvolvimento de software`
 alongside `desenvolvedor`, or an exclusion list of the phrases seen above).
+
+---
+
+## B9 — Genuinely good postings were being discarded; `apply` recall measured at 13-17%
+
+**Status:** partially fixed (period-gate cause), rest open · **Found:**
+2026-08-19, the first real M7 calibration run after B7's fix
+
+With B7 fixed, the 18-posting calibration run gave a real, trustworthy
+number for the first time: **correlation 0.412-0.455, but `apply` recall of
+only 13-17%** — of every posting hand-scored ≥70 ("I would apply"), the
+computed score agreed on just 1 in 6-8. Per the M7 protocol's own stated
+priority (`docs/04-scoring-model.md`), this is the worse direction of error:
+a missed good posting costs more than a reviewed bad one.
+
+Traced per-posting (`run-calibration.ts`'s new verbose output, this
+session), the six misses split into two causes:
+
+- **Two (Flamengo hand 70→35, MIDI hand 65→35) were a not-yet-reached
+  academic period, hard-capping an otherwise-strong match to
+  `blockingCapScore` and landing it in `discard`.** This is exactly the
+  gap `docs/audit AC-026` already named and `digest.ts`'s own
+  `PeriodBlockedEntry` comment described as never built.
+- **Four (Bemobi Wave hand 100→65, ELDORADO hand 90→65, Anbima DevOps
+  hand 100→63, Smarthis hand 100→40) were low `mandatoryCoverage`** — Stage
+  B matching the profile against the posting's stated requirements more
+  conservatively than the hand label expected. Model/prompt/evidence
+  quality, not a structural bug; not touched here.
+
+> **Resolution, the period-gate half, 2026-08-19 (ADR-053).**
+> `src/scoring/domain/period-gate.ts` now detects exactly this shape — a
+> not-yet-reached academic period as the *sole* blocking failure — and
+> `executeDeliver` routes it into the digest's already-existing (but
+> never populated) `periodBlocked` section instead of capping the score.
+> Full reasoning, the parser's heuristic limits, and why the other four
+> cases are explicitly out of scope for this fix: ADR-053.
+
+**The other four stay open.** Fixing them by guessing a prompt or weight
+change would break the M7 protocol's "change one variable at a time" rule,
+and 18 labelled postings (down from a nominal 20 — two more `matching_failed`
+this run) is still a thin sample to trust a specific correction against.
+Revisit once the worksheet is closer to the full 50 `docs/04` calls for.
+
+> **Verified against the real corpus, 2026-08-19.** Re-scored Flamengo and
+> MIDI directly (cached Stage A/B, no new model calls): Flamengo now
+> carries `periodGate: { minimumPeriod: 4, opensAtLabel: "2027.2" }` as
+> intended. **MIDI does not** — its extraction has *two* `blocking`
+> requirements, "Semestre exigido: 4 a 9" and "Nível escolar: SU" (higher
+> education), and Stage B matched the second `not_met` too, despite the
+> profile almost certainly evidencing current higher-ed enrollment.
+> `detectPeriodGate`'s "only when it is the sole blocker" rule correctly
+> refuses to reclassify MIDI — but the reason it refuses is a second, real
+> Stage B miss, the same category as the four open `mandatoryCoverage`
+> cases above, not a period-gate defect. Worth a dedicated look: "Nível
+> escolar: SU" reads like exactly the kind of requirement that should be
+> close to universally `met` for this profile and evidently is not.
