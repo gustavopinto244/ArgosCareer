@@ -49,6 +49,16 @@ describe("normalizeCieeVaga", () => {
     expect(posting?.description).toContain("Bolsa-auxílio:");
   });
 
+  it("never includes nivelEscolar — always 'SU' by ciee-collector.ts's own filter, so it is pure noise Stage A cannot evidence (docs/11-known-issues.md B9)", () => {
+    const item = fixtureItems()[0]!;
+    expect((item as { nivelEscolar?: string }).nivelEscolar).toBe("SU");
+
+    const posting = normalizeCieeVaga(raw(item), NOW);
+
+    expect(posting?.description).not.toContain("Nível escolar");
+    expect(posting?.description).not.toContain("SU");
+  });
+
   it("reports publishedAt and sourceUrl as null — the source states neither", () => {
     // Verified absent across all 300 postings of the real capture. ADR-019
     // lets a null publishedAt through the recency window deliberately.

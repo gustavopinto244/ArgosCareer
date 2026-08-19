@@ -691,3 +691,29 @@ Revisit once the worksheet is closer to the full 50 `docs/04` calls for.
 > cases above, not a period-gate defect. Worth a dedicated look: "Nível
 > escolar: SU" reads like exactly the kind of requirement that should be
 > close to universally `met` for this profile and evidently is not.
+
+> **Root cause found and fixed, 2026-08-19.** "Nível escolar: SU" was never
+> a real requirement to begin with. `ciee-collector.ts`'s own `keep()`
+> already filters collection to `DEFAULT_EDUCATION_LEVELS = ["SU"]`, with
+> no override in `criteria.yaml` — every CIEE posting that reaches the
+> corpus at all already has `nivelEscolar: "SU"`, by construction. But
+> `ciee-normalizer.ts` folded the raw two-letter code into `description`
+> verbatim regardless, as pure noise: always true, so not discriminating
+> information, and an opaque code ("SU" for "superior") no profile
+> evidence could ever literally quote even for a candidate who obviously
+> qualifies. Stage A extracted it as an ordinary `blocking` requirement
+> anyway, Stage B correctly found no evidence for a code that appears
+> nowhere in any real résumé, and it capped MIDI's otherwise-100%-matching
+> score at 35 — a second, independent false rejection on the same posting
+> the period gate above already explains half of.
+>
+> `composeDescription` no longer includes `nivelEscolar`. **Forward-looking
+> only** — this fixes newly-collected CIEE postings; MIDI's own row,
+> already normalized with the field baked into its stored `description`,
+> keeps it until re-collected with a changed payload invalidates its
+> cache (this project does not rewrite already-stored `description` values
+> as a side effect of a code change, matching this page's C1 precedent for
+> not touching production data outside a deliberate act). One regression
+> test added (`test/posting/infrastructure/ciee-normalizer.test.ts`) pins
+> the fixture's own `nivelEscolar: "SU"` and asserts it never reaches the
+> composed description.

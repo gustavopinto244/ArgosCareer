@@ -51,7 +51,15 @@ function composeDescription(vaga: CieeVaga): string | null {
       `Semestre exigido: ${req?.semestreInicio ?? "?"} a ${req?.semestreFinal ?? "?"}.`,
     );
   }
-  if (vaga.nivelEscolar) parts.push(`Nível escolar: ${vaga.nivelEscolar}.`);
+  // `nivelEscolar` deliberately NOT included (2026-08-19,
+  // docs/11-known-issues.md B9): `ciee-collector.ts`'s own `keep()` already
+  // filters to `DEFAULT_EDUCATION_LEVELS = ["SU"]`, so every posting that
+  // reaches this normalizer already has it — the field carries zero
+  // information here, just an opaque two-letter code ("SU" for "superior")
+  // no profile evidence could ever literally quote. Measured harm, not
+  // hypothetical: Stage A extracted "Nível escolar: SU" as a `blocking`
+  // requirement on a real posting, Stage B could not evidence it, and it
+  // capped an otherwise-100%-matching posting's score at 35.
   if (vaga.bolsaAuxilio != null) {
     parts.push(`Bolsa-auxílio: R$ ${vaga.bolsaAuxilio}.`);
   }
