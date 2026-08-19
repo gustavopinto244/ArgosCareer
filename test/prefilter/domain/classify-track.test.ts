@@ -121,3 +121,40 @@ describe("classifyTrack — exclusions veto a keyword match", () => {
     );
   });
 });
+
+// Real false positives observed in the production corpus (2026-08-19,
+// docs/11-known-issues.md B8): the canonical exclusion phrase existed
+// already but a real title's wording did not literally match it — a
+// reversed word order and a joining "e" lost to "&" normalization.
+describe("classifyTrack — exclusion phrasing variants found in real postings", () => {
+  const tracks = { dev: ["desenvolvimento"], security: [], automation: [] };
+  const exclusions = {
+    dev: [
+      "pesquisa e desenvolvimento",
+      "pesquisa desenvolvimento",
+      "humano desenvolvimento",
+    ],
+    security: [],
+    automation: [],
+  };
+
+  it("rejects a cosmetics R&D internship whose '&' loses the joining 'e'", () => {
+    expect(
+      classifyTrack(
+        "Estagiário de Pesquisa & Desenvolvimento",
+        tracks,
+        exclusions,
+      ),
+    ).toEqual([]);
+  });
+
+  it("rejects a Psychology internship where 'Humano Desenvolvimento' is the staffing agency's name, word order reversed", () => {
+    expect(
+      classifyTrack(
+        "ESTAGIÁRIO NA ÁREA DE PSICOLOGIA - Sem experiência (Humano Desenvolvimento)",
+        tracks,
+        exclusions,
+      ),
+    ).toEqual([]);
+  });
+});

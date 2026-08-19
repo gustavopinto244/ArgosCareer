@@ -387,8 +387,19 @@ trackExclusions:
     - desenvolvimento de arte
     - desenvolvimento de projetos de engenharia
     - pesquisa e desenvolvimento
+    # "Pesquisa & Desenvolvimento" (2026-08-19, Duty Cosméticos — a cosmetics
+    # R&D internship requiring Química/Farmácia/Engenharia Química): the "&"
+    # normalizes to a bare space, not "e", so it never matched "pesquisa e
+    # desenvolvimento" above despite being the same phrase in practice.
+    - pesquisa desenvolvimento
     - desenvolvimento de canais
     - desenvolvimento de embalagem
+    # "(Humano Desenvolvimento)" (2026-08-19, Jobbol — a Psychology
+    # internship where this is the staffing agency's own name, reversed
+    # word order from "desenvolvimento humano" above): word order is
+    # literal in this matcher (title-match.ts), so the canonical phrasing
+    # does not cover its own reversal.
+    - humano desenvolvimento
   security:
     - segurança do trabalho
     - segurança patrimonial

@@ -581,7 +581,8 @@ reproduced by tooling drift months after it was closed in production.
 
 ## B8 — The `dev` track keyword `desenvolvimento` false-positives on non-software postings
 
-**Status:** open · **Found:** 2026-08-19, selecting postings for the M7
+**Status:** fixed (the two observed cases), the underlying pattern stays
+worth watching · **Found:** 2026-08-19, selecting postings for the M7
 calibration worksheet
 
 `classifyTrack` (`src/prefilter/domain/classify-track.ts`) matches
@@ -598,11 +599,9 @@ reach the LLM despite having nothing to do with software:
   title — not a job-content word at all.
 
 Same failure shape ADR-011/015 already fixed once for `soc`/`api` substring
-collisions and for "ESTAGIÁRIO DE DESENVOLVIMENTO DE EMBALAGENS" (packaging,
-excluded via `trackExclusions`) — `desenvolvimento` alone is common enough in
-Portuguese HR boilerplate ("desenvolvimento profissional", "desenvolvimento
-humano", a department name) that whole-word matching does not save it the
-way it saves `api`/`soc`.
+collisions and for "ESTAGIÁRIO DE DESENVOLVIMENTO DE EMBALAGENS" (packaging)
+— `desenvolvimento` alone is common enough in Portuguese HR boilerplate that
+whole-word matching does not save it the way it saves `api`/`soc`.
 
 **Cost is real, not hypothetical:** every false positive here passes the
 pre-filter's track check and reaches Stage A/B, spending a real LLM call on
@@ -610,11 +609,32 @@ a posting no configuration of the profile could ever score `apply`. It also
 pollutes M10's market-analysis corpus, which reads `tracks` on every active
 posting regardless of pre-filter outcome.
 
-**Not fixed here** — changing `criteria.yaml`'s `dev` track keywords or
-`trackExclusions` is a criteria change, not a calibration-tooling one, and
-should be checked against the corpus (how many active postings would flip)
-before committing to a specific fix (e.g. `desenvolvimento de software`
-alongside `desenvolvedor`, or an exclusion list of the phrases seen above).
+> **Resolution, 2026-08-19.** Narrower than it first looked: **both
+> canonical exclusion phrases already existed** in `criteria.yaml`
+> (`pesquisa e desenvolvimento`, `desenvolvimento humano`) — the actual
+> titles just did not literally match them. Duty Cosméticos writes
+> "Pesquisa **&** Desenvolvimento"; `&` normalizes to a bare space
+> (`title-match.ts`), not the word "e", so it never matched "pesquisa e
+> desenvolvimento". Jobbol's title carries "(**Humano Desenvolvimento**)",
+> the staffing agency's own name, word order reversed from "desenvolvimento
+> humano". `title-match.ts`'s exclusion matching is literal word order —
+> the canonical phrasing does not cover its own variants. Added `pesquisa
+desenvolvimento` and `humano desenvolvimento` to `trackExclusions.dev`.
+> Verified against the real config loader:
+> `classifyTrack("Estagiário de Pesquisa & Desenvolvimento", ...)` and the
+> Jobbol title both now return `[]`, and
+> `classifyTrack("Estágio em Desenvolvimento Backend", ...)` still returns
+> `["dev"]` — the fix is additive, not a behavior change for genuine dev
+> postings. Two regression tests added
+> (`test/prefilter/domain/classify-track.test.ts`).
+>
+> **The underlying pattern — a fixed exclusion phrase can always miss a
+> real title's wording — stays open as a class of risk**, not a specific
+> bug: any future posting phrasing "desenvolvimento" in an order or with
+> punctuation none of today's exclusions anticipate will pass through
+> exactly the same way these two did, until it is observed and added.
+> Nothing here makes exclusion matching order-independent or
+> punctuation-tolerant; it only patches the two instances found so far.
 
 ---
 
@@ -646,7 +666,7 @@ session), the six misses split into two causes:
 
 > **Resolution, the period-gate half, 2026-08-19 (ADR-053).**
 > `src/scoring/domain/period-gate.ts` now detects exactly this shape — a
-> not-yet-reached academic period as the *sole* blocking failure — and
+> not-yet-reached academic period as the _sole_ blocking failure — and
 > `executeDeliver` routes it into the digest's already-existing (but
 > never populated) `periodBlocked` section instead of capping the score.
 > Full reasoning, the parser's heuristic limits, and why the other four
@@ -661,7 +681,7 @@ Revisit once the worksheet is closer to the full 50 `docs/04` calls for.
 > **Verified against the real corpus, 2026-08-19.** Re-scored Flamengo and
 > MIDI directly (cached Stage A/B, no new model calls): Flamengo now
 > carries `periodGate: { minimumPeriod: 4, opensAtLabel: "2027.2" }` as
-> intended. **MIDI does not** — its extraction has *two* `blocking`
+> intended. **MIDI does not** — its extraction has _two_ `blocking`
 > requirements, "Semestre exigido: 4 a 9" and "Nível escolar: SU" (higher
 > education), and Stage B matched the second `not_met` too, despite the
 > profile almost certainly evidencing current higher-ed enrollment.
