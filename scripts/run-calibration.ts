@@ -18,15 +18,10 @@ import {
   runMigrations,
 } from "../src/persistence/infrastructure/db";
 import { PostingsRepository } from "../src/persistence/infrastructure/postings-repository";
-import { ExtractionsRepository } from "../src/persistence/infrastructure/extractions-repository";
-import { MatchesRepository } from "../src/persistence/infrastructure/matches-repository";
 import { loadCriteria } from "../src/prefilter/infrastructure/criteria-loader";
 import { loadProfile } from "../src/profile/infrastructure/profile-loader";
 import { hashProfile } from "../src/profile/domain/profile-hash";
-import { OpenRouterClient } from "../src/scoring/infrastructure/openrouter-client";
-import { StageAExtractor } from "../src/scoring/infrastructure/stage-a-extractor";
-import { StageBMatcher } from "../src/scoring/infrastructure/stage-b-matcher";
-import { ApiScorer } from "../src/scoring/infrastructure/api-scorer";
+import { buildScorer } from "../src/scoring/infrastructure/build-scorer";
 import {
   CalibrationEntry,
   computeCalibrationReport,
@@ -84,27 +79,7 @@ async function main(): Promise<void> {
   }
 
   const adapter = process.env.SCORER_ADAPTER ?? "api";
-  let ask: (prompt: string) => Promise<string>;
-  let openRouterClient: OpenRouterClient | undefined;
-
-  if (adapter === "api") {
-    const apiKey = process.env.LLM_API_KEY;
-    if (!apiKey) {
-      console.error(
-        "LLM_API_KEY is required for SCORER_ADAPTER=api (ADR-012).",
-      );
-      process.exitCode = 1;
-      return;
-    }
-    openRouterClient = new OpenRouterClient({
-      apiKey,
-      model,
-      ...(process.env.LLM_BASE_URL
-        ? { baseUrl: process.env.LLM_BASE_URL }
-        : {}),
-    });
-    ask = openRouterClient.complete.bind(openRouterClient);
-  } else {
+  if (adapter !== "api") {
     console.error(
       `SCORER_ADAPTER=${adapter} is not a calibratable adapter (only "api" is, ADR-016).`,
     );
@@ -112,13 +87,18 @@ async function main(): Promise<void> {
     return;
   }
 
-  const scorer = new ApiScorer(
-    new StageAExtractor(ask, new ExtractionsRepository(db)),
-    new StageBMatcher(ask, new MatchesRepository(db)),
-    profile,
-    criteria,
-    postingsRepo,
-  );
+  // Built the same way production scoring is (buildScorer, shared with the
+  // scheduler and the CLI) so calibration exercises the exact same timeouts
+  // and reasoning.max_tokens caps as a real run — a separately constructed
+  // client here previously reproduced the pre-ADR-052 B6 incident's 30s
+  // timeouts and unbounded reasoning, invalidating everything it measured.
+  const built = buildScorer(db, criteria, profile);
+  if (!built.ok) {
+    console.error(built.error);
+    process.exitCode = 1;
+    return;
+  }
+  const scorer = built.scorer;
 
   const entries: CalibrationEntry[] = [];
   for (const [index, labeledPosting] of labeled.entries()) {
@@ -145,6 +125,17 @@ async function main(): Promise<void> {
     if (!result.ok) {
       console.error(
         `  -> scoring failed: ${result.reason} (${result.attempts} attempts)`,
+      );
+    } else {
+      const b = result.breakdown;
+      console.error(
+        `  -> hand ${labeledPosting.handScore} vs computed ${result.score} (${result.verdict})` +
+          ` | mandatory ${(b.mandatoryCoverage * 100).toFixed(0)}%` +
+          ` desirable ${(b.desirableCoverage * 100).toFixed(0)}%` +
+          ` track ${(b.trackAlignment * 100).toFixed(0)}%` +
+          (result.blockingFailure
+            ? ` | BLOCKED by "${result.blockingFailure.text}"`
+            : ""),
       );
     }
   }
@@ -177,8 +168,8 @@ async function main(): Promise<void> {
   // every time — printing it is what keeps that visible (ADR-014). A high
   // `cached` share is the prompt-cache reorder in `b-v2` doing its job; a
   // near-zero one means the shared prefix is not being reused.
-  if (openRouterClient) {
-    const usage = openRouterClient.getUsage();
+  if (built.getUsage) {
+    const usage = built.getUsage();
     const cachedShare =
       usage.promptTokens > 0
         ? `${((usage.cachedPromptTokens / usage.promptTokens) * 100).toFixed(0)}%`

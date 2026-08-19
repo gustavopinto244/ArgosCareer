@@ -546,3 +546,72 @@ finished_at IS NULL` against the live database returns zero rows as of
 > with no graceful cancellation to prevent it. The next occurrence needs
 > the same deliberate manual fix — this entry stays, minus the two now-closed
 > rows, as the runbook for doing it again.
+
+---
+
+## B7 — `run-calibration.ts` never got the ADR-052 fixes, so it silently reproduced B6
+
+**Status:** fixed · **Found:** 2026-08-19, running the M7 calibration protocol
+against a freshly-expanded worksheet
+
+`scripts/run-calibration.ts` built its own `OpenRouterClient`/`StageAExtractor`/
+`StageBMatcher`/`ApiScorer` by hand instead of calling `buildScorer()` — the
+function `src/scoring/infrastructure/build-scorer.ts` exists specifically so
+the scheduler and the CLI construct a scorer identically (its own docstring
+already flagged this exact script as the one place that didn't use it,
+docs/audit AC-015). The practical effect: calibration ran with the library's
+30 s default timeout and no `reasoning.max_tokens` cap, never the Stage A
+120 s timeout or the 3,000/300-token reasoning ceilings ADR-052 added to fix
+B6.
+
+First calibration run against 18 labelled postings: **78% parse-failure
+rate, correlation 0.054** (indistinguishable from noise) — B6's incident,
+reproduced by tooling drift months after it was closed in production.
+
+> **Resolution, 2026-08-19.** `run-calibration.ts` now calls `buildScorer()`
+> instead of constructing its own client, so calibration exercises the exact
+> configuration a real nightly run does. Re-run against the same 18
+> postings: **17% parse-failure rate, correlation 0.412**. Remaining
+> failures are Stage B `matching_failed` (`invalidOutput` after 4 retries on
+> individual requirements) — smaller-scale noise of the same shape B6 named,
+> not a new cause. `getUsage()` is now read from `buildScorer`'s return value
+> too, closing the same drift for cost reporting.
+
+---
+
+## B8 — The `dev` track keyword `desenvolvimento` false-positives on non-software postings
+
+**Status:** open · **Found:** 2026-08-19, selecting postings for the M7
+calibration worksheet
+
+`classifyTrack` (`src/prefilter/domain/classify-track.ts`) matches
+`desenvolvimento` as a whole word in the **title only** (ADR-011 Amendment 2).
+Two real postings from the production corpus were classified `dev` and would
+reach the LLM despite having nothing to do with software:
+
+- **Duty Cosméticos — "Estagiário de Pesquisa & Desenvolvimento"**: cosmetics
+  R&D, requires Química/Farmácia/Engenharia Química. "Desenvolvimento" here
+  means product development, not software.
+- **Jobbol — "ESTAGIÁRIO NA ÁREA DE PSICOLOGIA... (Humano Desenvolvimento)"**
+  ×5 postings: Psychology internships. "Desenvolvimento" is part of the
+  staffing agency's own name, "Humano Desenvolvimento", parenthesized in the
+  title — not a job-content word at all.
+
+Same failure shape ADR-011/015 already fixed once for `soc`/`api` substring
+collisions and for "ESTAGIÁRIO DE DESENVOLVIMENTO DE EMBALAGENS" (packaging,
+excluded via `trackExclusions`) — `desenvolvimento` alone is common enough in
+Portuguese HR boilerplate ("desenvolvimento profissional", "desenvolvimento
+humano", a department name) that whole-word matching does not save it the
+way it saves `api`/`soc`.
+
+**Cost is real, not hypothetical:** every false positive here passes the
+pre-filter's track check and reaches Stage A/B, spending a real LLM call on
+a posting no configuration of the profile could ever score `apply`. It also
+pollutes M10's market-analysis corpus, which reads `tracks` on every active
+posting regardless of pre-filter outcome.
+
+**Not fixed here** — changing `criteria.yaml`'s `dev` track keywords or
+`trackExclusions` is a criteria change, not a calibration-tooling one, and
+should be checked against the corpus (how many active postings would flip)
+before committing to a specific fix (e.g. `desenvolvimento de software`
+alongside `desenvolvedor`, or an exclusion list of the phrases seen above).
