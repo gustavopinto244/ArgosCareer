@@ -783,6 +783,18 @@ Revisit once the worksheet is closer to the full 50 `docs/04` calls for.
 > already known about this model/prompt pairing, not a defect in this
 > change. The evidence now exists for every future scoring attempt
 > regardless; whether the model reliably uses it is a separate,
-> already-tracked question. The CS-fundamentals gap (Bemobi Wave) is not
-> addressed here — it needs real evidence (a course, a project) only a
-> human can supply, not invented (CLAUDE.md §15).
+> already-tracked question.
+
+> **CS-fundamentals gap closed, 2026-08-19 — the profile owner supplied
+> real evidence.** Three competencies added to `config/profile.yaml`
+> (gitignored, not in this repo): "Lógica de programação", "Estruturas de
+> dados" and "Algoritmos de busca e ordenação", each evidenced by the
+> completed "Programação de Computadores" course at Universidade La Salle
+>
+> - RJ — confirmed by the profile owner to have actually covered pilha,
+>   fila, árvores and busca/ordenação, not assumed from the course title
+>   alone. Verified with a live re-score of the real Bemobi Wave posting:
+>   **score 0 → 88.3, verdict `review` → `apply`**, `mandatoryCoverage`
+>   0% → 67%, matching the hand label of 100 for the first time. No code
+>   changed — this was purely a profile-data gap, and closing it took a
+>   real fact, not a workaround.
