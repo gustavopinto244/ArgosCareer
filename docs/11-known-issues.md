@@ -717,3 +717,51 @@ Revisit once the worksheet is closer to the full 50 `docs/04` calls for.
 > test added (`test/posting/infrastructure/ciee-normalizer.test.ts`) pins
 > the fixture's own `nivelEscolar: "SU"` and asserts it never reaches the
 > composed description.
+
+> **Investigated the remaining three low-`mandatoryCoverage` cases,
+> 2026-08-19 — none are code bugs.** Pulled each real match array directly:
+>
+> - **Bemobi Wave (hand 100, mandatoryCoverage 0%).** The three unmet
+>   verifiable mandatory requirements are "lógica de programação bem
+>   fundamentada", "domínio das principais estruturas de dados (pilha,
+>   fila, árvores)" and "algoritmos de busca e ordenação" — classical CS
+>   fundamentals. `config/profile.yaml` has zero competency entries for
+>   any of them; every entry is framed around a named tool (Node.js,
+>   PostgreSQL, React, ...), never generic data-structures/algorithms
+>   knowledge. Stage B is being accurate, not conservative: it cannot
+>   quote evidence the profile does not contain. **Not a scoring bug — a
+>   profile gap.** Fixable only by adding a real, evidenced competency
+>   (a course, a project that used them) — this project does not invent
+>   evidence (CLAUDE.md §15), so that edit has to come from a human.
+> - **ELDORADO (hand 90, mandatoryCoverage 43%).** Confirmed to be exactly
+>   ADR-026's own worked example, still true: Angular and Java/Spring Boot
+>   are genuinely absent from the profile. The three soft-trait
+>   requirements in the same extraction ("apaixonadas por tecnologia",
+>   "motive por desafios", "espírito colaborativo") are correctly
+>   `verifiable: false` and already excluded from coverage — ADR-015 is
+>   working as designed here, not the cause.
+> - **Smarthis (hand 100, mandatoryCoverage 40%) — two separate findings.**
+>   "Disponibilidade para atuar em modelo híbrido ou remoto" is `not_met`
+>   with no evidence, and `config/profile.yaml` indeed states no
+>   remote/hybrid-availability fact anywhere (only `minimumStipend` and
+>   `maxWeeklyHours` are declared) — the same profile-gap shape as Bemobi
+>   Wave, and likely the single highest-leverage one to close: this exact
+>   requirement phrasing recurs across many postings, not just this one.
+>   **Separately, a real extraction-quality issue**: the posting text
+>   reads "**Para vagas com foco em Desenvolvimento:** conhecimento em
+>   uma linguagem de programação... **Para vagas com foco em Processos e
+>   Projetos:** conhecimento em gestão de processos..." — two
+>   track-conditional requirement branches for a multi-track internship
+>   program. Stage A extracted _both_ as unconditional flat `mandatory`
+>   requirements instead of recognizing the "Para vagas com foco em X:"
+>   qualifier, so a dev-track candidate (who correctly matched the
+>   Desenvolvimento branch) is also penalized for not meeting the
+>   Processos e Projetos branch, which was never actually asked of them.
+>   **Not fixed here** — this is a Stage A prompt question (recognizing
+>   and either resolving or excluding track-conditional clauses), and the
+>   M7 protocol's "change one variable at a time" rule means a prompt
+>   version bump needs its own dedicated calibration run to evaluate, not
+>   a same-session bundle with three unrelated fixes. Worth an ADR when
+>   picked up — flag if this conditional-clause shape recurs on other
+>   postings before spending the prompt-version cost on a single
+>   observation.
