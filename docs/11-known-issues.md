@@ -33,8 +33,8 @@ Opened 2026-08-16, after the incident recorded in
 
 ## A1 — Scoring the backlog takes ~18 hours
 
-**Status:** fixed by ADR-022, pending measurement on a real run ·
-**Found:** 2026-08-16, measuring the fix for #49
+**Status:** resolved — the premise no longer holds, confirmed against a real
+mostly-cold run · **Found:** 2026-08-16, measuring the fix for #49
 
 > **Resolution.** Stage B now issues its requirement calls concurrently,
 > bounded by `scoring.stageBConcurrency` (default 8), with the first call of
@@ -61,6 +61,46 @@ Opened 2026-08-16, after the incident recorded in
 > extraction rather than calling the model — see A3's matching note. A
 > mostly-cached run cannot stand in for "the backlog," which is by
 > definition mostly cold. Stays open.
+>
+> **Resolved, 2026-08-22 — not by fixing anything further, by re-measuring
+> against what the pipeline actually does today.** This entry's own
+> "310 postings currently pass the pre-filter" no longer describes the
+> system: ADR-051 (reject-unknown-track, 2026-08-17) and the keyword work
+> since have cut that number by roughly two orders of magnitude. Queried
+> Atlas's real corpus directly before running anything, to know what a real
+> run would actually face rather than guess: of 3,182 unclaimed, unnotified
+> postings, only a handful pass the pre-filter today (5, on the run
+> measured below) — nothing close to a multi-hour backlog exists to
+> measure.
+>
+> Ran a real `deliver` anyway (`01M0N5T4MWARP2EKX3SF6DN4CM`) rather than
+> stopping at "the backlog doesn't exist" as an assumption: **5 filtered, 5
+> scored, 3 delivered, 8 real LLM attempts (4 Stage A/B pairs genuinely
+> cold — `stageACacheHit: false` — one posting fully cache-hit), 0
+> failures, 0 timeouts, $0.0014, and the entire cycle — pre-filtering the
+> whole ~3,187-posting corpus, 4 cold Stage A/B pairs, composing and
+> sending a real Telegram digest — finished in 62 seconds.** Not a
+> handful-of-cache-hits number: 4 of those 5 postings had never been scored
+> under this profile/criteria hash before.
+>
+> **This closes both the volume half and the latency half of the original
+> concern.** Volume: the pre-filter now admits a small enough fraction of
+> the corpus that "the backlog" in this entry's original 18-hour sense no
+> longer exists — a nightly cycle processes single-digit postings, not
+> hundreds. Latency: A3's `40–67 s/posting` Stage A estimate, extrapolated
+> from ADR-022 measurements taken _during_ the B6/ADR-052 incident, does
+> not hold post-fix either — 4 cold pairs finished in well under a minute
+> combined. Neither number this entry was built around is still true, and
+> both changed for real, verified reasons (ADR-051's admission rate, ADR-052's
+> reasoning-token cap), not by coincidence.
+>
+> **What would reopen this:** if the pre-filter's admission rate ever grows
+> back toward the low-hundreds this entry originally measured (a criteria
+> change, a new high-volume source), the same latency-per-posting math
+> would need re-checking at that scale — today's 62-second run does not
+> prove a 300-posting cold run would scale linearly, only that neither the
+> volume nor the per-posting cost that made 18 hours plausible are still
+> true today.
 
 Stage B issues one sequential model call **per requirement**. One real posting
 measured end to end against `deepseek/deepseek-v4-flash-0731`:
@@ -93,7 +133,8 @@ noted so it is not a surprise if it is.
 
 ## A3 — Stage A is now the pipeline's bottleneck
 
-**Status:** open · **Found:** 2026-08-16, measuring ADR-022
+**Status:** resolved — see A1's 2026-08-22 entry, same measurement answers
+both · **Found:** 2026-08-16, measuring ADR-022
 
 With Stage B down to ~10 s per posting, the dominant cost is Stage A: one call
 per posting, emitting the entire requirement list as JSON, which is the
@@ -129,6 +170,23 @@ attempted while the numbers are extrapolations from a handful of postings.
 > not answer what this entry is actually asking — real Stage A cost at
 > backlog scale, mostly cache _misses_. That measurement has not happened
 > yet. Left open.
+
+> **Resolved, 2026-08-22 — the mostly-cache-miss run this entry asked for,
+> finally measured.** Same run as A1's closing entry
+> (`01M0N5T4MWARP2EKX3SF6DN4CM`): 4 of 5 scored postings were genuinely
+> cold (`stageACacheHit: false`), 8 real LLM attempts total (4 Stage A + 4
+> Stage B), 0 timeouts, 0 failures, whole cycle in 62 seconds. Back-solving
+> the same way this entry's original 40–67 s/posting estimate was
+> derived: 4 cold Stage A/B pairs fit inside 62 seconds _combined_, well
+> under 20 s/posting for the full pair, let alone Stage A alone. B6/ADR-052
+> (the `reasoning.max_tokens` cap, landed 2026-08-18) is the concrete,
+> already-documented reason this changed — this entry's own 40–67 s
+> estimate was extrapolated from ADR-022 measurements taken while B6's
+> reasoning-token blowup was still live and undiagnosed, the same
+> incident A1 references. There is no longer a bottleneck to split
+> concurrency across: **both options this entry proposed (concurrency
+> across postings, a smaller Stage A completion) are moot** — there is no
+> multi-hour run left for either to shorten.
 
 ---
 
