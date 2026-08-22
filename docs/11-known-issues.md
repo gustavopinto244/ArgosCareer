@@ -163,8 +163,8 @@ direct database check established the two had not actually collided.
 
 ## B1 — CIEE is exempt from the recency window
 
-**Status:** open, LLM cost mitigated · **Found:** 2026-08-16, explaining a
-`normalized: 0` run
+**Status:** resolved by decision (ADR-019 Amendment 3) · **Found:**
+2026-08-16, explaining a `normalized: 0` run
 
 ADR-019 filters **collected** postings by publication date, with
 `recencyDays: 1`, and deliberately lets a posting with no date through:
@@ -210,6 +210,26 @@ that ADR-019's reasoning assumed the undated posting was the exception.
 **Resolving the rest** means deciding what "recent" means for a source that
 never publishes dates, at the **collection** stage — not re-admitting the
 whole corpus on the first run that adopts it. Amends ADR-019.
+
+> **Decided, 2026-08-22 (ADR-019 Amendment 3).** Re-confirmed there is
+> still no date-like field anywhere in CIEE's real payload (`ciee-schema.ts`'s
+> own doc comment, checked against the full fixture sample again rather than
+> trusted from memory) — this genuinely cannot be fixed the way Gupy's
+> `publishedAt` was, there is no fact to map. Measured the actual cost of
+> leaving it unbounded instead of guessing: CIEE's real production growth,
+> read day by day from Atlas (`docker exec argos-career node
+...better-sqlite3...`), is a one-time 2,091-row backfill on enablement day
+> followed by a steady **~100-170 new rows/day** — not runaway. The whole
+> database, every table combined, measures 44.9 MB after six days of real
+> operation. **Decision: no new collection-stage mechanism.** "Recent"
+> already means what this entry's own 2026-08-16 mitigation made it mean —
+> `firstSeenAt`, bounded by `maxAgeDays`/`undatedBacklogCutoverAt` at the
+> pre-filter, which is the layer that actually spends money. Building
+> storage pruning now would defend against a cost the measurement shows
+> does not exist. A concrete revisit trigger is recorded instead of a vague
+> "someday": 500 MB total database size, or any real `df`/`docker stats`
+> disk pressure on Atlas, whichever comes first. Full reasoning and the
+> measurement in ADR-019 Amendment 3.
 
 ---
 
