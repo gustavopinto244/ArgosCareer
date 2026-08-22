@@ -846,6 +846,12 @@ export interface DeliverOutcome {
   readonly scored: number;
   readonly delivered: number;
   readonly error?: string;
+  /** docs/11-known-issues.md C1: set when a cancel request (not a failure)
+   * stopped the scoring loop early. Whatever scored before the request was
+   * observed was still delivered normally -- `delivered` above already
+   * reflects that -- this only distinguishes "stopped on purpose" from
+   * `error`'s "stopped because something broke" for a caller that cares. */
+  readonly cancelled?: boolean;
 }
 
 /**
@@ -921,6 +927,12 @@ export async function executeDeliver(
    * five real runs' worth of failures. */
   maxScoreFailures: number = DEFAULT_MAX_SCORE_FAILURES,
   triggeredBy: string = "internal",
+  /** docs/11-known-issues.md C1. Polled once per posting in the scoring
+   * loop below -- the caller decides what "requested" means (`RunLock`'s
+   * in-memory flag for the real server; a test's own closure). Defaults to
+   * never cancelling, so every existing caller that does not pass this is
+   * unaffected. */
+  isCancelRequested: () => boolean = () => false,
 ): Promise<DeliverOutcome> {
   const postingsRepo = new PostingsRepository(db);
   const runsRepo = new RunsRepository(db);
@@ -956,6 +968,7 @@ export async function executeDeliver(
   let filteredCount = 0;
   let scoredCount = 0;
   let batchFatalReason: string | undefined;
+  let cancelRequested = false;
   const scoreFailureCounts: Record<string, number> = {};
 
   function finalScoreFailureCounts(): Readonly<Record<string, number>> {
@@ -1079,6 +1092,20 @@ export async function executeDeliver(
     const scoredEntries: ScoredPosting[] = [];
     const periodBlockedEntries: PeriodBlockedEntry[] = [];
     for (const posting of filtered) {
+      // docs/11-known-issues.md C1: checked once per posting, the same
+      // checkpoint granularity `batchFatalReason` below already uses --
+      // never mid-Stage-A/B call, which is already a single bounded
+      // request/retry cycle with its own timeout, not something worth
+      // teaching to abort partway through. A cancel request seen here stops
+      // the batch exactly like a permanent provider failure does: whatever
+      // scored before this point is kept and delivered, nothing already
+      // spent is thrown away, and every posting from here on is simply
+      // never reached this run -- unclaimed and unnotified, reconsidered in
+      // full next run.
+      if (cancelRequested === false && isCancelRequested()) {
+        cancelRequested = true;
+        break;
+      }
       // docs/audit PR-002: a posting that has already failed
       // `maxScoreFailures` times in a row does not get another model call --
       // it has had its fair chance at a transient issue resolving itself,
@@ -1273,7 +1300,13 @@ export async function executeDeliver(
     runsRepo.finish(
       runId,
       deliveredAt,
-      batchFatalReason ? "failed" : "success",
+      // Priority order matters: a cancel request is checked first because
+      // it can only ever be observed on an otherwise-healthy iteration
+      // (the check above runs before any scoring attempt), so the two
+      // conditions are mutually exclusive within one run in practice --
+      // this ordering just documents that "cancelled" wins if that were
+      // ever not true.
+      cancelRequested ? "cancelled" : batchFatalReason ? "failed" : "success",
       {
         filteredCount,
         scoredCount,
@@ -1289,6 +1322,7 @@ export async function executeDeliver(
       scored: scoredCount,
       delivered: sent.length,
       ...(batchFatalReason ? { error: batchFatalReason } : {}),
+      ...(cancelRequested ? { cancelled: true } : {}),
     };
   }
 }

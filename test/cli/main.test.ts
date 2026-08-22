@@ -2107,6 +2107,117 @@ describe("executeDeliver", () => {
     });
   });
 
+  describe("docs/11-known-issues.md C1 — cooperative cancellation", () => {
+    function okScoreResult() {
+      return {
+        ok: true as const,
+        score: 80,
+        verdict: "apply" as const,
+        breakdown: {
+          mandatoryCoverage: 1,
+          desirableCoverage: 1,
+          trackAlignment: 1,
+        },
+        blockingFailure: null,
+        blockingFailures: [],
+        lowConfidence: false,
+        criticalGaps: [],
+        periodGate: null,
+        recommendedVariant: null,
+        highlights: [],
+        missingTerms: [],
+        inputTruncated: false,
+        stageACacheHit: false,
+        stageBCacheHit: false,
+        evidenceRejectedCount: 0,
+      };
+    }
+
+    it("stops after the posting in flight when the cancel flag flips, and still delivers what was scored", async () => {
+      const collector = stubCollector({
+        source: "gupy",
+        collectedAt: new Date(),
+        postings: [1, 2, 3].map((n) => ({
+          source: "gupy",
+          sourceId: String(n),
+          payload: gupyPayload(n, `Estágio em Backend ${n}`, `Empresa ${n}`),
+        })),
+      });
+      await executeCollect(db, () => collector, [{}], undefined, 0);
+
+      const criteria = deliverCriteria();
+      const scoreCalls: string[] = [];
+      // Flips true after the first posting is scored -- simulates a cancel
+      // request arriving mid-run, observed at the next loop checkpoint.
+      const scorer: ScorerPort = {
+        score: async (posting) => {
+          scoreCalls.push(posting.fingerprint);
+          return okScoreResult();
+        },
+      };
+      const { notifier, digests } = recordingNotifier();
+
+      const outcome = await executeDeliver(
+        db,
+        scorer,
+        notifier,
+        criteria,
+        deliverProfile(),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        "internal",
+        () => scoreCalls.length >= 1,
+      );
+
+      expect(scoreCalls).toHaveLength(1);
+      expect(outcome.filtered).toBe(3);
+      expect(outcome.scored).toBe(1);
+      expect(outcome.cancelled).toBe(true);
+      expect(outcome.delivered).toBe(1);
+      expect(digests[0]?.recommended).toHaveLength(1);
+
+      const run = new RunsRepository(db).findById(outcome.runId);
+      expect(run?.outcome).toBe("cancelled");
+
+      // The two postings never reached stay real candidates, exactly like
+      // PR-007's permanent-failure path -- cancellation is not a rejection.
+      const postingsRepo = new PostingsRepository(db);
+      expect(postingsRepo.findUnnotified()).toHaveLength(2);
+    });
+
+    it("never cancels when isCancelRequested is not passed (default behavior unchanged)", async () => {
+      const collector = stubCollector({
+        source: "gupy",
+        collectedAt: new Date(),
+        postings: [1, 2].map((n) => ({
+          source: "gupy",
+          sourceId: String(n),
+          payload: gupyPayload(n, `Estágio em Backend ${n}`, `Empresa ${n}`),
+        })),
+      });
+      await executeCollect(db, () => collector, [{}], undefined, 0);
+
+      const criteria = deliverCriteria();
+      const scorer: ScorerPort = { score: async () => okScoreResult() };
+      const { notifier } = recordingNotifier();
+
+      const outcome = await executeDeliver(
+        db,
+        scorer,
+        notifier,
+        criteria,
+        deliverProfile(),
+      );
+
+      expect(outcome.scored).toBe(2);
+      expect(outcome.cancelled).toBeUndefined();
+      const run = new RunsRepository(db).findById(outcome.runId);
+      expect(run?.outcome).toBe("success");
+    });
+  });
+
   describe("docs/audit PR-004 — persisted claim as the scoring admission barrier", () => {
     function rawClaimFields(fingerprint: string) {
       const row = db

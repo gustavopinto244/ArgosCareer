@@ -3,7 +3,14 @@ import { ulid } from "ulid";
 import { Db } from "./db";
 import { runs } from "./schema";
 
-export type RunOutcome = "success" | "failed";
+// "cancelled" (docs/11-known-issues.md C1): a deliberate, cooperative stop
+// via `RunLock.requestCancel` mid-run — distinct from "failed", which means
+// something went wrong. A cancelled `scoreAndDeliver` still finishes its row
+// normally and still delivers whatever it scored before the request landed;
+// it never gets the orphaned-row treatment C1 originally described, because
+// unlike a killed process, code that observes its own cancel flag always
+// reaches `runsRepo.finish`.
+export type RunOutcome = "success" | "failed" | "cancelled";
 export type RunRow = typeof runs.$inferSelect;
 
 export interface RunCounts {

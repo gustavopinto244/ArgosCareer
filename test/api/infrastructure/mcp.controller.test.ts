@@ -113,11 +113,12 @@ function textOf(result: Awaited<ReturnType<Client["callTool"]>>): unknown {
 }
 
 describe("MCP server", () => {
-  it("lists all eight tools", async () => {
+  it("lists all nine tools", async () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual(
       [
+        "cancel_run",
         "discard_posting",
         "get_health",
         "get_run",
@@ -220,6 +221,24 @@ describe("MCP server", () => {
     expect(fourth.isError).toBe(true);
     const content = fourth.content as { type: string; text: string }[];
     expect(content[0]?.text).toContain("Rate limit exceeded");
+  });
+
+  it("cancel_run (docs/11-known-issues.md C1) returns an isError result when nothing is in flight", async () => {
+    const result = await client.callTool({
+      name: "cancel_run",
+      arguments: { kind: "scoreAndDeliver" },
+    });
+    expect(result.isError).toBe(true);
+  });
+
+  it("cancel_run rejects a kind that has no cancellation checkpoint", async () => {
+    const result = await client.callTool({
+      name: "cancel_run",
+      arguments: { kind: "collect" },
+    });
+    expect(result.isError).toBe(true);
+    const content = result.content as { type: string; text: string }[];
+    expect(content[0]?.text).toContain("Cancellation is only supported");
   });
 
   it("get_study_plan reads the corpus and sends through the fake notifier", async () => {

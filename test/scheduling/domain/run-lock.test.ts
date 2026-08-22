@@ -36,6 +36,39 @@ describe("RunLock", () => {
   });
 });
 
+describe("RunLock — cancellation (docs/11-known-issues.md C1)", () => {
+  it("requestCancel is a no-op when the kind is not active", () => {
+    const lock = new RunLock();
+    lock.requestCancel("scoreAndDeliver");
+    expect(lock.isCancelRequested("scoreAndDeliver")).toBe(false);
+  });
+
+  it("requestCancel marks an active kind, observable via isCancelRequested", () => {
+    const lock = new RunLock();
+    lock.tryAcquire("scoreAndDeliver");
+    lock.requestCancel("scoreAndDeliver");
+    expect(lock.isCancelRequested("scoreAndDeliver")).toBe(true);
+  });
+
+  it("does not cancel a different kind", () => {
+    const lock = new RunLock();
+    lock.tryAcquire("scoreAndDeliver");
+    lock.tryAcquire("collect");
+    lock.requestCancel("scoreAndDeliver");
+    expect(lock.isCancelRequested("collect")).toBe(false);
+  });
+
+  it("release clears the cancel flag, so the next run of the same kind starts clean", () => {
+    const lock = new RunLock();
+    lock.tryAcquire("scoreAndDeliver");
+    lock.requestCancel("scoreAndDeliver");
+    lock.release("scoreAndDeliver");
+
+    lock.tryAcquire("scoreAndDeliver");
+    expect(lock.isCancelRequested("scoreAndDeliver")).toBe(false);
+  });
+});
+
 describe("runExclusive", () => {
   it("runs fn and returns its result when the kind is free", async () => {
     const lock = new RunLock();

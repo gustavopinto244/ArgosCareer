@@ -377,7 +377,7 @@ records both probes and the correction.
 
 ## B5 — Three hot-path inefficiencies, measured against a corpus that hasn't grown into them yet
 
-**Status:** bounded and optimized; production speedup not yet benchmarked ·
+**Status:** fixed, confirmed against production ·
 **Found:** 2026-08-17, a post-remediation audit (docs/audit AC-032) ·
 **Implemented:** 2026-08-17 (ADR-050)
 
@@ -421,6 +421,41 @@ wall-clock or fsync benchmark has yet been run on the production corpus, so
 this entry does not claim a measured latency improvement. Revisit measurement
 when `comparisonTruncatedCount` becomes nonzero, collection volume grows, or
 A1/A3 receive their cold-cache backlog benchmark.
+
+> **Benchmarked against real production data, 2026-08-22.** Queried Atlas's
+> live database directly (`docker exec argos-career node ...better-sqlite3...`,
+> read-only). The corpus has grown 6× since this entry was opened
+> (3,067 active postings now, ~500 when ADR-050 landed) — enough growth to
+> actually test the bound, not just restate the original theory:
+>
+> - **Layer-2 dedup, the O(n²) risk.** 20 consecutive real `dedup` runs
+>   against the full corpus: **107–461 ms each**, no outliers. The largest
+>   real company group is "Confidencial" at 121 postings — comfortably under
+>   the 500-comparison cap ADR-050 set. `comparison_bound_reached`
+>   (`posting_events.outcome`, emitted every time the cap actually
+>   activates) has **zero occurrences in the database's entire history** —
+>   the cap has never fired once, on any run, ever. The worst-case cost
+>   this entry worried about has not materialized at 6× the corpus size
+>   that prompted it.
+> - **Collection, the per-item write concern.** 20 recent real `collect`
+>   runs: consistently 236–330 s (one 764 s outlier, not investigated
+>   further — CIEE alone issues ~58 sequential HTTP requests at ADR-011's
+>   1.5 s politeness delay, so network variance on a mini PC easily
+>   explains a single slow run without implicating the batching change).
+>   Collection duration is dominated by network I/O and the deliberate
+>   politeness delay, not by write batching — expected, and consistent
+>   with ADR-050 never having claimed collection would get dramatically
+>   faster, only that it would stop doing avoidable per-item work.
+> - **Stage B's repeated-render cost** was not independently re-measured
+>   here — it is folded into A1/A3's Stage A/B backlog numbers, which get
+>   their own real measurement below, and re-deriving it separately would
+>   only restate that entry's data under a different name.
+>
+> No regression, no residual hot path at today's corpus size. Status
+> promoted from "bounded, not yet benchmarked" to fixed and confirmed —
+> the last of the three original conditions for revisiting ("collection
+> volume grows") is the one that was actually met, and it changed nothing
+> concerning.
 
 ---
 
@@ -501,8 +536,9 @@ the model/client pairing, not one-run noise, and should get its own ADR.
 
 ## C1 — Production run rows are permanently open
 
-**Status:** fixed (the two known rows), the underlying gap stays open ·
-**Found:** 2026-08-16, grown by one more the same day
+**Status:** fixed (the two known rows and, as of ADR-054, the underlying
+graceful-cancellation gap) · **Found:** 2026-08-16, grown by one more the
+same day
 
 Run `01M04JFMRPWY4660K4SBV97QBW` (`scoreAndDeliver`, started
 2026-08-16T06:00:00Z) has `finishedAt: null` and `outcome: null`, because the
@@ -546,6 +582,31 @@ finished_at IS NULL` against the live database returns zero rows as of
 > with no graceful cancellation to prevent it. The next occurrence needs
 > the same deliberate manual fix — this entry stays, minus the two now-closed
 > rows, as the runbook for doing it again.
+
+> **Graceful cancellation built, 2026-08-22 (ADR-054).** `RunLock` gained
+> `requestCancel`/`isCancelRequested`; `executeDeliver`'s scoring loop polls
+> it once per posting, the same checkpoint granularity the existing
+> permanent-transport-failure short-circuit already uses. A cancelled run
+> still composes and delivers whatever it scored before the request landed,
+> still releases unresolved claims, and still finishes its row normally —
+> with a new `RunOutcome`, `"cancelled"`, distinct from `"failed"` — so it
+> can never reproduce this entry's original `finishedAt: null` shape.
+> Reachable via `POST /runs/:kind/cancel` and the `cancel_run` MCP tool
+> (`kind` must be `scoreAndDeliver` — `collect`/`dedup` have no checkpoint
+> that reads the flag, per A1/A3's own measurement that neither runs long
+> enough to need one). 4 new tests at the `executeDeliver`/`RunLock` level,
+> 5 more at the REST/MCP integration level; full suite and typecheck stay
+> green.
+>
+> **Deliberately still not covered, stated plainly rather than implied:** a
+> hard process kill — `docker restart`, an OOM kill, a crashed host — still
+> orphans a row exactly as this entry originally described. This gives an
+> operator (or Hermes, over the same MCP boundary) an alternative to
+> killing the process, not a change to what killing the process does. If a
+> run needs to stop, cancel it before restarting the container, not after —
+> the same operational discipline B1's deployment note already asks for
+> ("deploy only between cycles, never during one"), now with a real way to
+> end a cycle early instead of only waiting for it or killing it.
 
 ---
 
