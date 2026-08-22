@@ -32,16 +32,15 @@ export interface ScoredPosting {
  * `opensAtLabel` is a pre-formatted calendar term ("2027.1"), not the raw
  * period index.
  *
- * Still always empty post-M7 (docs/audit AC-026) — not because nothing can
- * read the requirement text anymore (Stage A does extract a "cursando a
- * partir do Nº período" requirement, and Stage B matches it, same as any
- * other), but because nothing turns that specific requirement into a
- * *structured* minimum period this system could compare against
- * `computeAcademicPeriod` and use to compute an "opens at" date. Today a
- * period requirement the candidate does not yet meet is scored like any
- * other unmet requirement (often `blocking`, capping the score) — the
- * *separate*, non-punitive "opens for you in 2027.1" section this comment
- * describes was never built. `executeDeliver` always passes `[]` here.
+ * Populated since `period-gate.ts` (docs/11-known-issues.md, resolving
+ * docs/audit AC-026's period-blocked half): `executeDeliver` routes a
+ * posting here, instead of into `scored`, exactly when a not-yet-reached
+ * academic period is the *only* unmet blocking requirement — a real
+ * rejection with anything else wrong alongside the period gate stays an
+ * ordinary `discard`/`review`. Heuristic, not exhaustive: only phrasings
+ * `period-gate.ts`'s patterns recognize get routed here; an unrecognized
+ * phrasing falls back to being scored (and possibly capped) exactly as
+ * before this existed — a missed case, not a wrong one.
  */
 export interface PeriodBlockedEntry {
   readonly posting: Posting;

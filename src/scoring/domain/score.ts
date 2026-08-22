@@ -1,4 +1,9 @@
 import {
+  computeAcademicPeriod,
+  periodCalendarLabel,
+} from "../../profile/domain/academic-period";
+import { detectPeriodGate, PeriodGate } from "./period-gate";
+import {
   isVerifiable,
   Match,
   MatchStatus,
@@ -58,18 +63,18 @@ export function computeTrackAlignment(
 
 /**
  * A blocking requirement fails on `partial` too — an ATS knockout question is
- * binary, so "unsure" is not a pass (docs/04-scoring-model.md). Returns the
- * first failing blocking requirement, in match order.
+ * binary, so "unsure" is not a pass (docs/04-scoring-model.md). Every failing
+ * blocking requirement, in match order — `findBlockingFailure` below takes
+ * just the first for existing single-value consumers.
  */
-function findBlockingFailure(matches: readonly Match[]): Requirement | null {
+function findBlockingFailures(matches: readonly Match[]): Requirement[] {
   // Verifiable only (ADR-015): a trait extracted as `blocking` — "ter
   // compromisso e responsabilidade com as entregas" — would otherwise fail
   // for every candidate forever, capping every such posting at 35 on a
   // requirement no one can evidence.
-  const failure = verifiableMatches(matches).find(
-    (m) => m.requirement.weight === "blocking" && m.status !== "met",
-  );
-  return failure ? failure.requirement : null;
+  return verifiableMatches(matches)
+    .filter((m) => m.requirement.weight === "blocking" && m.status !== "met")
+    .map((m) => m.requirement);
 }
 
 /** Exported for the M7 calibration protocol (docs/04-scoring-model.md),
@@ -104,6 +109,19 @@ function computeCriticalGaps(matches: readonly Match[]): Requirement[] {
 }
 
 /**
+ * `courseStart`/`today` are optional so every existing call site (35+ tests,
+ * `StubScorer`, `market-repository.ts`'s historical re-scoring) keeps
+ * computing exactly as before — periodGate detection needs a candidate's
+ * calendar position, which those callers either don't have or don't need.
+ * Only `ApiScorer.score`, which runs against a real profile and a real
+ * clock, supplies it.
+ */
+export interface AcademicContext {
+  readonly courseStart: Date;
+  readonly today: Date;
+}
+
+/**
  * Stage C (ADR-005): pure, deterministic, no I/O, no LLM. Same inputs, same
  * output, forever — that is what makes the M7 calibration protocol meaningful.
  */
@@ -111,6 +129,7 @@ export function computeScore(
   matches: readonly Match[],
   tracks: readonly Track[],
   config: ScoringConfig,
+  academicContext?: AcademicContext,
 ): ScoreOutcome {
   const mandatoryCoverage = coverage(matches, "mandatory");
   const desirableCoverage = coverage(matches, "desirable");
@@ -127,7 +146,8 @@ export function computeScore(
     config.weights.desirable * desirableCoverage +
     config.weights.trackAlignment * trackAlignment;
 
-  const blockingFailure = findBlockingFailure(matches);
+  const blockingFailures = findBlockingFailures(matches);
+  const blockingFailure = blockingFailures[0] ?? null;
   // Both caps are upper bounds, not floors: a posting already scoring below
   // one is not raised by it (docs/04-scoring-model.md). They stack — a
   // blocked, off-track posting is capped by whichever is lower — because
@@ -164,12 +184,34 @@ export function computeScore(
   // lowConfidence caps the verdict at "review" — it never upgrades a "discard".
   if (lowConfidence && verdict === "apply") verdict = "review";
 
+  // Only when the period gate is the *entire* reason this posting is capped
+  // (detectPeriodGate already requires it be the only blocking failure) and
+  // the rest of the posting is worth surfacing at all — `rawScore`,
+  // uncapped, cleared `review`. A posting that would not even clear review
+  // ignoring the period gate is not "a good fit you're not eligible for
+  // yet," it is a weak match that also has a period gate; staying an
+  // ordinary capped `discard` is the correct outcome for that one.
+  const periodGate: PeriodGate | null =
+    academicContext && rawScore >= config.thresholds.review
+      ? detectPeriodGate(
+          blockingFailures,
+          computeAcademicPeriod(
+            academicContext.courseStart,
+            academicContext.today,
+          ),
+          (minimumPeriod) =>
+            periodCalendarLabel(academicContext.courseStart, minimumPeriod),
+        )
+      : null;
+
   return {
     score,
     verdict,
     breakdown,
     blockingFailure,
+    blockingFailures,
     lowConfidence,
     criticalGaps: computeCriticalGaps(matches),
+    periodGate,
   };
 }

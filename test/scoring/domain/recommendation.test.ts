@@ -28,6 +28,7 @@ function profile(overrides: Partial<Profile> = {}): Profile {
     englishLevel: "intermediate",
     minimumStipend: "R$ 1500",
     maxWeeklyHours: "30",
+    workAvailability: "40h remoto, disponível dias úteis.",
     competencies: [
       {
         name: "Node.js",

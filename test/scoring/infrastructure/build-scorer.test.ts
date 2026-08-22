@@ -78,6 +78,7 @@ function profile(): Profile {
     englishLevel: "intermediate",
     minimumStipend: "R$ 700",
     maxWeeklyHours: "40",
+    workAvailability: "40h remoto, disponível dias úteis.",
     competencies: [
       {
         name: "Node.js",

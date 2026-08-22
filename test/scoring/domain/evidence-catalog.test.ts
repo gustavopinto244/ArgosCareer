@@ -14,6 +14,7 @@ function profile(overrides: Partial<Profile> = {}): Profile {
     englishLevel: "intermediate",
     minimumStipend: "R$ 1500",
     maxWeeklyHours: "30",
+    workAvailability: "40h remoto, disponível dias úteis.",
     competencies: [
       {
         name: "Node.js",
@@ -43,7 +44,7 @@ describe("buildEvidenceCatalog (docs/audit PR-001)", () => {
     });
   });
 
-  it("includes the three declared-field entries, each tagged", () => {
+  it("includes the four declared-field entries, each tagged", () => {
     const catalog = buildEvidenceCatalog(profile(), TODAY);
     expect(catalog).toContainEqual({
       tag: "English level",
@@ -52,6 +53,10 @@ describe("buildEvidenceCatalog (docs/audit PR-001)", () => {
     expect(catalog).toContainEqual({
       tag: "Availability",
       text: "Disponibilidade de até 30 horas semanais.",
+    });
+    expect(catalog).toContainEqual({
+      tag: "Work availability",
+      text: "40h remoto, disponível dias úteis.",
     });
     expect(catalog).toContainEqual({
       tag: "Compensation",
@@ -65,6 +70,14 @@ describe("buildEvidenceCatalog (docs/audit PR-001)", () => {
       TODAY,
     );
     expect(catalog.some((e) => e.tag === "English level")).toBe(false);
+  });
+
+  it("omits workAvailability when still marked UNVERIFIED", () => {
+    const catalog = buildEvidenceCatalog(
+      profile({ workAvailability: UNVERIFIED }),
+      TODAY,
+    );
+    expect(catalog.some((e) => e.tag === "Work availability")).toBe(false);
   });
 
   it("includes every competency's evidence, tagged by competency name", () => {

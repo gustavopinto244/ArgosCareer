@@ -41,8 +41,10 @@ function outcome(
       trackAlignment: 1,
     },
     blockingFailure: null,
+    blockingFailures: [],
     lowConfidence: true,
     criticalGaps: [],
+    periodGate: null,
     ...EMPTY_RECOMMENDATION,
     ...overrides,
   };

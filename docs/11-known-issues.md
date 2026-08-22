@@ -546,3 +546,330 @@ finished_at IS NULL` against the live database returns zero rows as of
 > with no graceful cancellation to prevent it. The next occurrence needs
 > the same deliberate manual fix — this entry stays, minus the two now-closed
 > rows, as the runbook for doing it again.
+
+---
+
+## B7 — `run-calibration.ts` never got the ADR-052 fixes, so it silently reproduced B6
+
+**Status:** fixed · **Found:** 2026-08-19, running the M7 calibration protocol
+against a freshly-expanded worksheet
+
+`scripts/run-calibration.ts` built its own `OpenRouterClient`/`StageAExtractor`/
+`StageBMatcher`/`ApiScorer` by hand instead of calling `buildScorer()` — the
+function `src/scoring/infrastructure/build-scorer.ts` exists specifically so
+the scheduler and the CLI construct a scorer identically (its own docstring
+already flagged this exact script as the one place that didn't use it,
+docs/audit AC-015). The practical effect: calibration ran with the library's
+30 s default timeout and no `reasoning.max_tokens` cap, never the Stage A
+120 s timeout or the 3,000/300-token reasoning ceilings ADR-052 added to fix
+B6.
+
+First calibration run against 18 labelled postings: **78% parse-failure
+rate, correlation 0.054** (indistinguishable from noise) — B6's incident,
+reproduced by tooling drift months after it was closed in production.
+
+> **Resolution, 2026-08-19.** `run-calibration.ts` now calls `buildScorer()`
+> instead of constructing its own client, so calibration exercises the exact
+> configuration a real nightly run does. Re-run against the same 18
+> postings: **17% parse-failure rate, correlation 0.412**. Remaining
+> failures are Stage B `matching_failed` (`invalidOutput` after 4 retries on
+> individual requirements) — smaller-scale noise of the same shape B6 named,
+> not a new cause. `getUsage()` is now read from `buildScorer`'s return value
+> too, closing the same drift for cost reporting.
+
+---
+
+## B8 — The `dev` track keyword `desenvolvimento` false-positives on non-software postings
+
+**Status:** fixed (the two observed cases), the underlying pattern stays
+worth watching · **Found:** 2026-08-19, selecting postings for the M7
+calibration worksheet
+
+`classifyTrack` (`src/prefilter/domain/classify-track.ts`) matches
+`desenvolvimento` as a whole word in the **title only** (ADR-011 Amendment 2).
+Two real postings from the production corpus were classified `dev` and would
+reach the LLM despite having nothing to do with software:
+
+- **Duty Cosméticos — "Estagiário de Pesquisa & Desenvolvimento"**: cosmetics
+  R&D, requires Química/Farmácia/Engenharia Química. "Desenvolvimento" here
+  means product development, not software.
+- **Jobbol — "ESTAGIÁRIO NA ÁREA DE PSICOLOGIA... (Humano Desenvolvimento)"**
+  ×5 postings: Psychology internships. "Desenvolvimento" is part of the
+  staffing agency's own name, "Humano Desenvolvimento", parenthesized in the
+  title — not a job-content word at all.
+
+Same failure shape ADR-011/015 already fixed once for `soc`/`api` substring
+collisions and for "ESTAGIÁRIO DE DESENVOLVIMENTO DE EMBALAGENS" (packaging)
+— `desenvolvimento` alone is common enough in Portuguese HR boilerplate that
+whole-word matching does not save it the way it saves `api`/`soc`.
+
+**Cost is real, not hypothetical:** every false positive here passes the
+pre-filter's track check and reaches Stage A/B, spending a real LLM call on
+a posting no configuration of the profile could ever score `apply`. It also
+pollutes M10's market-analysis corpus, which reads `tracks` on every active
+posting regardless of pre-filter outcome.
+
+> **Resolution, 2026-08-19.** Narrower than it first looked: **both
+> canonical exclusion phrases already existed** in `criteria.yaml`
+> (`pesquisa e desenvolvimento`, `desenvolvimento humano`) — the actual
+> titles just did not literally match them. Duty Cosméticos writes
+> "Pesquisa **&** Desenvolvimento"; `&` normalizes to a bare space
+> (`title-match.ts`), not the word "e", so it never matched "pesquisa e
+> desenvolvimento". Jobbol's title carries "(**Humano Desenvolvimento**)",
+> the staffing agency's own name, word order reversed from "desenvolvimento
+> humano". `title-match.ts`'s exclusion matching is literal word order —
+> the canonical phrasing does not cover its own variants. Added `pesquisa
+desenvolvimento` and `humano desenvolvimento` to `trackExclusions.dev`.
+> Verified against the real config loader:
+> `classifyTrack("Estagiário de Pesquisa & Desenvolvimento", ...)` and the
+> Jobbol title both now return `[]`, and
+> `classifyTrack("Estágio em Desenvolvimento Backend", ...)` still returns
+> `["dev"]` — the fix is additive, not a behavior change for genuine dev
+> postings. Two regression tests added
+> (`test/prefilter/domain/classify-track.test.ts`).
+>
+> **The underlying pattern — a fixed exclusion phrase can always miss a
+> real title's wording — stays open as a class of risk**, not a specific
+> bug: any future posting phrasing "desenvolvimento" in an order or with
+> punctuation none of today's exclusions anticipate will pass through
+> exactly the same way these two did, until it is observed and added.
+> Nothing here makes exclusion matching order-independent or
+> punctuation-tolerant; it only patches the two instances found so far.
+
+---
+
+## B9 — Genuinely good postings were being discarded; `apply` recall measured at 13-17%
+
+**Status:** partially fixed (period-gate cause), rest open · **Found:**
+2026-08-19, the first real M7 calibration run after B7's fix
+
+With B7 fixed, the 18-posting calibration run gave a real, trustworthy
+number for the first time: **correlation 0.412-0.455, but `apply` recall of
+only 13-17%** — of every posting hand-scored ≥70 ("I would apply"), the
+computed score agreed on just 1 in 6-8. Per the M7 protocol's own stated
+priority (`docs/04-scoring-model.md`), this is the worse direction of error:
+a missed good posting costs more than a reviewed bad one.
+
+Traced per-posting (`run-calibration.ts`'s new verbose output, this
+session), the six misses split into two causes:
+
+- **Two (Flamengo hand 70→35, MIDI hand 65→35) were a not-yet-reached
+  academic period, hard-capping an otherwise-strong match to
+  `blockingCapScore` and landing it in `discard`.** This is exactly the
+  gap `docs/audit AC-026` already named and `digest.ts`'s own
+  `PeriodBlockedEntry` comment described as never built.
+- **Four (Bemobi Wave hand 100→65, ELDORADO hand 90→65, Anbima DevOps
+  hand 100→63, Smarthis hand 100→40) were low `mandatoryCoverage`** — Stage
+  B matching the profile against the posting's stated requirements more
+  conservatively than the hand label expected. Model/prompt/evidence
+  quality, not a structural bug; not touched here.
+
+> **Resolution, the period-gate half, 2026-08-19 (ADR-053).**
+> `src/scoring/domain/period-gate.ts` now detects exactly this shape — a
+> not-yet-reached academic period as the _sole_ blocking failure — and
+> `executeDeliver` routes it into the digest's already-existing (but
+> never populated) `periodBlocked` section instead of capping the score.
+> Full reasoning, the parser's heuristic limits, and why the other four
+> cases are explicitly out of scope for this fix: ADR-053.
+
+**The other four stay open.** Fixing them by guessing a prompt or weight
+change would break the M7 protocol's "change one variable at a time" rule,
+and 18 labelled postings (down from a nominal 20 — two more `matching_failed`
+this run) is still a thin sample to trust a specific correction against.
+Revisit once the worksheet is closer to the full 50 `docs/04` calls for.
+
+> **Verified against the real corpus, 2026-08-19.** Re-scored Flamengo and
+> MIDI directly (cached Stage A/B, no new model calls): Flamengo now
+> carries `periodGate: { minimumPeriod: 4, opensAtLabel: "2027.2" }` as
+> intended. **MIDI does not** — its extraction has _two_ `blocking`
+> requirements, "Semestre exigido: 4 a 9" and "Nível escolar: SU" (higher
+> education), and Stage B matched the second `not_met` too, despite the
+> profile almost certainly evidencing current higher-ed enrollment.
+> `detectPeriodGate`'s "only when it is the sole blocker" rule correctly
+> refuses to reclassify MIDI — but the reason it refuses is a second, real
+> Stage B miss, the same category as the four open `mandatoryCoverage`
+> cases above, not a period-gate defect. Worth a dedicated look: "Nível
+> escolar: SU" reads like exactly the kind of requirement that should be
+> close to universally `met` for this profile and evidently is not.
+
+> **Root cause found and fixed, 2026-08-19.** "Nível escolar: SU" was never
+> a real requirement to begin with. `ciee-collector.ts`'s own `keep()`
+> already filters collection to `DEFAULT_EDUCATION_LEVELS = ["SU"]`, with
+> no override in `criteria.yaml` — every CIEE posting that reaches the
+> corpus at all already has `nivelEscolar: "SU"`, by construction. But
+> `ciee-normalizer.ts` folded the raw two-letter code into `description`
+> verbatim regardless, as pure noise: always true, so not discriminating
+> information, and an opaque code ("SU" for "superior") no profile
+> evidence could ever literally quote even for a candidate who obviously
+> qualifies. Stage A extracted it as an ordinary `blocking` requirement
+> anyway, Stage B correctly found no evidence for a code that appears
+> nowhere in any real résumé, and it capped MIDI's otherwise-100%-matching
+> score at 35 — a second, independent false rejection on the same posting
+> the period gate above already explains half of.
+>
+> `composeDescription` no longer includes `nivelEscolar`. **Forward-looking
+> only** — this fixes newly-collected CIEE postings; MIDI's own row,
+> already normalized with the field baked into its stored `description`,
+> keeps it until re-collected with a changed payload invalidates its
+> cache (this project does not rewrite already-stored `description` values
+> as a side effect of a code change, matching this page's C1 precedent for
+> not touching production data outside a deliberate act). One regression
+> test added (`test/posting/infrastructure/ciee-normalizer.test.ts`) pins
+> the fixture's own `nivelEscolar: "SU"` and asserts it never reaches the
+> composed description.
+
+> **Investigated the remaining three low-`mandatoryCoverage` cases,
+> 2026-08-19 — none are code bugs.** Pulled each real match array directly:
+>
+> - **Bemobi Wave (hand 100, mandatoryCoverage 0%).** The three unmet
+>   verifiable mandatory requirements are "lógica de programação bem
+>   fundamentada", "domínio das principais estruturas de dados (pilha,
+>   fila, árvores)" and "algoritmos de busca e ordenação" — classical CS
+>   fundamentals. `config/profile.yaml` has zero competency entries for
+>   any of them; every entry is framed around a named tool (Node.js,
+>   PostgreSQL, React, ...), never generic data-structures/algorithms
+>   knowledge. Stage B is being accurate, not conservative: it cannot
+>   quote evidence the profile does not contain. **Not a scoring bug — a
+>   profile gap.** Fixable only by adding a real, evidenced competency
+>   (a course, a project that used them) — this project does not invent
+>   evidence (CLAUDE.md §15), so that edit has to come from a human.
+> - **ELDORADO (hand 90, mandatoryCoverage 43%).** Confirmed to be exactly
+>   ADR-026's own worked example, still true: Angular and Java/Spring Boot
+>   are genuinely absent from the profile. The three soft-trait
+>   requirements in the same extraction ("apaixonadas por tecnologia",
+>   "motive por desafios", "espírito colaborativo") are correctly
+>   `verifiable: false` and already excluded from coverage — ADR-015 is
+>   working as designed here, not the cause.
+> - **Smarthis (hand 100, mandatoryCoverage 40%) — two separate findings.**
+>   "Disponibilidade para atuar em modelo híbrido ou remoto" is `not_met`
+>   with no evidence, and `config/profile.yaml` indeed states no
+>   remote/hybrid-availability fact anywhere (only `minimumStipend` and
+>   `maxWeeklyHours` are declared) — the same profile-gap shape as Bemobi
+>   Wave, and likely the single highest-leverage one to close: this exact
+>   requirement phrasing recurs across many postings, not just this one.
+>   **Separately, a real extraction-quality issue**: the posting text
+>   reads "**Para vagas com foco em Desenvolvimento:** conhecimento em
+>   uma linguagem de programação... **Para vagas com foco em Processos e
+>   Projetos:** conhecimento em gestão de processos..." — two
+>   track-conditional requirement branches for a multi-track internship
+>   program. Stage A extracted _both_ as unconditional flat `mandatory`
+>   requirements instead of recognizing the "Para vagas com foco em X:"
+>   qualifier, so a dev-track candidate (who correctly matched the
+>   Desenvolvimento branch) is also penalized for not meeting the
+>   Processos e Projetos branch, which was never actually asked of them.
+>   **Not fixed here** — this is a Stage A prompt question (recognizing
+>   and either resolving or excluding track-conditional clauses), and the
+>   M7 protocol's "change one variable at a time" rule means a prompt
+>   version bump needs its own dedicated calibration run to evaluate, not
+>   a same-session bundle with three unrelated fixes. Worth an ADR when
+>   picked up — flag if this conditional-clause shape recurs on other
+>   postings before spending the prompt-version cost on a single
+>   observation.
+
+> **`workAvailability` profile field added, 2026-08-19.** Closes the
+> Smarthis work-mode gap above: `profile.ts` gained a fourth declared
+> field alongside `englishLevel`/`minimumStipend`/`maxWeeklyHours`,
+> rendered by `evidence-catalog.ts` as a `[Work availability]` quotable
+> line the same way the other three are. `config/profile.yaml` now states
+> "Disponível para trabalho presencial ou híbrido no Rio de Janeiro,
+> Niterói ou São Gonçalo, e para trabalho remoto em qualquer lugar do
+> mundo." Verified the plumbing directly against the real corpus
+> (`loadProfile` + `buildEvidenceCatalog`): the new line is generated and
+> present in what Stage B is allowed to quote. **Re-scoring the real
+> Smarthis posting with a live call, the model still answered `not_met`
+> for "modelo híbrido ou remoto" despite the evidence being available** —
+> the field is correctly wired, but one real call not using available
+> evidence is exactly the calibration-measured ~0.4 correlation ceiling
+> already known about this model/prompt pairing, not a defect in this
+> change. The evidence now exists for every future scoring attempt
+> regardless; whether the model reliably uses it is a separate,
+> already-tracked question.
+
+> **CS-fundamentals gap closed, 2026-08-19 — the profile owner supplied
+> real evidence.** Three competencies added to `config/profile.yaml`
+> (gitignored, not in this repo): "Lógica de programação", "Estruturas de
+> dados" and "Algoritmos de busca e ordenação", each evidenced by the
+> completed "Programação de Computadores" course at Universidade La Salle
+>
+> - RJ — confirmed by the profile owner to have actually covered pilha,
+>   fila, árvores and busca/ordenação, not assumed from the course title
+>   alone. Verified with a live re-score of the real Bemobi Wave posting:
+>   **score 0 → 88.3, verdict `review` → `apply`**, `mandatoryCoverage`
+>   0% → 67%, matching the hand label of 100 for the first time. No code
+>   changed — this was purely a profile-data gap, and closing it took a
+>   real fact, not a workaround.
+
+---
+
+## B10 — `dev` track keywords missed degree-name and database-only phrasing
+
+**Status:** fixed · **Found:** 2026-08-22, an audit comparing the pre-filter's
+real decisions against a manual read of the same corpus
+
+Queried the production `posting_events` table on Atlas directly (read-only,
+`docker exec argos-career node ...better-sqlite3...`, same method as B6/C1's
+verifications). Of 2,976 postings with a recorded pre-filter decision,
+**2,756 (92.6%) were rejected `track_unknown`** — overwhelmingly correct
+(CIEE alone supplies 91% of the corpus, and it is a general internship board,
+not a tech one), but the sheer volume made it the one rejection reason worth
+reading by hand rather than trusting by proportion. `title_missing_required_term`,
+`location_not_allowed` and `title_blocked` were sampled too (98 / 33 / 7
+postings) and all held up as correct on inspection — a McDonald's "Atendente
+de Restaurante" and an out-of-region São Paulo posting are not this project's
+misses.
+
+Grepping the 2,756 `track_unknown` titles for tech-adjacent words (`dados`,
+`sql`, `sistemas`, `banco de dados`, `ciência da computação`, ...) surfaced
+two **genuinely on-track, real, currently-open postings** the pre-filter
+was discarding before any LLM call:
+
+- **Confitec — "Estagiário em Banco de Dados SQL Server - Exclusiva Rio de
+  Janeiro."** A real backend/database internship; `config/profile.yaml`
+  already evidences PostgreSQL and "SQL and NoSQL databases." None of
+  `dev`'s keywords (backend, node, typescript, javascript, api,
+  desenvolvimento, software, programação, informática) match "banco de
+  dados" or "SQL Server" — the whole posting is exactly the shape of tech
+  vocabulary the list had never needed to cover, because most Gupy/CIEE dev
+  postings say "desenvolvimento" or "backend" somewhere in the title.
+- **CEPEL (Programa de Estágio) — "Estágio | Redes de Computadores, Sistemas
+  de Informação, Ciência da Computação e afins."** CEPEL's own catch-all
+  phrasing for "any CS-adjacent degree" — the formal course names a Brazilian
+  transcript uses, not the framework/language vocabulary the keyword list was
+  built around.
+
+Measured before touching the config, the same discipline every entry in
+`criteria.yaml`'s own comments already follows: each of the five candidate
+phrases (`banco de dados`, `sql server`, `sistemas de informação`, `ciência
+da computação`, `redes de computadores`) returns **exactly 1 match** against
+the full 3,067-posting corpus, both real matches on-track, zero false
+positives. Deliberately **not** added: a bare `dados` keyword, probed
+separately at 7 matches with only 2 genuinely on-track (the same two above,
+already covered by the whole-phrase entries) and the other 5 accounting/HR/
+academic-support noise — exactly the false-positive shape ADR-011's
+whole-phrase discipline exists to avoid, so postings like "Estágio em
+Contabilidade: Dados e Inteligência Artificial" and "Pessoa Estagiária de
+Dados" correctly stay `unknown` rather than being swept in by a generic word.
+A data-engineering/data-analytics track is not part of this project's
+declared search profile (CLAUDE.md §1: dev, security, automation only) — that
+stays a deliberate scope boundary, not something this fix tried to widen.
+
+> **Resolution, 2026-08-22.** Both phrase groups added to `tracks.dev` in
+> `config/criteria.yaml`. Verified directly against `classifyTrack` with the
+> real production titles: the CEPEL posting now classifies `["dev"]`, the
+> Confitec posting now classifies `["dev"]`, and both previously-excluded
+> "dados" postings still classify `[]` — the fix is additive, not a
+> behavior change for anything that was already being classified correctly.
+> Two regression tests added
+> (`test/prefilter/domain/classify-track.test.ts`, "degree-name and
+> database phrasing (B10)"). Full suite (1,127 tests) and typecheck stay
+> green. **Not yet observed against a live `deliver` run** — both postings
+> will reach Stage A/B on the next scheduled cycle; whether they actually
+> score `apply` depends on real Stage A/B matching quality, a separate,
+> already-tracked question (B9's four open `mandatoryCoverage` cases).
+>
+> **The broader pattern stays open, same shape as B8's closing note:** a
+> fixed keyword list can only ever cover phrasing already observed. Any
+> future posting that describes a dev/security/automation role in wording
+> none of today's keywords anticipate will be missed exactly the way these
+> two were, until it is found and added. This entry closes the two
+> instances found in this audit, not the class of risk.

@@ -67,6 +67,46 @@ describe("classifyTrack", () => {
 });
 
 /**
+ * docs/11-known-issues.md B10. Both real postings found `track_unknown` in
+ * production despite being genuinely on-track: CIEE's/Gupy's title-only
+ * classification had no keyword for "degree name" or "database" phrasing,
+ * only for the framework/language vocabulary a dev-focused title usually
+ * uses.
+ */
+describe("classifyTrack — degree-name and database phrasing (B10)", () => {
+  const devTracks = {
+    dev: [
+      "backend",
+      "sistemas de informação",
+      "ciência da computação",
+      "redes de computadores",
+      "banco de dados",
+      "sql server",
+    ],
+    security: ["segurança"],
+    automation: ["automação"],
+  };
+
+  it("classifies a CS/SI/networking catch-all degree list as dev", () => {
+    expect(
+      classifyTrack(
+        "Estágio | Redes de Computadores, Sistemas de Informação, Ciência da Computação e afins",
+        devTracks,
+      ),
+    ).toEqual(["dev"]);
+  });
+
+  it("classifies a database internship as dev", () => {
+    expect(
+      classifyTrack(
+        "Estagiário em Banco de Dados SQL Server - Exclusiva Rio de Janeiro",
+        devTracks,
+      ),
+    ).toEqual(["dev"]);
+  });
+});
+
+/**
  * ADR-015. "Desenvolvimento" and "segurança" are the two most overloaded
  * words in Brazilian job titles, and both produced 1.0 track alignment on
  * postings hand-labelled 0 in the first calibration run.
@@ -119,5 +159,42 @@ describe("classifyTrack — exclusions veto a keyword match", () => {
     expect(classifyTrack("Estágio em Desenvolvimento Backend", tracks)).toEqual(
       ["dev"],
     );
+  });
+});
+
+// Real false positives observed in the production corpus (2026-08-19,
+// docs/11-known-issues.md B8): the canonical exclusion phrase existed
+// already but a real title's wording did not literally match it — a
+// reversed word order and a joining "e" lost to "&" normalization.
+describe("classifyTrack — exclusion phrasing variants found in real postings", () => {
+  const tracks = { dev: ["desenvolvimento"], security: [], automation: [] };
+  const exclusions = {
+    dev: [
+      "pesquisa e desenvolvimento",
+      "pesquisa desenvolvimento",
+      "humano desenvolvimento",
+    ],
+    security: [],
+    automation: [],
+  };
+
+  it("rejects a cosmetics R&D internship whose '&' loses the joining 'e'", () => {
+    expect(
+      classifyTrack(
+        "Estagiário de Pesquisa & Desenvolvimento",
+        tracks,
+        exclusions,
+      ),
+    ).toEqual([]);
+  });
+
+  it("rejects a Psychology internship where 'Humano Desenvolvimento' is the staffing agency's name, word order reversed", () => {
+    expect(
+      classifyTrack(
+        "ESTAGIÁRIO NA ÁREA DE PSICOLOGIA - Sem experiência (Humano Desenvolvimento)",
+        tracks,
+        exclusions,
+      ),
+    ).toEqual([]);
   });
 });

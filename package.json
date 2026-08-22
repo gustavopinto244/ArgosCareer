@@ -28,6 +28,7 @@
     "probe:terms": "tsx scripts/probe-query-terms.ts",
     "report:scoring": "tsx scripts/report-scoring.ts",
     "calibration:generate": "tsx scripts/generate-calibration-set.ts",
+    "calibration:expand": "tsx scripts/select-calibration-batch.ts",
     "calibration:run": "tsx --env-file-if-exists=.env scripts/run-calibration.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",

@@ -72,6 +72,7 @@ courseEnd: 2029-12-01
 englishLevel: intermediate
 minimumStipend: "R$ 700"
 maxWeeklyHours: "40"
+workAvailability: "Remoto em qualquer lugar."
 competencies:
   - name: Node.js
     tracks: [dev]

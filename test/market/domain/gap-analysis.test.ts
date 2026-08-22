@@ -48,6 +48,7 @@ function profile(competencyNames: string[]): Profile {
     englishLevel: "intermediate",
     minimumStipend: "R$ 1500",
     maxWeeklyHours: "30",
+    workAvailability: "40h remoto, disponível dias úteis.",
     competencies: competencyNames.map((name) => ({
       name,
       tracks: ["dev"],

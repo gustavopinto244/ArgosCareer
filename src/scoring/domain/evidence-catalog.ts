@@ -61,11 +61,11 @@ function academicEvidenceEntries(
 }
 
 /**
- * `englishLevel`/`maxWeeklyHours`/`minimumStipend` (CLAUDE.md §9) as
- * quotable lines — the same class of gap `academicEvidenceEntries` closes
- * (ADR-014). A field still `UNVERIFIED` is skipped rather than rendered:
- * quoting "⚠ VERIFY" back as if it were an answer would be worse than the
- * field staying absent.
+ * `englishLevel`/`maxWeeklyHours`/`minimumStipend`/`workAvailability`
+ * (CLAUDE.md §9) as quotable lines — the same class of gap
+ * `academicEvidenceEntries` closes (ADR-014). A field still `UNVERIFIED` is
+ * skipped rather than rendered: quoting "⚠ VERIFY" back as if it were an
+ * answer would be worse than the field staying absent.
  */
 function declaredFieldsEvidenceEntries(
   profile: Profile,
@@ -81,6 +81,12 @@ function declaredFieldsEvidenceEntries(
     entries.push({
       tag: "Availability",
       text: `Disponibilidade de até ${profile.maxWeeklyHours} horas semanais.`,
+    });
+  }
+  if (profile.workAvailability !== UNVERIFIED) {
+    entries.push({
+      tag: "Work availability",
+      text: profile.workAvailability,
     });
   }
   if (profile.minimumStipend !== UNVERIFIED) {

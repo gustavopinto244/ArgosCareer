@@ -59,7 +59,11 @@ import {
 } from "../scoring/infrastructure/prompts";
 import { UsageTotals } from "../scoring/infrastructure/openrouter-client";
 import { NotifierPort } from "../delivery/domain/ports/notifier.port";
-import { composeDigest, ScoredPosting } from "../delivery/domain/digest";
+import {
+  composeDigest,
+  PeriodBlockedEntry,
+  ScoredPosting,
+} from "../delivery/domain/digest";
 import {
   TelegramNotifier,
   TextNotifier,
@@ -1073,6 +1077,7 @@ export async function executeDeliver(
     filteredCount = filtered.length;
 
     const scoredEntries: ScoredPosting[] = [];
+    const periodBlockedEntries: PeriodBlockedEntry[] = [];
     for (const posting of filtered) {
       // docs/audit PR-002: a posting that has already failed
       // `maxScoreFailures` times in a row does not get another model call --
@@ -1144,7 +1149,18 @@ export async function executeDeliver(
         // A posting that failed before and now scores cleanly should not
         // carry a stale near-ceiling count into whatever reads it next.
         postingsRepo.clearScoreFailures(posting.fingerprint);
-        scoredEntries.push({ posting, outcome: result });
+        // A period gate (period-gate.ts) means this posting is not a
+        // rejection, just not reachable *yet* — routed to its own digest
+        // section (CLAUDE.md §9) instead of scoredEntries, so it never
+        // shows up as `discard`/`review` at all.
+        if (result.periodGate) {
+          periodBlockedEntries.push({
+            posting,
+            opensAtLabel: result.periodGate.opensAtLabel,
+          });
+        } else {
+          scoredEntries.push({ posting, outcome: result });
+        }
         scoredCount += 1;
       } else {
         scoreFailureCounts[result.reason] =
@@ -1182,9 +1198,7 @@ export async function executeDeliver(
       runId,
       generatedAt: startedAt,
       scored: scoredEntries,
-      // Always empty — no structured "opens at" computation exists yet
-      // (docs/audit AC-026, `digest.ts`'s `PeriodBlockedEntry` doc comment).
-      periodBlocked: [],
+      periodBlocked: periodBlockedEntries,
       summary: {
         collected,
         deduplicated,
