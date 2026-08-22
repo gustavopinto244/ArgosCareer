@@ -67,6 +67,16 @@ export class RunsController {
     return this.runs.deliver(principalFromRequest(request).id);
   }
 
+  /** docs/11-known-issues.md C1. `kind` in the path, not a fixed route,
+   * even though only `scoreAndDeliver` is accepted today — `RunsService`
+   * is where that restriction is enforced (and explained), and a fixed
+   * `runs/scoreAndDeliver/cancel` route would just move the same check
+   * into routing without changing what a caller can actually do. */
+  @Post("runs/:kind/cancel")
+  cancel(@Param("kind") kind: string) {
+    return this.runs.cancel(kind);
+  }
+
   /**
    * ADR-027 — the host-side jobspy script's only entry point. `source` and
    * `postings` are required at this layer (a plain shape check, not a Zod

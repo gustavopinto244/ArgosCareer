@@ -160,6 +160,21 @@ export class McpController {
     );
 
     server.registerTool(
+      "cancel_run",
+      {
+        description:
+          "Request that an in-flight run stop at its next checkpoint " +
+          "(docs/11-known-issues.md C1). Cooperative, not immediate — " +
+          "only scoreAndDeliver has a checkpoint that observes this today; " +
+          "use get_run to see the eventual 'cancelled' outcome.",
+        inputSchema: {
+          kind: z.string().describe("Only 'scoreAndDeliver' is accepted."),
+        },
+      },
+      ({ kind }) => safely(() => this.runs.cancel(kind)),
+    );
+
+    server.registerTool(
       "get_study_plan",
       {
         description:

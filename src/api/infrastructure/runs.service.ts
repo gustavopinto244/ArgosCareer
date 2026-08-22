@@ -223,12 +223,47 @@ export class RunsService {
         undefined,
         undefined,
         principalId,
+        // docs/11-known-issues.md C1: reads the same `RunLock` instance
+        // `cancel()` below writes to, so a cancel request placed while this
+        // run is in flight is visible to it on the very next posting.
+        () => this.runLock.isCancelRequested("scoreAndDeliver"),
       ),
     );
     if (!outcome.ok) {
       throw new ConflictException("scoreAndDeliver is already running");
     }
     return outcome.result;
+  }
+
+  /**
+   * docs/11-known-issues.md C1: requests that the in-flight run of `kind`
+   * stop at its next checkpoint rather than running to completion or being
+   * killed. Cooperative, not preemptive (`RunLock.requestCancel`'s own
+   * doc comment has the full reasoning) — this call returns immediately,
+   * before the run actually stops; `GET /runs/:runId` is how a caller
+   * observes the eventual `cancelled` outcome.
+   *
+   * Only `scoreAndDeliver` has a checkpoint that reads this flag today —
+   * `collect` and `dedup` are the two-orders-of-magnitude-shorter cycles
+   * A1/A3 measured (minutes, not hours), and neither has the long
+   * per-posting loop that makes mid-run cancellation worth the cost of
+   * threading the flag through. Rejecting a cancel request for either
+   * here, rather than silently accepting a request nothing will ever look
+   * at, is deliberate: a caller should learn immediately that the request
+   * did nothing, not infer it later from a run that finished anyway.
+   */
+  cancel(kind: string) {
+    if (kind !== "scoreAndDeliver") {
+      throw new BadRequestException(
+        `Cancellation is only supported for 'scoreAndDeliver' (got '${kind}') — ` +
+          "collect and dedup runs are short enough that no checkpoint reads a cancel request.",
+      );
+    }
+    if (!this.runLock.isActive(kind)) {
+      throw new NotFoundException(`No '${kind}' run is currently in flight`);
+    }
+    this.runLock.requestCancel(kind);
+    return { kind, cancelRequested: true };
   }
 
   /**

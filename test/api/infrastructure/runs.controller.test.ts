@@ -790,3 +790,55 @@ describe("overlap guard (ADR-024)", () => {
     expect(firstResult.status).toBe(201);
   });
 });
+
+describe("POST /runs/:kind/cancel (docs/11-known-issues.md C1)", () => {
+  it("requires auth", async () => {
+    await request(app.getHttpServer())
+      .post("/runs/scoreAndDeliver/cancel")
+      .expect(401);
+  });
+
+  it("404s when no scoreAndDeliver run is in flight", async () => {
+    const res = await auth(
+      request(app.getHttpServer()).post("/runs/scoreAndDeliver/cancel"),
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("400s for a kind cancellation is not supported for", async () => {
+    const res = await auth(
+      request(app.getHttpServer()).post("/runs/collect/cancel"),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("accepts a cancel request while scoreAndDeliver is in flight, reaching the same RunLock deliver acquired", async () => {
+    let releaseFirst!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    fakeNotifier.notify = async (digest: Digest) => {
+      fakeNotifier.sent.push(digest);
+      await gate;
+      return { ok: true };
+    };
+
+    const first = auth(request(app.getHttpServer()).post("/runs/deliver")).then(
+      (res) => res,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const cancelRes = await auth(
+      request(app.getHttpServer()).post("/runs/scoreAndDeliver/cancel"),
+    );
+    expect(cancelRes.status).toBe(201);
+    expect(cancelRes.body).toEqual({
+      kind: "scoreAndDeliver",
+      cancelRequested: true,
+    });
+
+    releaseFirst();
+    const firstResult = await first;
+    expect(firstResult.status).toBe(201);
+  });
+});

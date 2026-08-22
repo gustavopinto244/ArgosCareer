@@ -216,6 +216,16 @@ export class SchedulerService implements OnModuleInit {
           this.criteria,
           this.profile,
           built.getUsage,
+          undefined,
+          undefined,
+          undefined,
+          "internal",
+          // docs/11-known-issues.md C1: the scheduled cron and RunsService's
+          // REST/MCP-triggered run share this same `RunLock` instance (both
+          // injected via `RUN_LOCK`) — a cancel request placed through
+          // `POST /runs/scoreAndDeliver/cancel` reaches whichever of the two
+          // actually holds the lock right now.
+          () => this.runLock.isCancelRequested("scoreAndDeliver"),
         );
 
         const run = runsRepo.findById(outcome.runId);

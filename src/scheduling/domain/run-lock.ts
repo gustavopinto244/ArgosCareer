@@ -37,6 +37,12 @@
  */
 export class RunLock {
   private readonly active = new Set<string>();
+  // docs/11-known-issues.md C1: a cooperative cancellation flag, separate
+  // from `active` itself — a run that has been asked to stop is still
+  // `active` (still holds the lock, still has real work in flight) until
+  // the loop it is running actually observes the flag and exits on its
+  // own. Nothing here can force a stop mid-await; see `isCancelRequested`.
+  private readonly cancelRequested = new Set<string>();
 
   /** `true` and marks `kind` in-flight if it was free; `false` and leaves
    * state untouched if `kind` was already held. */
@@ -48,10 +54,33 @@ export class RunLock {
 
   release(kind: string): void {
     this.active.delete(kind);
+    // A stale cancel request must not carry into the *next* run of the
+    // same kind — this call is the one place that is unambiguously "this
+    // run's lifetime has ended."
+    this.cancelRequested.delete(kind);
   }
 
   isActive(kind: string): boolean {
     return this.active.has(kind);
+  }
+
+  /**
+   * C1's actual mechanism: cooperative, not preemptive. Setting this flag
+   * does not stop anything by itself — it only marks `kind`'s in-flight run
+   * for the *next* checkpoint that calls `isCancelRequested` to see and act
+   * on (`executeDeliver`'s per-posting scoring loop is the one long-running
+   * checkpoint that exists today). No effect if `kind` is not currently
+   * active — there is nothing running to cancel, and the flag would only
+   * leak into a future run if `release` were not already guaranteed to
+   * clear it.
+   */
+  requestCancel(kind: string): void {
+    if (!this.active.has(kind)) return;
+    this.cancelRequested.add(kind);
+  }
+
+  isCancelRequested(kind: string): boolean {
+    return this.cancelRequested.has(kind);
   }
 }
 
