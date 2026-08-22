@@ -798,3 +798,78 @@ Revisit once the worksheet is closer to the full 50 `docs/04` calls for.
 >   0% → 67%, matching the hand label of 100 for the first time. No code
 >   changed — this was purely a profile-data gap, and closing it took a
 >   real fact, not a workaround.
+
+---
+
+## B10 — `dev` track keywords missed degree-name and database-only phrasing
+
+**Status:** fixed · **Found:** 2026-08-22, an audit comparing the pre-filter's
+real decisions against a manual read of the same corpus
+
+Queried the production `posting_events` table on Atlas directly (read-only,
+`docker exec argos-career node ...better-sqlite3...`, same method as B6/C1's
+verifications). Of 2,976 postings with a recorded pre-filter decision,
+**2,756 (92.6%) were rejected `track_unknown`** — overwhelmingly correct
+(CIEE alone supplies 91% of the corpus, and it is a general internship board,
+not a tech one), but the sheer volume made it the one rejection reason worth
+reading by hand rather than trusting by proportion. `title_missing_required_term`,
+`location_not_allowed` and `title_blocked` were sampled too (98 / 33 / 7
+postings) and all held up as correct on inspection — a McDonald's "Atendente
+de Restaurante" and an out-of-region São Paulo posting are not this project's
+misses.
+
+Grepping the 2,756 `track_unknown` titles for tech-adjacent words (`dados`,
+`sql`, `sistemas`, `banco de dados`, `ciência da computação`, ...) surfaced
+two **genuinely on-track, real, currently-open postings** the pre-filter
+was discarding before any LLM call:
+
+- **Confitec — "Estagiário em Banco de Dados SQL Server - Exclusiva Rio de
+  Janeiro."** A real backend/database internship; `config/profile.yaml`
+  already evidences PostgreSQL and "SQL and NoSQL databases." None of
+  `dev`'s keywords (backend, node, typescript, javascript, api,
+  desenvolvimento, software, programação, informática) match "banco de
+  dados" or "SQL Server" — the whole posting is exactly the shape of tech
+  vocabulary the list had never needed to cover, because most Gupy/CIEE dev
+  postings say "desenvolvimento" or "backend" somewhere in the title.
+- **CEPEL (Programa de Estágio) — "Estágio | Redes de Computadores, Sistemas
+  de Informação, Ciência da Computação e afins."** CEPEL's own catch-all
+  phrasing for "any CS-adjacent degree" — the formal course names a Brazilian
+  transcript uses, not the framework/language vocabulary the keyword list was
+  built around.
+
+Measured before touching the config, the same discipline every entry in
+`criteria.yaml`'s own comments already follows: each of the five candidate
+phrases (`banco de dados`, `sql server`, `sistemas de informação`, `ciência
+da computação`, `redes de computadores`) returns **exactly 1 match** against
+the full 3,067-posting corpus, both real matches on-track, zero false
+positives. Deliberately **not** added: a bare `dados` keyword, probed
+separately at 7 matches with only 2 genuinely on-track (the same two above,
+already covered by the whole-phrase entries) and the other 5 accounting/HR/
+academic-support noise — exactly the false-positive shape ADR-011's
+whole-phrase discipline exists to avoid, so postings like "Estágio em
+Contabilidade: Dados e Inteligência Artificial" and "Pessoa Estagiária de
+Dados" correctly stay `unknown` rather than being swept in by a generic word.
+A data-engineering/data-analytics track is not part of this project's
+declared search profile (CLAUDE.md §1: dev, security, automation only) — that
+stays a deliberate scope boundary, not something this fix tried to widen.
+
+> **Resolution, 2026-08-22.** Both phrase groups added to `tracks.dev` in
+> `config/criteria.yaml`. Verified directly against `classifyTrack` with the
+> real production titles: the CEPEL posting now classifies `["dev"]`, the
+> Confitec posting now classifies `["dev"]`, and both previously-excluded
+> "dados" postings still classify `[]` — the fix is additive, not a
+> behavior change for anything that was already being classified correctly.
+> Two regression tests added
+> (`test/prefilter/domain/classify-track.test.ts`, "degree-name and
+> database phrasing (B10)"). Full suite (1,127 tests) and typecheck stay
+> green. **Not yet observed against a live `deliver` run** — both postings
+> will reach Stage A/B on the next scheduled cycle; whether they actually
+> score `apply` depends on real Stage A/B matching quality, a separate,
+> already-tracked question (B9's four open `mandatoryCoverage` cases).
+>
+> **The broader pattern stays open, same shape as B8's closing note:** a
+> fixed keyword list can only ever cover phrasing already observed. Any
+> future posting that describes a dev/security/automation role in wording
+> none of today's keywords anticipate will be missed exactly the way these
+> two were, until it is found and added. This entry closes the two
+> instances found in this audit, not the class of risk.

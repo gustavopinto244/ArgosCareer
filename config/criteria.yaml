@@ -306,6 +306,27 @@ tracks:
     # "Informatica", e sem esta entrada as 6 vagas de TI do CIEE que passam o
     # pre-filtro classificavam como `unknown` e pontuavam 0.4 de alinhamento.
     - informática
+    # Added 2026-08-22 (docs/11-known-issues.md B10), measured against the
+    # real 2,976-posting corpus with the same probe discipline as every
+    # entry above: whole-phrase, on-track, no false positives sampled.
+    #   banco de dados / sql server   1 match each (Confitec — "Estagiário
+    #     em Banco de Dados SQL Server"), the same posting -- a real
+    #     backend/database internship the profile has evidenced SQL/
+    #     PostgreSQL competencies for, classifying `unknown` and being
+    #     rejected by `rejectUnknownTrack` before it ever reached a human.
+    #   sistemas de informação / ciência da computação / redes de
+    #     computadores   1 match each, all on the same CEPEL posting
+    #     ("Estágio | Redes de Computadores, Sistemas de Informação,
+    #     Ciência da Computação e afins") -- CEPEL's own catch-all phrasing
+    #     for "any CS-adjacent degree," the formal course names rather than
+    #     generic words, so the false-positive risk that ruled out bare
+    #     "dados" (5/7 matches off-track: accounting, HR, academic support)
+    #     does not apply here.
+    - banco de dados
+    - sql server
+    - sistemas de informação
+    - ciência da computação
+    - redes de computadores
   security:
     - segurança
     - security

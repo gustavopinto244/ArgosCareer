@@ -67,6 +67,46 @@ describe("classifyTrack", () => {
 });
 
 /**
+ * docs/11-known-issues.md B10. Both real postings found `track_unknown` in
+ * production despite being genuinely on-track: CIEE's/Gupy's title-only
+ * classification had no keyword for "degree name" or "database" phrasing,
+ * only for the framework/language vocabulary a dev-focused title usually
+ * uses.
+ */
+describe("classifyTrack — degree-name and database phrasing (B10)", () => {
+  const devTracks = {
+    dev: [
+      "backend",
+      "sistemas de informação",
+      "ciência da computação",
+      "redes de computadores",
+      "banco de dados",
+      "sql server",
+    ],
+    security: ["segurança"],
+    automation: ["automação"],
+  };
+
+  it("classifies a CS/SI/networking catch-all degree list as dev", () => {
+    expect(
+      classifyTrack(
+        "Estágio | Redes de Computadores, Sistemas de Informação, Ciência da Computação e afins",
+        devTracks,
+      ),
+    ).toEqual(["dev"]);
+  });
+
+  it("classifies a database internship as dev", () => {
+    expect(
+      classifyTrack(
+        "Estagiário em Banco de Dados SQL Server - Exclusiva Rio de Janeiro",
+        devTracks,
+      ),
+    ).toEqual(["dev"]);
+  });
+});
+
+/**
  * ADR-015. "Desenvolvimento" and "segurança" are the two most overloaded
  * words in Brazilian job titles, and both produced 1.0 track alignment on
  * postings hand-labelled 0 in the first calibration run.
