@@ -873,3 +873,77 @@ stays a deliberate scope boundary, not something this fix tried to widen.
 > none of today's keywords anticipate will be missed exactly the way these
 > two were, until it is found and added. This entry closes the two
 > instances found in this audit, not the class of risk.
+
+> **Deployed and verified live, 2026-08-22.** Rebuilt and restarted the
+> Atlas container (`docker compose build && up -d`) with the merged fix.
+> `classifyTrack`, executed inside the running production container against
+> the real CEPEL and Confitec titles, returned `["dev"]` for both — the fix
+> is not just merged, it is the code actually running. A manual `argos
+deliver` (run `01M0KZY93MBME3TQBW138QV9F3`) confirms the structural
+> effect on the real corpus: **neither posting stops at `track_unknown`
+> anymore.** Confitec passed the pre-filter and reached Stage A/B, scoring
+> `discard` (a real, separate `mandatoryCoverage` outcome — the LLM found
+> thin evidence overlap, not a classification failure; the same open
+> question as B9's four cases). CEPEL was rejected `too_old` this run — a
+> different, also-correct deterministic rule, unrelated to track
+> classification. Two independent confirmations that this entry fixed
+> exactly the layer it targeted (pre-filter track classification) and
+> nothing past it — what a posting does _after_ correctly reaching the LLM
+> is governed by other, already-tracked concerns.
+>
+> Deploying surfaced two unrelated production issues, fixed the same
+> session because they blocked bringing the container back up, not because
+> either is in scope for B10: Atlas's Tailscale identity had re-keyed since
+> the container's last start, leaving `.env`'s `ATLAS_TAILSCALE_IP` stale
+> and the port bind failing (`.env` corrected to the current address); and
+> `config/profile.yaml` on Atlas — a real, gitignored, hand-maintained file,
+> distinct from the repo's `profile.example.yaml` — had never received the
+> `workAvailability` field added by an earlier commit (`c174e40`), so
+> `loadProfile` threw on startup until the value already recorded in this
+> page's Smarthis note (above) was added to the real file.
+>
+> **Negative sweep, 2026-08-22 — no further keyword gap found.** Asked
+> explicitly to look for more collector/classifier misses beyond the two
+> above. Re-pulled the full 3,067-posting active corpus from Atlas and ran
+> the real `classifyTrack` (with the fix already applied) locally against
+> a much wider candidate lexicon than the original audit: language/platform
+> terms (python, java, cloud, aws, azure, mobile, android, ios, linux),
+> degree/field names (engenharia da computação, ciência de dados, análise e
+> desenvolvimento de sistemas, estatística, matemática aplicada,
+> telecomunicações), IT-operations phrasing (T.I. with periods, analista de
+> suporte, administrador de redes, sistemas embarcados, automação
+> industrial), and design/security-adjacent terms (UX, red team, blue team,
+> forense, LGPD). **2,948 of 3,067 postings still classify `unknown`,
+> essentially unchanged from before the fix (2,976 before, on the smaller
+> pre-fix candidate set) — the two titles this entry already fixed are
+> gone from the unknown set and nothing new qualified to replace them.**
+> Every apparent hit resolved to noise on inspection:
+>
+> - "UX User Experience" (1 match, Trabalho Remoto) — design/frontend, not
+>   part of this project's declared search profile (CLAUDE.md §1: dev,
+>   security, automation only, no design/UX track).
+> - "Auxiliar de..." (mecânico, açougue, estoque, manutenção — several
+>   matches) — a false positive in the _probe script_, not the corpus:
+>   "auxiliar" contains "ux" as a substring, which this sweep's own probe
+>   matched loosely; `classifyTrack`'s real whole-word matching was never
+>   exposed to this bug and does not have it.
+> - "TECNICO DE ENFERMAGEM - U.T.I." — hospital ICU (Unidade de Terapia
+>   Intensiva), not information technology; a punctuation collision on the
+>   same abbreviation, same shape as ADR-011's original `IV`-inside-`nível`
+>   false positive.
+> - "Estágio em Telecomunicações" (1 match) — posted by "SERVENTIA
+>   EXTRAJUDICIAL DE BURITICUPU," a notary's office in Buriticupu/MA. CIEE's
+>   field-of-study tag names the student's degree, not the job content, and
+>   this one is also outside the target region regardless — would fail
+>   `location_not_allowed` even if track-classified.
+> - "Estágio em Estatística" (1 match) — Statistics, not part of the
+>   declared search profile.
+>
+> No `criteria.yaml` change made from this sweep — nothing found cleared
+> the bar the two resolved cases did (a real, on-track, unambiguous,
+> currently-open posting an actual keyword gap was hiding). Recorded so a
+> future session does not re-run the same broad sweep expecting to find
+> more: as of this date, the `track_unknown` population left in the corpus
+> has been read for tech vocabulary twice, by two different keyword sets,
+> and both times resolved to either correctly-off-track postings or
+> probe-script noise, not classifier gaps.
