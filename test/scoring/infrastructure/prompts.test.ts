@@ -49,7 +49,7 @@ describe("prompt version constants", () => {
   });
 
   it("are pinned to the current versions", () => {
-    expect(STAGE_A_PROMPT_VERSION).toBe("a-v4");
+    expect(STAGE_A_PROMPT_VERSION).toBe("a-v5");
     expect(STAGE_B_PROMPT_VERSION).toBe("b-v4");
   });
 });
@@ -249,6 +249,18 @@ describe("buildStageAPrompt — untrusted content delimiting (docs/audit PR-005)
     expect(descriptionIndex).toBeLessThan(descEnd);
 
     expect(prompt.toLowerCase()).toContain("untrusted external data");
+  });
+});
+
+describe("buildStageAPrompt — a-v5 track-conditional merging instruction (ADR-055)", () => {
+  it("instructs the model to merge parallel track-conditional branches into one alternative requirement", () => {
+    const prompt = buildStageAPrompt(
+      "Estágio em Backend",
+      "Buscamos estagiário com conhecimento em Node.js.",
+    );
+
+    expect(prompt.toLowerCase()).toContain("para vagas com foco em");
+    expect(prompt).toContain("alternatives");
   });
 });
 

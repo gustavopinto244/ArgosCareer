@@ -86,7 +86,7 @@ describe("StageAExtractor.extract", () => {
     expect(
       extractionsRepo.find(
         posting().fingerprint,
-        "a-v4",
+        "a-v5",
         "unknown",
         hashExtractionInput(posting().title, posting().description),
       ),
@@ -107,7 +107,7 @@ describe("StageAExtractor.extract", () => {
   it("never calls the model on a cache hit", async () => {
     extractionsRepo.upsert(
       posting().fingerprint,
-      "a-v4",
+      "a-v5",
       "unknown",
       hashExtractionInput(posting().title, posting().description),
       {
@@ -347,7 +347,7 @@ describe("StageAExtractor.extract", () => {
       expect(
         extractionsRepo.find(
           richPosting.fingerprint,
-          "a-v4",
+          "a-v5",
           "unknown",
           hashExtractionInput(richPosting.title, plainTextEquivalent),
         ),
@@ -530,7 +530,7 @@ describe("StageAExtractor.extract — posting with no description", () => {
     expect(
       extractionsRepo.find(
         p.fingerprint,
-        "a-v4",
+        "a-v5",
         "unknown",
         hashExtractionInput(p.title, p.description),
       ),
