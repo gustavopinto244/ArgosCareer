@@ -27,19 +27,19 @@ first real M7 calibration run (`docs/11-known-issues.md`, expanding the
 20-posting labelled worksheet toward 50). Real production examples,
 capped to 35 purely by a period gate:
 
-| Posting                              | Hand score | Computed (before) | Blocking requirement                                          |
-| ------------------------------------- | ---------- | ------------------ | --------------------------------------------------------------- |
-| Flamengo — Análise de Dados            | 70         | 35 (`discard`)      | "Cursando a partir do 4º período de Educação Física, ..."       |
-| MIDI Participações — Estágio Informática | 65         | 35 (`discard`)      | "Semestre exigido: 4 a 9"                                        |
+| Posting                                  | Hand score | Computed (before) | Blocking requirement                                      |
+| ---------------------------------------- | ---------- | ----------------- | --------------------------------------------------------- |
+| Flamengo — Análise de Dados              | 70         | 35 (`discard`)    | "Cursando a partir do 4º período de Educação Física, ..." |
+| MIDI Participações — Estágio Informática | 65         | 35 (`discard`)    | "Semestre exigido: 4 a 9"                                 |
 
 Both are exactly the case CLAUDE.md §9 describes: a good match the
 candidate cannot take yet, not a bad match. Two of six "good posting scored
 too low" cases in that calibration run had this single cause.
 
-Nothing structural changed about *how* the requirement is extracted —
+Nothing structural changed about _how_ the requirement is extracted —
 Stage A already produces it as a normal `blocking` requirement, and Stage B
 already matches it `not_met` like any other. What was missing is purely
-Stage C: turning that specific requirement's *text* into a structured
+Stage C: turning that specific requirement's _text_ into a structured
 minimum period comparable against `computeAcademicPeriod`.
 
 ## Considered options
@@ -50,7 +50,7 @@ CIEE's raw schema (`ciee-schema.ts`) already carries this as structured
 data, currently flattened into free-text `description` and lost
 (`docs/11-known-issues.md`). Rejected as the primary mechanism: every real
 example found so far is a Gupy posting, where the period gate exists only
-as requirement *text*, never a structured field — a CIEE-only fix would
+as requirement _text_, never a structured field — a CIEE-only fix would
 miss every case actually observed. Worth doing later as a second, more
 reliable source for the one collector that has it; not a substitute for
 reading the extracted requirement text.
