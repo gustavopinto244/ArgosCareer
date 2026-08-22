@@ -106,13 +106,13 @@ provisional — see Calibration below for what has and has not been measured.
 
 ### Calibration
 
-**Preliminary — 16 hand-labelled postings, not the 50 the protocol calls for.**
+**Preliminary — 18 hand-labelled postings, not the 50 the protocol calls for.**
 Real Gupy volume for this search profile is thin (consistent with the
 pre-filter's own 84–97% cut, [ADR-011](docs/adr/011-pre-filter-rules-and-thresholds.md)):
-16 is what exists to label today. Expanding to 50 happens as more real
-postings accumulate in the corpus, not on demand — tracked in
-[`docs/10-milestones.md`](docs/10-milestones.md), re-run from here whenever that
-happens.
+18 is what exists to label today (grew from 16 as more real postings
+accumulated in the corpus). Expanding to 50 happens the same way, not on
+demand — tracked in [`docs/10-milestones.md`](docs/10-milestones.md),
+re-run from here whenever that happens.
 
 | #   | Configuration                                                                                                                             | n   | Scored | Parse-failure | Correlation           | Verdict recall (apply / review / discard)                                                                          | Cost                                      |
 | --- | ----------------------------------------------------------------------------------------------------------------------------------------- | --- | ------ | ------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- |
@@ -122,6 +122,8 @@ happens.
 | 4   | `deepseek-v4-flash-0731` via `ApiScorer`, `b-v2` prompt — **inputs later found broken** (see below)                                       | 16  | 16     | 0%            | -0.097                | not recorded per-verdict — the aggregate correlation is what triggered the audit below                             | not recorded (usage tracking added later) |
 | 5   | Same as #4, **after** the description backfill, `verifiable`-exclusion and `trackExclusions` fixes                                        | 16  | 16     | 0%            | **0.522**             | 0% / 0% / 100% (64% precision)                                                                                     | $0.0326                                   |
 | 6   | Same as #5, **after** completing the profile's declared fields (English, availability) — worst-5-deviation subset only, not a full re-run | 5   | 5      | 0%            | **0.835**             | 20% / n/a / n/a (100% precision)                                                                                   | $0.0059                                   |
+| 7   | `a-v4`/`b-v4`, worksheet grown to 18 — baseline before [ADR-055](docs/adr/055-stage-a-v5-track-conditional-requirements.md)               | 18  | 13     | 28%           | 0.357                 | 40% / 0% / 80% (apply 100% precision)                                                                              | $0.0305                                   |
+| 8   | `a-v5`/`b-v4`, **only** the Stage A prompt changed from #7 (ADR-055 — merges track-conditional requirement branches)                      | 18  | 18     | 0%            | **0.468**             | 25% / 0% / 86% (apply 100% precision)                                                                              | $0.0272                                   |
 
 **Configurations #1–#3 lost for infrastructure reasons, not model quality** —
 worth keeping because the fix (`OllamaScorer` as a fixed local model,
@@ -129,8 +131,8 @@ worth keeping because the fix (`OllamaScorer` as a fixed local model,
 decision ([ADR-012](docs/adr/012-openrouter-as-the-api-scorer-provider.md),
 [ADR-013](docs/adr/013-deepseek-v4-flash-and-cache-friendly-stage-b.md)).
 
-**#4 → #5 is the one deliberate, single-variable comparison in this table** —
-same model, same prompt, only the inputs changed. Auditing #4 posting-by-posting
+**#4 → #5 and #7 → #8 are the deliberate, single-variable comparisons in this
+table** — same model, only one thing changed each time. Auditing #4 posting-by-posting
 (not just its aggregate correlation) found the -0.097 was almost entirely
 broken inputs, not a bad model or a bad formula:
 
@@ -169,10 +171,28 @@ they are known to be right, but because the one complete measurement available
 came from inputs later found broken, and 16 samples is too few to retune
 against without overfitting to noise. Revisit once 50 labelled postings exist.
 
+**#7 → #8**: only `STAGE_A_PROMPT_VERSION` changed, `a-v4` → `a-v5`
+([ADR-055](docs/adr/055-stage-a-v5-track-conditional-requirements.md)) —
+Stage B, weights and cutoffs held fixed. Correlation improved and every
+posting parsed cleanly, but **the recall columns are not a clean
+comparison and this table does not claim otherwise**: #7's 28%
+parse-failure rate dropped 5 of 18 postings out of every metric entirely,
+including each verdict's support count, so #7's recall is computed on a
+smaller, non-random 13-posting sample while #8's covers all 18. The two
+parse-failure rates are themselves very likely unrelated to the prompt
+change — almost every retry in both runs' logs was a Stage B failure
+(`b-v4`, unchanged between the two), most plausibly ordinary OpenRouter
+provider variance between the two run times. What #7 → #8 does verify
+directly, not just via the aggregate correlation: the real Smarthis
+extraction that motivated the change collapses its two track-conditional
+requirement branches into one alternative requirement under `a-v5`, on
+every one of the runs where the extraction was cold — see ADR-055 for the
+before/after data pulled straight from the database.
+
 A scoring system that has never been measured against ground truth is a number
-generator. This one now has one real measurement, three documented structural
-fixes derived from auditing it, and a known amount of data still missing before
-the next number means more than this one does.
+generator. This one now has two real single-variable measurements, four
+documented structural fixes derived from auditing it, and a known amount of
+data still missing before the next number means more than this one does.
 
 ## Stack
 

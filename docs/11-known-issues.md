@@ -779,7 +779,9 @@ desenvolvimento` and `humano desenvolvimento` to `trackExclusions.dev`.
 
 ## B9 — Genuinely good postings were being discarded; `apply` recall measured at 13-17%
 
-**Status:** partially fixed (period-gate cause), rest open · **Found:**
+**Status:** partially fixed (period-gate cause, CS-fundamentals evidence,
+Smarthis's Stage A extraction shape), two real gaps stay open (ELDORADO's
+missing evidence, Smarthis's residual Stage B matching) · **Found:**
 2026-08-19, the first real M7 calibration run after B7's fix
 
 With B7 fixed, the 18-posting calibration run gave a real, trustworthy
@@ -879,6 +881,12 @@ Revisit once the worksheet is closer to the full 50 `docs/04` calls for.
 >   "motive por desafios", "espírito colaborativo") are correctly
 >   `verifiable: false` and already excluded from coverage — ADR-015 is
 >   working as designed here, not the cause.
+>   **Reviewed with the profile owner, 2026-08-22: confirmed valid, no
+>   error.** No real Angular or Java/Spring Boot evidence exists to add —
+>   this stays a genuine profile gap, not a scoring defect, and is not
+>   pursued further unless real evidence (a course, a project) arises
+>   later. The system correctly scores this posting low for this profile
+>   as it stands today.
 > - **Smarthis (hand 100, mandatoryCoverage 40%) — two separate findings.**
 >   "Disponibilidade para atuar em modelo híbrido ou remoto" is `not_met`
 >   with no evidence, and `config/profile.yaml` indeed states no
@@ -904,6 +912,31 @@ Revisit once the worksheet is closer to the full 50 `docs/04` calls for.
 >   picked up — flag if this conditional-clause shape recurs on other
 >   postings before spending the prompt-version cost on a single
 >   observation.
+
+> **Picked up and fixed, 2026-08-22 (ADR-055).** `prompts/stage-a-extraction.v5.md`
+> teaches Stage A to recognize the "Para vagas com foco em X: ... Para
+> vagas com foco em Y: ..." shape and merge the parallel branches into one
+> alternative ("OR") requirement, instead of emitting each as an
+> independent unconditional `mandatory`. Verified directly against
+> Smarthis's real re-extracted data, not just the aggregate calibration
+> number: the two separate branch requirements from every prior prompt
+> version (`a-v2` through `a-v4`) collapse into a single merged requirement
+> under `a-v5`. Calibration re-run against the full 18-posting worksheet,
+> only the Stage A prompt changed (Stage B stayed `b-v4`): correlation
+> 0.357 → 0.468, parse-failure rate 28% → 0% (very likely provider noise,
+> not attributable to this change — see ADR-055's own caveat), no verdict
+> precision regression. Full comparison table and the direct
+> before/after extraction diff: ADR-055.
+>
+> **Does not fully rescue Smarthis's score, and was never expected to.**
+> The posting's real Stage B match for the new merged requirement still
+> answers `not_met` despite the profile evidencing Node.js — a programming
+> language, which should satisfy the "Desenvolvimento" side of the OR.
+> This is the same Stage B matching-quality ceiling the `workAvailability`
+> note above already named, a second variable ADR-055 deliberately left
+> untouched. **This closes the extraction-shape defect B9 identified,
+> not Smarthis's score** — the residual gap is now entirely a Stage B
+> question, tracked here, not reopened as a new entry.
 
 > **`workAvailability` profile field added, 2026-08-19.** Closes the
 > Smarthis work-mode gap above: `profile.ts` gained a fourth declared

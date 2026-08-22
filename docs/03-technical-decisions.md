@@ -65,6 +65,7 @@ revisited on its merits instead of re-argued from memory.
 | [051](adr/051-reject-unknown-track-postings-pre-llm.md)                       | Reject unknown-track postings before the LLM, behind a flag                         | Accepted   | 2026-08-17 |
 | [053](adr/053-populate-period-blocked-digest-section.md)                      | Populate the period-blocked digest section                                          | Accepted   | 2026-08-19 |
 | [054](adr/054-cooperative-run-cancellation.md)                                | Cooperative cancellation for `scoreAndDeliver`                                      | Accepted   | 2026-08-22 |
+| [055](adr/055-stage-a-v5-track-conditional-requirements.md)                   | Stage A v5: merge track-conditional requirement branches                            | Accepted   | 2026-08-22 |
 
 ## When an ADR is required
 
